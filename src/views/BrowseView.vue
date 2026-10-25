@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
   ListFilterIcon,
   SearchXIcon,
+  SparklesIcon,
 } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { AiChatPanel } from '@/components/ai'
 import AnswerBody from '@/components/AnswerBody.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
@@ -95,6 +104,8 @@ const frequencyFilter = ref('all')
 const statusFilter = ref('all')
 
 // 支持外部跳转带 filter=wrong 等初始状态
+const aiOpen = ref(false)
+
 const VALID_STATUS = ['all', 'unseen', 'mastered', 'fuzzy', 'wrong', 'due']
 watch(
   () => route.query.filter,
@@ -271,7 +282,13 @@ const langTopics = computed(() =>
               <h2 class="text-base font-semibold leading-snug sm:text-lg">{{ selected.title }}</h2>
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <QuestionMeta :question="selected" show-status />
-                <StatusActions :question-id="selected.id" compact />
+                <div class="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" size="sm" @click="aiOpen = true">
+                    <SparklesIcon />
+                    AI 助手
+                  </Button>
+                  <StatusActions :question-id="selected.id" compact />
+                </div>
               </div>
             </div>
             <div class="p-4 sm:p-5">
@@ -355,5 +372,20 @@ const langTopics = computed(() =>
         </template>
       </div>
     </div>
+
+    <!-- AI 助手 -->
+    <Dialog v-model:open="aiOpen">
+      <DialogContent class="flex h-[80vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader v-if="selected" class="border-b px-4 py-3">
+          <DialogTitle class="truncate pr-6 text-sm">{{ selected.title }}</DialogTitle>
+          <DialogDescription class="text-xs">
+            {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }} · AI 生成内容仅供参考
+          </DialogDescription>
+        </DialogHeader>
+        <div v-if="selected" class="min-h-0 flex-1">
+          <AiChatPanel :question="selected" />
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
