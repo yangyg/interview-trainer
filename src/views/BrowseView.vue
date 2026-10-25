@@ -39,11 +39,13 @@ const progress = useProgressStore()
 const lang = computed<string>({
   get: () => {
     const t = route.query.lang as string
-    if (t === 'java' || t === 'go') return t
+    if (t === 'java' || t === 'go' || t === 'ai') return t
     return currentTopic.value?.language ?? 'java'
   },
   set: (v) => {
-    router.replace({ query: { ...route.query, lang: v, topic: undefined, q: undefined } })
+    // 切语言时自动选中该语言第一个专题,避免列表区空白
+    const first = (v === 'go' ? dataStore.goTopics : v === 'ai' ? dataStore.aiTopics : dataStore.javaTopics)[0]?.id
+    router.replace({ query: { ...route.query, lang: v, topic: first, q: undefined } })
   },
 })
 
