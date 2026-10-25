@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-25T03:31:55.990Z",
+  "generatedAt": "2026-10-25T05:02:05.754Z",
   "counts": {
     "java": 889,
     "go": 304,
-    "total": 1193
+    "total": 1329
   },
   "topics": [
     {
@@ -850,6 +850,193 @@
           "count": 5
         }
       ]
+    },
+    {
+      "id": "ai-01",
+      "language": "ai",
+      "name": "大模型基础",
+      "file": "01-大模型基础.md",
+      "count": 22,
+      "chapters": [
+        {
+          "name": "一、Transformer 与注意力机制",
+          "count": 5
+        },
+        {
+          "name": "二、Tokenizer 与模型结构",
+          "count": 4
+        },
+        {
+          "name": "三、生成与解码",
+          "count": 12
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-02",
+      "language": "ai",
+      "name": "训练与微调",
+      "file": "02-训练与微调.md",
+      "count": 20,
+      "chapters": [
+        {
+          "name": "一、预训练与数据工程",
+          "count": 2
+        },
+        {
+          "name": "二、SFT 与参数高效微调",
+          "count": 6
+        },
+        {
+          "name": "三、对齐与推理模型训练",
+          "count": 4
+        },
+        {
+          "name": "四、训练工程与评测",
+          "count": 7
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-03",
+      "language": "ai",
+      "name": "推理与部署",
+      "file": "03-推理与部署.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "一、推理原理与显存",
+          "count": 3
+        },
+        {
+          "name": "二、推理框架与加速",
+          "count": 5
+        },
+        {
+          "name": "三、服务化与工程",
+          "count": 9
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-04",
+      "language": "ai",
+      "name": "Prompt与上下文工程",
+      "file": "04-Prompt与上下文工程.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "一、Prompt 设计方法论",
+          "count": 5
+        },
+        {
+          "name": "二、上下文工程",
+          "count": 5
+        },
+        {
+          "name": "三、安全与工程化",
+          "count": 7
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-05",
+      "language": "ai",
+      "name": "RAG与知识增强",
+      "file": "05-RAG与知识增强.md",
+      "count": 20,
+      "chapters": [
+        {
+          "name": "一、RAG 基础与链路",
+          "count": 6
+        },
+        {
+          "name": "二、检索与重排",
+          "count": 4
+        },
+        {
+          "name": "三、评估与进阶",
+          "count": 9
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-06",
+      "language": "ai",
+      "name": "Agent与工具调用",
+      "file": "06-Agent与工具调用.md",
+      "count": 22,
+      "chapters": [
+        {
+          "name": "一、Agent 基础架构",
+          "count": 5
+        },
+        {
+          "name": "二、MCP 协议（2026 必考）",
+          "count": 4
+        },
+        {
+          "name": "三、规划、记忆与多智能体",
+          "count": 4
+        },
+        {
+          "name": "四、可靠性与安全",
+          "count": 8
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-07",
+      "language": "ai",
+      "name": "AI应用工程与安全",
+      "file": "07-AI应用工程与安全.md",
+      "count": 16,
+      "chapters": [
+        {
+          "name": "一、幻觉治理与质量",
+          "count": 2
+        },
+        {
+          "name": "二、安全与合规",
+          "count": 4
+        },
+        {
+          "name": "三、生产工程",
+          "count": 5
+        },
+        {
+          "name": "四、AI 协作工程（2026 新热点）",
+          "count": 4
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
     }
   ],
   "topLists": {
@@ -1096,6 +1283,128 @@
         "note": "各 6 家",
         "questionId": "java-07-Q57"
       }
+    ],
+    "ai": [
+      {
+        "rank": 1,
+        "title": "Transformer 的整体结构是什么？为什么它能取代 RNN？",
+        "location": "01 基础",
+        "questionId": "ai-01-Q1"
+      },
+      {
+        "rank": 2,
+        "title": "自注意力（Self-Attention）的计算过程是什么？",
+        "location": "01 基础",
+        "questionId": "ai-01-Q2"
+      },
+      {
+        "rank": 3,
+        "title": "温度（temperature）和 top-p 采样的原理是什么？应用中怎么选？",
+        "location": "01 基础",
+        "questionId": "ai-01-Q11"
+      },
+      {
+        "rank": 4,
+        "title": "幻觉（Hallucination）的根本成因是什么？",
+        "location": "01 基础",
+        "questionId": "ai-01-Q12"
+      },
+      {
+        "rank": 5,
+        "title": "KV Cache 是什么？为什么没有它 Transformer 几乎无法落地？",
+        "location": "01 基础",
+        "questionId": "ai-01-Q21"
+      },
+      {
+        "rank": 6,
+        "title": "LoRA 的原理是什么？为什么有效？",
+        "location": "02 训练",
+        "questionId": "ai-02-Q5"
+      },
+      {
+        "rank": 7,
+        "title": "全参微调、LoRA、Prompt/Prompt-tuning 怎么选型？",
+        "location": "02 训练",
+        "questionId": "ai-02-Q7"
+      },
+      {
+        "rank": 8,
+        "title": "微调后的模型怎么评估？benchmark 分数高就代表好吗？",
+        "location": "02 训练",
+        "questionId": "ai-02-Q17"
+      },
+      {
+        "rank": 9,
+        "title": "部署一个 7B/70B 模型需要多少显存？请给出估算方法。",
+        "location": "03 推理",
+        "questionId": "ai-03-Q1"
+      },
+      {
+        "rank": 10,
+        "title": "vLLM 为什么快？除了 PagedAttention 还有什么关键机制？",
+        "location": "03 推理",
+        "questionId": "ai-03-Q5"
+      },
+      {
+        "rank": 11,
+        "title": "Prefill 和 Decode 两个阶段有什么区别？",
+        "location": "03 推理",
+        "questionId": "ai-03-Q4"
+      },
+      {
+        "rank": 12,
+        "title": "一个生产级 System Prompt 的结构是什么？",
+        "location": "04 Prompt",
+        "questionId": "ai-04-Q1"
+      },
+      {
+        "rank": 13,
+        "title": "多轮对话的历史管理有哪些策略？",
+        "location": "04 Prompt",
+        "questionId": "ai-04-Q8"
+      },
+      {
+        "rank": 14,
+        "title": "什么是提示注入（Prompt Injection）？举一个直接与间接注入的例子。",
+        "location": "04 Prompt",
+        "questionId": "ai-04-Q12"
+      },
+      {
+        "rank": 15,
+        "title": "什么是 RAG？完整链路分哪几步？",
+        "location": "05 RAG",
+        "questionId": "ai-05-Q1"
+      },
+      {
+        "rank": 16,
+        "title": "RAG 和微调怎么选？两者是替代关系吗？",
+        "location": "05 RAG",
+        "questionId": "ai-05-Q2"
+      },
+      {
+        "rank": 17,
+        "title": "切块（Chunking）策略有哪些？怎么选切块大小？",
+        "location": "05 RAG",
+        "questionId": "ai-05-Q4"
+      },
+      {
+        "rank": 18,
+        "title": "什么是混合检索（Hybrid Search）？为什么纯向量检索不够？",
+        "location": "05 RAG",
+        "questionId": "ai-05-Q8"
+      },
+      {
+        "rank": 19,
+        "title": "RAG 效果怎么评估？RAGAS 的指标体系是什么？",
+        "location": "05 RAG",
+        "questionId": "ai-05-Q12"
+      },
+      {
+        "rank": 20,
+        "title": "MCP 是什么？解决什么问题？",
+        "location": "06 Agent",
+        "questionId": "ai-06-Q7"
+      }
     ]
   },
   "docs": [
@@ -1122,6 +1431,12 @@
       "language": "go",
       "title": "岗位与就业方向分析",
       "description": "岗位职责、薪资与就业方向调研"
+    },
+    {
+      "id": "ai-readme",
+      "language": "ai",
+      "title": "AI 题库总览",
+      "description": "2026 AI 岗考情、复习路径与最高频 20 题速查"
     },
     {
       "id": "go-profile",

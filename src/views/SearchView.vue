@@ -29,7 +29,13 @@ const frequency = ref('all')
 const statusFilter = ref('all')
 
 const topicOptions = computed(() =>
-  lang.value === 'all' ? dataStore.topics : lang.value === 'go' ? dataStore.goTopics : dataStore.javaTopics,
+  lang.value === 'all'
+    ? dataStore.topics
+    : lang.value === 'go'
+      ? dataStore.goTopics
+      : lang.value === 'ai'
+        ? dataStore.aiTopics
+        : dataStore.javaTopics,
 )
 
 const results = computed<Question[]>(() => {
@@ -79,6 +85,7 @@ function openQuestion(q: Question) {
             <TabsTrigger value="all">全部</TabsTrigger>
             <TabsTrigger value="java">Java</TabsTrigger>
             <TabsTrigger value="go">Go</TabsTrigger>
+            <TabsTrigger value="ai">AI</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>

@@ -25,6 +25,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/stores/data";
 import { useProgressStore } from "@/stores/progress";
+import { LANG_META } from "@/lib/langs";
 import type { Language } from "@/lib/types";
 
 const router = useRouter();
@@ -39,7 +40,8 @@ const masteryPct = computed(() =>
 
 const topTab = ref("java");
 const topList = computed(
-  () => dataStore.index?.topLists[topTab.value as "java" | "go"] ?? [],
+  () =>
+    dataStore.index?.topLists[topTab.value as "java" | "go" | "ai"] ?? [],
 );
 
 function topicLearned(topicId: string): number {
@@ -67,11 +69,17 @@ function openDoc(id: string) {
 
 function langCard(language: Language) {
   const topics =
-    language === "java" ? dataStore.javaTopics : dataStore.goTopics;
+    language === "java"
+      ? dataStore.javaTopics
+      : language === "go"
+        ? dataStore.goTopics
+        : dataStore.aiTopics;
   const total =
     language === "java"
       ? (dataStore.index?.counts.java ?? 0)
-      : (dataStore.index?.counts.go ?? 0);
+      : language === "go"
+        ? (dataStore.index?.counts.go ?? 0)
+        : (dataStore.index?.counts.ai ?? 0);
   const learned = topics.reduce((sum, t) => sum + topicLearned(t.id), 0);
   return { topics, total, learned };
 }
@@ -138,7 +146,8 @@ function langCard(language: Language) {
           </p>
           <p class="text-xs text-muted-foreground">
             Java {{ dataStore.index?.counts.java }} · Go
-            {{ dataStore.index?.counts.go }}
+            {{ dataStore.index?.counts.go }} · AI
+            {{ dataStore.index?.counts.ai }}
           </p>
         </CardContent>
       </Card>
@@ -193,9 +202,9 @@ function langCard(language: Language) {
     </div>
 
     <!-- 语言专题 -->
-    <div class="grid gap-3 lg:grid-cols-2">
+    <div class="grid gap-3 lg:grid-cols-3">
       <Card
-        v-for="lang in ['java', 'go'] as Language[]"
+        v-for="lang in ['java', 'go', 'ai'] as Language[]"
         :key="lang"
         class="overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
       >
@@ -203,13 +212,13 @@ function langCard(language: Language) {
           <div class="flex items-center gap-2.5">
             <span
               class="flex size-8 items-center justify-center rounded-lg text-xs font-bold text-white"
-              :class="lang === 'java' ? 'bg-amber-500' : 'bg-cyan-600'"
+              :class="LANG_META[lang].badge"
             >
-              {{ lang === "java" ? "J" : "Go" }}
+              {{ LANG_META[lang].short }}
             </span>
             <div>
               <CardTitle class="text-base">{{
-                lang === "java" ? "Java 后端" : "Golang 后端"
+                LANG_META[lang].label + (lang === "ai" ? "" : " 后端")
               }}</CardTitle>
               <CardDescription
                 >{{ langCard(lang).total }} 题 · 已学
@@ -260,6 +269,9 @@ function langCard(language: Language) {
                 >
                 <TabsTrigger value="go" class="px-2.5 text-xs"
                   >Go Top 10</TabsTrigger
+                >
+                <TabsTrigger value="ai" class="px-2.5 text-xs"
+                  >AI Top 20</TabsTrigger
                 >
               </TabsList>
             </Tabs>
@@ -324,9 +336,9 @@ function langCard(language: Language) {
           >
             <span
               class="flex size-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white"
-              :class="d.language === 'java' ? 'bg-amber-500' : 'bg-cyan-600'"
+              :class="LANG_META[d.language].badge"
             >
-              {{ d.language === "java" ? "J" : "Go" }}
+              {{ LANG_META[d.language].short }}
             </span>
             <span class="min-w-0 flex-1">
               <span class="block truncate text-sm font-medium">{{

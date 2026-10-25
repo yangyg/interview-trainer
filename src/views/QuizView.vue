@@ -44,7 +44,13 @@ const includeAlgorithm = ref(true)
 const includeCodeOutput = ref(true)
 
 const topicOptions = computed(() =>
-  lang.value === 'all' ? dataStore.topics : lang.value === 'go' ? dataStore.goTopics : dataStore.javaTopics,
+  lang.value === 'all'
+    ? dataStore.topics
+    : lang.value === 'go'
+      ? dataStore.goTopics
+      : lang.value === 'ai'
+        ? dataStore.aiTopics
+        : dataStore.javaTopics,
 )
 
 const matched = computed<Question[]>(() => {
@@ -187,6 +193,7 @@ onBeforeUnmount(stopTimer)
                 <TabsTrigger value="all" class="flex-1">全部</TabsTrigger>
                 <TabsTrigger value="java" class="flex-1">Java</TabsTrigger>
                 <TabsTrigger value="go" class="flex-1">Golang</TabsTrigger>
+                <TabsTrigger value="ai" class="flex-1">AI</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

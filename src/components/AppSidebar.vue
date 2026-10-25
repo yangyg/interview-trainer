@@ -49,7 +49,7 @@ function isActive(to: { name: string; params?: { id?: string } }): boolean {
       </div>
       <div class="leading-tight">
         <p class="text-sm font-semibold">面试刷题工作台</p>
-        <p class="text-[11px] text-muted-foreground">Java · Golang 八股题库</p>
+        <p class="text-[11px] text-muted-foreground">Java · Golang · AI 题库</p>
       </div>
     </div>
 

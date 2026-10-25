@@ -1,4 +1,4 @@
-export type Language = 'java' | 'go'
+export type Language = 'java' | 'go' | 'ai'
 
 export interface SourceRef {
   title?: string
@@ -53,9 +53,9 @@ export interface DocMeta {
 
 export interface IndexData {
   generatedAt: string
-  counts: { java: number; go: number; total: number }
+  counts: { java: number; go: number; ai: number; total: number }
   topics: Topic[]
-  topLists: { java: TopItem[]; go: TopItem[] }
+  topLists: { java: TopItem[]; go: TopItem[]; ai: TopItem[] }
   docs: DocMeta[]
 }
 

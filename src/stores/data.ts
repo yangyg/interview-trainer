@@ -41,6 +41,9 @@ export const useDataStore = defineStore('data', {
     goTopics(): Topic[] {
       return this.topics.filter((t) => t.language === 'go')
     },
+    aiTopics(): Topic[] {
+      return this.topics.filter((t) => t.language === 'ai')
+    },
     allQuestions(): Question[] {
       return Object.values(this.questionsById)
     },

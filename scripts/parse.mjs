@@ -17,6 +17,7 @@ const APP_ROOT = path.resolve(__dirname, '..')
 const DOCS_ROOT = path.resolve(APP_ROOT, '..')
 const JAVA_DIR = path.join(DOCS_ROOT, 'java')
 const GO_DIR = path.join(DOCS_ROOT, 'golang')
+const AI_DIR = path.join(DOCS_ROOT, 'ai')
 const OUT_DIR = path.join(APP_ROOT, 'public', 'data')
 const OUT_DOCS_DIR = path.join(OUT_DIR, 'docs')
 
@@ -24,6 +25,7 @@ const OUT_DOCS_DIR = path.join(OUT_DIR, 'docs')
 const EXPECTED = {
   java: { 'java-01': 97, 'java-02': 61, 'java-03': 80, 'java-04': 72, 'java-05': 94, 'java-06': 90, 'java-07': 80, 'java-08': 89, 'java-09': 76, 'java-10': 56, 'java-11': 94 },
   go: { 'go-01': 75, 'go-02': 35, 'go-03': 21, 'go-04': 17, 'go-05': 32, 'go-index': 177 },
+  ai: { 'ai-01': 22, 'ai-02': 20, 'ai-03': 18, 'ai-04': 18, 'ai-05': 20, 'ai-06': 22, 'ai-07': 16 },
 }
 
 // ---------- Markdown 渲染(marked + highlight.js,构建时执行) ----------
@@ -123,14 +125,14 @@ function annotate(text) {
 // ---------- Java 解析器 ----------
 // 结构:h1 文档标题 → h2 简介 → h1/h2 章节 → ### Qn. 题目 → **频率**/**难度** 行 → 答案 → > 📌 来源:
 
-function parseJavaTopic(filePath, topicId) {
+function parseJavaTopic(filePath, topicId, language = 'java') {
   const annotated = annotate(fs.readFileSync(filePath, 'utf8'))
   const questions = []
   let chapter = ''
   let cur = null
 
   const flush = () => {
-    if (cur) questions.push(buildJavaQuestion(cur, topicId, chapter))
+    if (cur) questions.push(buildJavaQuestion(cur, topicId, chapter, language))
     cur = null
   }
 
@@ -163,7 +165,7 @@ function parseJavaTopic(filePath, topicId) {
   return questions
 }
 
-function buildJavaQuestion(raw, topicId, chapter) {
+function buildJavaQuestion(raw, topicId, chapter, language = 'java') {
   const bodyLines = raw.body
   // 元信息:仅扫描前几行,避免误吞正文中的 ⭐/🔥
   const headLines = []
@@ -215,7 +217,7 @@ function buildJavaQuestion(raw, topicId, chapter) {
 
   return {
     id: `${topicId}-${raw.no}`,
-    language: 'java',
+    language,
     topicId,
     chapter,
     no: raw.no,
@@ -498,18 +500,28 @@ function extractGoIndex() {
 
 // ---------- README 高频榜抽取 ----------
 
-function parseJavaTopList() {
-  const text = fs.readFileSync(path.join(JAVA_DIR, 'README.md'), 'utf8')
-  const start = text.indexOf('全题库最高频 30 题速查')
+function parseTopTableList(filePath) {
+  const text = fs.readFileSync(filePath, 'utf8')
+  const start = text.search(/^## .*速查/m)
   if (start === -1) return []
   const rows = []
   for (const line of text.slice(start).split(/\r?\n/)) {
     const m = /^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*$/.exec(line.trim())
-    if (m && !/^[#\s|:-]+$/.test(m[2]) && m[2] !== '题目') {
+    if (m && m[2] !== '题目') {
       rows.push({ rank: Number(m[1]), title: m[2], location: m[3].trim() })
+    } else if (rows.length && !/^\|/.test(line.trim())) {
+      break // 表格结束
     }
   }
   return rows
+}
+
+function parseJavaTopList() {
+  return parseTopTableList(path.join(JAVA_DIR, 'README.md'))
+}
+
+function parseAiTopList() {
+  return parseTopTableList(path.join(AI_DIR, 'README.md'))
 }
 
 function parseGoTopList() {
@@ -761,12 +773,30 @@ function main() {
     fs.writeFileSync(path.join(OUT_DIR, `${t.topicId}.json`), JSON.stringify({ topicId: t.topicId, questions: t.questions }))
   }
 
+  // AI 专题(Java 格式,复用解析器)
+  for (const { file, topicId } of listTopicFiles(AI_DIR, 'ai')) {
+    const qs = parseJavaTopic(path.join(AI_DIR, file), topicId, 'ai')
+    if (!qs.length) continue
+    parsedCounts[topicId] = qs.length
+    allQuestions.push(...qs)
+    topics.push({
+      id: topicId,
+      language: 'ai',
+      name: topicDisplayName(file),
+      file,
+      count: qs.length,
+      chapters: chapterCounts(qs),
+    })
+    fs.writeFileSync(path.join(OUT_DIR, `${topicId}.json`), JSON.stringify({ topicId, questions: qs }))
+  }
+
   // 特殊文档整体渲染
   const docs = [
     { id: 'java-readme', language: 'java', file: path.join(JAVA_DIR, 'README.md'), title: 'Java 题库总览', description: '总说明、复习路径与最高频 30 题速查' },
     { id: 'go-readme', language: 'go', file: path.join(GO_DIR, 'README.md'), title: 'Golang 题库总览', description: '总说明、使用建议与 Top 10 高频题' },
     { id: 'go-interviews', language: 'go', file: path.join(GO_DIR, '06-真实面经汇编.md'), title: '真实面经汇编', description: '字节/腾讯/美团等 17 家公司分轮次真题' },
     { id: 'go-careers', language: 'go', file: path.join(GO_DIR, '07-岗位职责与就业方向分析.md'), title: '岗位与就业方向分析', description: '岗位职责、薪资与就业方向调研' },
+    { id: 'ai-readme', language: 'ai', file: path.join(AI_DIR, 'README.md'), title: 'AI 题库总览', description: '2026 AI 岗考情、复习路径与最高频 20 题速查' },
   ]
   if (goProfileDoc) docs.push(goProfileDoc)
   for (const d of docs) {
@@ -780,6 +810,7 @@ function main() {
   const match = buildTitleMatcher(allQuestions)
   const javaTop = parseJavaTopList().map((r) => ({ ...r, questionId: match(r.title) }))
   const goTop = parseGoTopList().map((r) => ({ ...r, questionId: match(r.title) }))
+  const aiTop = parseAiTopList().map((r) => ({ ...r, questionId: match(r.title) }))
 
   const index = {
     generatedAt: new Date().toISOString(),
@@ -789,7 +820,7 @@ function main() {
       total: allQuestions.length,
     },
     topics,
-    topLists: { java: javaTop, go: goTop },
+    topLists: { java: javaTop, go: goTop, ai: aiTop },
     docs: docs.map(({ id, language, title, description }) => ({ id, language, title, description })),
   }
   fs.writeFileSync(path.join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2))
@@ -816,8 +847,8 @@ function main() {
     console.log(`!! 空答案题目: ${noAnswer.join(', ')}`)
     failed = true
   }
-  const linked = javaTop.filter((r) => r.questionId).length + goTop.filter((r) => r.questionId).length
-  console.log(`\n高频榜深链: ${linked}/${javaTop.length + goTop.length}`)
+  const linked = javaTop.filter((r) => r.questionId).length + goTop.filter((r) => r.questionId).length + aiTop.filter((r) => r.questionId).length
+  console.log(`\n高频榜深链: ${linked}/${javaTop.length + goTop.length + aiTop.length}`)
   console.log(`合计(去重后): Java ${index.counts.java} 题, Go ${index.counts.go} 题, 共 ${index.counts.total} 题`)
   if (failed) {
     console.error('\n自检未通过:题数与基准不符,请检查解析规则!')

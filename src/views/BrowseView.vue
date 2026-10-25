@@ -24,6 +24,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
 import StatusActions from '@/components/StatusActions.vue'
 import { cn } from '@/lib/utils'
+import { LANG_META } from '@/lib/langs'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
 import type { Question, Topic } from '@/lib/types'
@@ -153,7 +154,9 @@ function topicProgress(t: Topic): { learned: number; total: number; pct: number 
   return { learned, total, pct: total ? Math.round((learned / total) * 100) : 0 }
 }
 
-const langTopics = computed(() => (lang.value === 'go' ? dataStore.goTopics : dataStore.javaTopics))
+const langTopics = computed(() =>
+  lang.value === 'go' ? dataStore.goTopics : lang.value === 'ai' ? dataStore.aiTopics : dataStore.javaTopics,
+)
 </script>
 
 <template>
@@ -175,6 +178,7 @@ const langTopics = computed(() => (lang.value === 'go' ? dataStore.goTopics : da
           <TabsList class="w-full">
             <TabsTrigger value="java" class="flex-1">Java</TabsTrigger>
             <TabsTrigger value="go" class="flex-1">Golang</TabsTrigger>
+            <TabsTrigger value="ai" class="flex-1">AI</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -196,7 +200,7 @@ const langTopics = computed(() => (lang.value === 'go' ? dataStore.goTopics : da
             <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
               <div
                 class="h-full rounded-full"
-                :class="t.language === 'java' ? 'bg-amber-500' : 'bg-cyan-500'"
+                :class="LANG_META[t.language].bar"
                 :style="{ width: `${topicProgress(t).pct}%` }"
               />
             </div>
@@ -212,6 +216,7 @@ const langTopics = computed(() => (lang.value === 'go' ? dataStore.goTopics : da
             <TabsList>
               <TabsTrigger value="java">Java</TabsTrigger>
               <TabsTrigger value="go">Golang</TabsTrigger>
+              <TabsTrigger value="ai">AI</TabsTrigger>
             </TabsList>
           </Tabs>
           <Select :model-value="topicId" @update:model-value="topicId = String($event)">

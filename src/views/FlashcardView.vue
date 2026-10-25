@@ -44,7 +44,14 @@ const count = ref('20')
 const order = ref('random')
 
 const topicOptions = computed(() => {
-  const list = lang.value === 'all' ? dataStore.topics : lang.value === 'go' ? dataStore.goTopics : dataStore.javaTopics
+  const list =
+    lang.value === 'all'
+      ? dataStore.topics
+      : lang.value === 'go'
+        ? dataStore.goTopics
+        : lang.value === 'ai'
+          ? dataStore.aiTopics
+          : dataStore.javaTopics
   return list
 })
 
@@ -163,6 +170,7 @@ onMounted(() => {
                 <TabsTrigger value="all" class="flex-1">全部</TabsTrigger>
                 <TabsTrigger value="java" class="flex-1">Java</TabsTrigger>
                 <TabsTrigger value="go" class="flex-1">Golang</TabsTrigger>
+                <TabsTrigger value="ai" class="flex-1">AI</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
