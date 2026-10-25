@@ -1,0 +1,434 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 16%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--foreground) 20%, transparent);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ---------- 页面切换过渡 ---------- */
+
+.page-enter-active {
+  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1), transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.page-leave-active {
+  transition: opacity 0.12s ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+}
+
+/* ---------- 背题卡片翻转 ---------- */
+
+.flip-perspective {
+  perspective: 1400px;
+}
+.flip-enter-active {
+  transition: opacity 0.16s ease, transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.flip-leave-active {
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+.flip-enter-from {
+  opacity: 0;
+  transform: rotateY(-60deg);
+}
+.flip-leave-to {
+  opacity: 0;
+  transform: rotateY(60deg);
+}
+
+/* ---------- 首页 hero 网格纹理 ---------- */
+
+.bg-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 5%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(75% 100% at 30% 0%, black, transparent 80%);
+}
+.brand-gradient-text {
+  background: linear-gradient(100deg, #f59e0b 10%, #f97316 45%, #06b6d4 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- 动效降级 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active,
+  .flip-enter-active,
+  .flip-leave-active {
+    transition: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- 答案 Markdown 渲染排版 ---------- */
+
+.md-body {
+  @apply text-sm leading-relaxed;
+}
+.md-body > :first-child {
+  margin-top: 0;
+}
+.md-body > :last-child {
+  margin-bottom: 0;
+}
+.md-body p {
+  @apply my-2.5;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  @apply mb-2 mt-5 font-semibold tracking-tight;
+}
+.md-body h1 {
+  @apply text-lg;
+}
+.md-body h2 {
+  @apply text-base;
+}
+.md-body h3 {
+  @apply text-sm;
+}
+.md-body ul {
+  @apply my-2.5 list-disc space-y-1 pl-5;
+}
+.md-body ol {
+  @apply my-2.5 list-decimal space-y-1 pl-5;
+}
+.md-body li > ul,
+.md-body li > ol {
+  @apply my-1;
+}
+.md-body blockquote {
+  @apply my-3 border-l-2 border-border pl-3 text-muted-foreground;
+}
+.md-body a {
+  @apply text-primary underline-offset-4 hover:underline;
+}
+.md-body strong {
+  @apply font-semibold text-foreground;
+}
+.md-body code {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.85em];
+}
+.md-body pre {
+  @apply my-3 overflow-x-auto rounded-md border bg-muted/50 p-3 text-xs leading-relaxed;
+}
+.md-body pre code {
+  @apply block bg-transparent p-0 font-mono text-[0.85em] leading-relaxed;
+}
+.md-body table {
+  @apply my-3 block w-full overflow-x-auto border-collapse text-xs;
+}
+.md-body th,
+.md-body td {
+  @apply border px-2.5 py-1.5 text-left align-top;
+}
+.md-body th {
+  @apply bg-muted font-medium;
+}
+.md-body hr {
+  @apply my-4 border-border;
+}
+.md-body img {
+  @apply my-2 max-w-full rounded-md;
+}
+.md-body .follow-tip {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-left: 2px solid rgba(139, 92, 246, 0.45);
+  background: rgba(139, 92, 246, 0.08);
+  color: #6d28d9;
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.md-body .follow-tip b {
+  margin-right: 6px;
+  font-weight: 600;
+  color: inherit;
+}
+.dark .md-body .follow-tip {
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.12);
+}
+
+/* ---------- highlight.js 双主题(GitHub Light / Dark 手工精简版) ---------- */
+
+.hljs-comment,
+.hljs-quote {
+  color: #6a737d;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-formula {
+  color: #d73a49;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: #032f62;
+}
+.hljs-number,
+.hljs-literal,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-type,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: #005cc5;
+}
+.hljs-title,
+.hljs-section,
+.hljs-title.class_,
+.hljs-title.function_ {
+  color: #6f42c1;
+}
+.hljs-built_in,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: #e36209;
+}
+.hljs-attr,
+.hljs-property,
+.hljs-name,
+.hljs-tag {
+  color: #22863a;
+}
+.hljs-meta {
+  color: #735c0f;
+}
+.hljs-deletion {
+  color: #b31d28;
+  background: #ffeef0;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+.dark .hljs-comment,
+.dark .hljs-quote {
+  color: #8b949e;
+}
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-doctag,
+.dark .hljs-formula {
+  color: #ff7b72;
+}
+.dark .hljs-string,
+.dark .hljs-regexp,
+.dark .hljs-addition,
+.dark .hljs-attribute,
+.dark .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+.dark .hljs-number,
+.dark .hljs-literal,
+.dark .hljs-variable,
+.dark .hljs-template-variable,
+.dark .hljs-type,
+.dark .hljs-selector-class,
+.dark .hljs-selector-attr,
+.dark .hljs-selector-pseudo {
+  color: #79c0ff;
+}
+.dark .hljs-title,
+.dark .hljs-section,
+.dark .hljs-title.class_,
+.dark .hljs-title.function_ {
+  color: #d2a8ff;
+}
+.dark .hljs-built_in,
+.dark .hljs-symbol,
+.dark .hljs-bullet,
+.dark .hljs-link {
+  color: #ffa657;
+}
+.dark .hljs-attr,
+.dark .hljs-property,
+.dark .hljs-name,
+.dark .hljs-tag {
+  color: #7ee787;
+}
+.dark .hljs-meta {
+  color: #d29922;
+}
+.dark .hljs-deletion {
+  color: #ffdcd7;
+  background: #67060c;
+}
+
+/* 文档视图(README/面经)的标题层级 */
+.md-doc h1 {
+  @apply mb-3 text-2xl font-bold;
+}
+.md-doc h2 {
+  @apply mb-3 mt-8 border-b pb-1.5 text-xl font-semibold;
+}
+.md-doc h3 {
+  @apply mb-2 mt-5 text-base font-semibold;
+}
+.md-doc p,
+.md-doc li {
+  @apply text-sm;
+}
+.md-doc blockquote {
+  @apply border-l-primary/40 bg-muted/40 py-1;
+}
+

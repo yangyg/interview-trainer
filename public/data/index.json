@@ -1,0 +1,1133 @@
+{
+  "generatedAt": "2026-10-25T03:31:55.990Z",
+  "counts": {
+    "java": 889,
+    "go": 304,
+    "total": 1193
+  },
+  "topics": [
+    {
+      "id": "java-01",
+      "language": "java",
+      "name": "Java基础",
+      "file": "01-Java基础.md",
+      "count": 97,
+      "chapters": [
+        {
+          "name": "第一章 Java 语言与 JVM 基础概念",
+          "count": 7
+        },
+        {
+          "name": "第二章 数据类型与变量",
+          "count": 12
+        },
+        {
+          "name": "第三章 String",
+          "count": 10
+        },
+        {
+          "name": "第四章 面向对象",
+          "count": 14
+        },
+        {
+          "name": "第五章 Object 与对象相等性",
+          "count": 6
+        },
+        {
+          "name": "第六章 异常",
+          "count": 7
+        },
+        {
+          "name": "第七章 泛型",
+          "count": 5
+        },
+        {
+          "name": "第八章 反射、注解与代理",
+          "count": 6
+        },
+        {
+          "name": "第九章 IO 与序列化",
+          "count": 7
+        },
+        {
+          "name": "第十章 其他语言细节",
+          "count": 6
+        },
+        {
+          "name": "第十一章 Java 新特性（Java 8 → 21/25）",
+          "count": 9
+        },
+        {
+          "name": "第十二章 经典代码陷阱题",
+          "count": 7
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-02",
+      "language": "java",
+      "name": "Java集合",
+      "file": "02-Java集合.md",
+      "count": 61,
+      "chapters": [
+        {
+          "name": "一、集合体系总览",
+          "count": 6
+        },
+        {
+          "name": "二、List",
+          "count": 10
+        },
+        {
+          "name": "三、Map · HashMap",
+          "count": 14
+        },
+        {
+          "name": "四、Map · 其他实现",
+          "count": 10
+        },
+        {
+          "name": "五、Set",
+          "count": 5
+        },
+        {
+          "name": "六、Queue / Deque",
+          "count": 6
+        },
+        {
+          "name": "七、迭代器",
+          "count": 5
+        },
+        {
+          "name": "八、其他（排序、不可变集合、泛型、选型）",
+          "count": 4
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-03",
+      "language": "java",
+      "name": "并发编程",
+      "file": "03-并发编程.md",
+      "count": 80,
+      "chapters": [
+        {
+          "name": "一、线程基础",
+          "count": 8
+        },
+        {
+          "name": "二、Java 内存模型（JMM）",
+          "count": 6
+        },
+        {
+          "name": "三、synchronized",
+          "count": 6
+        },
+        {
+          "name": "四、volatile",
+          "count": 5
+        },
+        {
+          "name": "五、CAS 与原子类",
+          "count": 5
+        },
+        {
+          "name": "六、AQS 与锁",
+          "count": 7
+        },
+        {
+          "name": "七、线程池",
+          "count": 12
+        },
+        {
+          "name": "八、ThreadLocal",
+          "count": 5
+        },
+        {
+          "name": "九、JUC 并发工具类",
+          "count": 4
+        },
+        {
+          "name": "十、并发容器与阻塞队列",
+          "count": 5
+        },
+        {
+          "name": "十一、并发设计问题（死锁 / 手写题）",
+          "count": 6
+        },
+        {
+          "name": "十二、CompletableFuture 与异步编程",
+          "count": 4
+        },
+        {
+          "name": "十三、虚拟线程（Java 21，新热点必考）",
+          "count": 6
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-04",
+      "language": "java",
+      "name": "JVM",
+      "file": "04-JVM.md",
+      "count": 72,
+      "chapters": [
+        {
+          "name": "一、JVM 概览",
+          "count": 3
+        },
+        {
+          "name": "二、运行时内存区域",
+          "count": 13
+        },
+        {
+          "name": "三、对象相关",
+          "count": 7
+        },
+        {
+          "name": "四、垃圾回收：算法与判断",
+          "count": 8
+        },
+        {
+          "name": "五、垃圾回收：收集器",
+          "count": 11
+        },
+        {
+          "name": "六、内存分配与回收策略",
+          "count": 7
+        },
+        {
+          "name": "七、类加载",
+          "count": 8
+        },
+        {
+          "name": "八、JVM 调优实战",
+          "count": 8
+        },
+        {
+          "name": "九、JIT 与性能",
+          "count": 3
+        },
+        {
+          "name": "十、其他",
+          "count": 3
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-05",
+      "language": "java",
+      "name": "Spring与框架",
+      "file": "05-Spring与框架.md",
+      "count": 94,
+      "chapters": [
+        {
+          "name": "一、Spring 总览",
+          "count": 8
+        },
+        {
+          "name": "二、IoC 与 Bean",
+          "count": 12
+        },
+        {
+          "name": "三、循环依赖",
+          "count": 6
+        },
+        {
+          "name": "四、AOP",
+          "count": 8
+        },
+        {
+          "name": "五、事务",
+          "count": 10
+        },
+        {
+          "name": "六、Spring MVC",
+          "count": 9
+        },
+        {
+          "name": "七、Spring Boot",
+          "count": 11
+        },
+        {
+          "name": "八、Spring Cloud 微服务（概要级）",
+          "count": 8
+        },
+        {
+          "name": "九、MyBatis",
+          "count": 15
+        },
+        {
+          "name": "十、其他高频",
+          "count": 6
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-06",
+      "language": "java",
+      "name": "MySQL",
+      "file": "06-MySQL.md",
+      "count": 90,
+      "chapters": [
+        {
+          "name": "一、基础与存储引擎",
+          "count": 9
+        },
+        {
+          "name": "二、索引",
+          "count": 16
+        },
+        {
+          "name": "三、SQL 优化",
+          "count": 10
+        },
+        {
+          "name": "四、事务",
+          "count": 8
+        },
+        {
+          "name": "五、MVCC",
+          "count": 7
+        },
+        {
+          "name": "六、锁",
+          "count": 9
+        },
+        {
+          "name": "七、日志",
+          "count": 10
+        },
+        {
+          "name": "八、主从与高可用",
+          "count": 6
+        },
+        {
+          "name": "九、分库分表",
+          "count": 7
+        },
+        {
+          "name": "十、其他高频与真题连环追问",
+          "count": 7
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-07",
+      "language": "java",
+      "name": "Redis",
+      "file": "07-Redis.md",
+      "count": 80,
+      "chapters": [
+        {
+          "name": "第一章 基础与应用",
+          "count": 11
+        },
+        {
+          "name": "第二章 数据结构底层",
+          "count": 11
+        },
+        {
+          "name": "第三章 持久化",
+          "count": 8
+        },
+        {
+          "name": "第四章 高可用架构",
+          "count": 10
+        },
+        {
+          "name": "第五章 缓存三大问题与数据库一致性（最高频章节）",
+          "count": 9
+        },
+        {
+          "name": "第六章 过期删除与内存淘汰",
+          "count": 6
+        },
+        {
+          "name": "第七章 分布式锁",
+          "count": 7
+        },
+        {
+          "name": "第八章 性能与运维",
+          "count": 13
+        },
+        {
+          "name": "第九章 其他与延伸",
+          "count": 4
+        },
+        {
+          "name": "附：速记清单（考前 10 分钟过一遍）",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-08",
+      "language": "java",
+      "name": "分布式与消息队列",
+      "file": "08-分布式与消息队列.md",
+      "count": 89,
+      "chapters": [
+        {
+          "name": "第一章 消息队列总览",
+          "count": 6
+        },
+        {
+          "name": "第二章 Kafka",
+          "count": 14
+        },
+        {
+          "name": "第三章 RocketMQ",
+          "count": 7
+        },
+        {
+          "name": "第四章 RabbitMQ（概要）",
+          "count": 5
+        },
+        {
+          "name": "第五章 MQ 通用问题（大厂连环追问核心）",
+          "count": 5
+        },
+        {
+          "name": "第六章 分布式理论",
+          "count": 5
+        },
+        {
+          "name": "第七章 分布式事务",
+          "count": 10
+        },
+        {
+          "name": "第八章 分布式 ID",
+          "count": 5
+        },
+        {
+          "name": "第九章 分布式锁与 ZooKeeper",
+          "count": 5
+        },
+        {
+          "name": "第十章 限流、熔断与降级",
+          "count": 7
+        },
+        {
+          "name": "第十一章 微服务与 RPC",
+          "count": 9
+        },
+        {
+          "name": "第十二章 网关与治理",
+          "count": 6
+        },
+        {
+          "name": "第十三章 其他高频题",
+          "count": 4
+        },
+        {
+          "name": "附：来源清单（本文引用的真实链接）",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-09",
+      "language": "java",
+      "name": "计算机网络与操作系统",
+      "file": "09-计算机网络与操作系统.md",
+      "count": 76,
+      "chapters": [
+        {
+          "name": "一、网络模型与协议总览",
+          "count": 5
+        },
+        {
+          "name": "二、TCP 基础",
+          "count": 4
+        },
+        {
+          "name": "三、三次握手",
+          "count": 6
+        },
+        {
+          "name": "四、四次挥手",
+          "count": 6
+        },
+        {
+          "name": "五、TCP 核心机制",
+          "count": 7
+        },
+        {
+          "name": "六、HTTP",
+          "count": 6
+        },
+        {
+          "name": "七、HTTPS",
+          "count": 4
+        },
+        {
+          "name": "八、DNS 与输入 URL",
+          "count": 5
+        },
+        {
+          "name": "九、网络编程（Socket/NIO/Netty）",
+          "count": 9
+        },
+        {
+          "name": "十、操作系统 - 进程与线程",
+          "count": 8
+        },
+        {
+          "name": "十一、操作系统 - 内存与 IO",
+          "count": 8
+        },
+        {
+          "name": "十二、操作系统 - 其他（死锁/内核态/Linux）",
+          "count": 7
+        },
+        {
+          "name": "来源清单",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-10",
+      "language": "java",
+      "name": "设计模式与场景题",
+      "file": "10-设计模式与场景题.md",
+      "count": 56,
+      "chapters": [
+        {
+          "name": "第一章 设计原则",
+          "count": 1
+        },
+        {
+          "name": "第二章 创建型模式",
+          "count": 6
+        },
+        {
+          "name": "第三章 结构型模式",
+          "count": 5
+        },
+        {
+          "name": "第四章 行为型模式",
+          "count": 6
+        },
+        {
+          "name": "第五章 模式综合与应用",
+          "count": 5
+        },
+        {
+          "name": "第六章 系统设计方法论",
+          "count": 2
+        },
+        {
+          "name": "第七章 高并发经典场景题",
+          "count": 15
+        },
+        {
+          "name": "第八章 海量数据处理题",
+          "count": 4
+        },
+        {
+          "name": "第九章 线上问题排查场景",
+          "count": 7
+        },
+        {
+          "name": "补充章 高频追加题",
+          "count": 4
+        },
+        {
+          "name": "补充：高频追问速查",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "java-11",
+      "language": "java",
+      "name": "算法与手撕代码",
+      "file": "11-算法与手撕代码.md",
+      "count": 94,
+      "chapters": [
+        {
+          "name": "一、手撕高频 TOP 榜（字节/阿里/美团 Java 岗出镜率最高的 20 题）",
+          "count": 19
+        },
+        {
+          "name": "二、链表（考频从高到低）",
+          "count": 11
+        },
+        {
+          "name": "三、二叉树（考频从高到低）",
+          "count": 11
+        },
+        {
+          "name": "四、数组与双指针（考频从高到低）",
+          "count": 9
+        },
+        {
+          "name": "五、二分与排序（快排必考）",
+          "count": 7
+        },
+        {
+          "name": "六、栈与队列（单调栈系列是中高级分水岭）",
+          "count": 7
+        },
+        {
+          "name": "七、动态规划入门高频（把状态转移方程讲清楚比写码更重要）",
+          "count": 9
+        },
+        {
+          "name": "八、字符串",
+          "count": 3
+        },
+        {
+          "name": "九、设计类（LRU 必考完整代码）",
+          "count": 3
+        },
+        {
+          "name": "十、海量数据与场景题（大厂场景算法，口述为主）",
+          "count": 6
+        },
+        {
+          "name": "十一、Java 特有手撕（并发/工程，不依赖 LeetCode）",
+          "count": 8
+        },
+        {
+          "name": "十二、复杂度分析与手撕注意事项",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "go-index",
+      "language": "go",
+      "name": "Go 精编题库",
+      "file": "index.html",
+      "count": 177,
+      "chapters": [
+        {
+          "name": "基础语法与类型",
+          "count": 24
+        },
+        {
+          "name": "并发编程",
+          "count": 32
+        },
+        {
+          "name": "内存管理与 GC",
+          "count": 17
+        },
+        {
+          "name": "网络编程",
+          "count": 16
+        },
+        {
+          "name": "标准库与运行时",
+          "count": 13
+        },
+        {
+          "name": "性能优化与调试",
+          "count": 14
+        },
+        {
+          "name": "分布式与微服务",
+          "count": 24
+        },
+        {
+          "name": "工程化与存储中间件",
+          "count": 17
+        },
+        {
+          "name": "系统设计与场景题",
+          "count": 12
+        },
+        {
+          "name": "项目与软技能",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "id": "go-01",
+      "language": "go",
+      "name": "语言基础与常见代码输出题",
+      "file": "01-语言基础与常见代码输出题.md",
+      "count": 62,
+      "chapters": [
+        {
+          "name": "一、值传递 / 引用语义",
+          "count": 1
+        },
+        {
+          "name": "二、数组与切片",
+          "count": 6
+        },
+        {
+          "name": "三、map",
+          "count": 5
+        },
+        {
+          "name": "四、string",
+          "count": 3
+        },
+        {
+          "name": "五、defer",
+          "count": 5
+        },
+        {
+          "name": "六、panic / recover",
+          "count": 2
+        },
+        {
+          "name": "七、interface",
+          "count": 6
+        },
+        {
+          "name": "八、方法与接收者",
+          "count": 1
+        },
+        {
+          "name": "九、for range",
+          "count": 4
+        },
+        {
+          "name": "十、闭包",
+          "count": 3
+        },
+        {
+          "name": "十一、make/new、iota、常量、init",
+          "count": 3
+        },
+        {
+          "name": "十二、泛型（Go 1.18+）",
+          "count": 2
+        },
+        {
+          "name": "十三、错误处理",
+          "count": 3
+        },
+        {
+          "name": "十四、内存对齐与空结构体",
+          "count": 1
+        },
+        {
+          "name": "十五、代码输出题",
+          "count": 17
+        }
+      ]
+    },
+    {
+      "id": "go-02",
+      "language": "go",
+      "name": "并发编程与调度",
+      "file": "02-并发编程与调度.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "一、goroutine 与调度",
+          "count": 8
+        },
+        {
+          "name": "二、channel",
+          "count": 2
+        },
+        {
+          "name": "三、sync 包与并发正确性",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "id": "go-03",
+      "language": "go",
+      "name": "运行时原理-GC内存与性能分析",
+      "file": "03-运行时原理-GC内存与性能分析.md",
+      "count": 12,
+      "chapters": [
+        {
+          "name": "一、GC 垃圾回收",
+          "count": 5
+        },
+        {
+          "name": "二、内存分配与逃逸分析",
+          "count": 4
+        },
+        {
+          "name": "三、性能分析与工程实践",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "id": "go-04",
+      "language": "go",
+      "name": "工程实践与标准库",
+      "file": "04-工程实践与标准库.md",
+      "count": 12,
+      "chapters": [
+        {
+          "name": "一、go mod 依赖管理",
+          "count": 3
+        },
+        {
+          "name": "二、测试",
+          "count": 1
+        },
+        {
+          "name": "三、net/http",
+          "count": 4
+        },
+        {
+          "name": "四、database/sql",
+          "count": 1
+        },
+        {
+          "name": "五、io 与序列化",
+          "count": 1
+        },
+        {
+          "name": "六、time 定时器陷阱",
+          "count": 1
+        },
+        {
+          "name": "七、编译与部署",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "go-05",
+      "language": "go",
+      "name": "后端配套知识",
+      "file": "05-后端配套知识.md",
+      "count": 23,
+      "chapters": [
+        {
+          "name": "一、MySQL",
+          "count": 4
+        },
+        {
+          "name": "二、Redis",
+          "count": 1
+        },
+        {
+          "name": "三、消息队列（Kafka 为主）",
+          "count": 3
+        },
+        {
+          "name": "四、网络（TCP/HTTP/epoll）",
+          "count": 5
+        },
+        {
+          "name": "五、分布式与微服务",
+          "count": 5
+        },
+        {
+          "name": "六、系统设计场景题",
+          "count": 5
+        }
+      ]
+    }
+  ],
+  "topLists": {
+    "java": [
+      {
+        "rank": 1,
+        "title": "==、equals、hashCode 的区别与契约",
+        "location": "01 基础",
+        "questionId": "java-01-Q48"
+      },
+      {
+        "rank": 2,
+        "title": "String 为什么不可变；字符串常量池；intern",
+        "location": "01 基础",
+        "questionId": "go-01-Q19"
+      },
+      {
+        "rank": 3,
+        "title": "接口和抽象类的区别",
+        "location": "01 基础",
+        "questionId": "java-01-Q35"
+      },
+      {
+        "rank": 4,
+        "title": "Java 是值传递还是引用传递",
+        "location": "01 基础",
+        "questionId": "java-01-Q36"
+      },
+      {
+        "rank": 5,
+        "title": "finally 一定会执行吗；finally 与 return",
+        "location": "01 基础",
+        "questionId": "java-01-Q53"
+      },
+      {
+        "rank": 6,
+        "title": "Java 8/17/21 新特性（Lambda/Stream/record/虚拟线程）",
+        "location": "01 基础",
+        "questionId": null
+      },
+      {
+        "rank": 7,
+        "title": "ArrayList 扩容机制；与 LinkedList 区别",
+        "location": "02 集合",
+        "questionId": "java-02-Q9"
+      },
+      {
+        "rank": 8,
+        "title": "HashMap 底层原理、put 流程、1.7 与 1.8 区别",
+        "location": "02 集合",
+        "questionId": "java-02-Q19"
+      },
+      {
+        "rank": 9,
+        "title": "HashMap 为什么线程不安全；ConcurrentHashMap 原理",
+        "location": "02 集合",
+        "questionId": "java-02-Q34"
+      },
+      {
+        "rank": 10,
+        "title": "链表转红黑树的阈值为什么是 8",
+        "location": "02 集合",
+        "questionId": "java-02-Q22"
+      },
+      {
+        "rank": 11,
+        "title": "线程池七大参数、执行流程、拒绝策略",
+        "location": "03 并发",
+        "questionId": null
+      },
+      {
+        "rank": 12,
+        "title": "为什么不推荐 Executors 创建线程池；核心线程数怎么定",
+        "location": "03 并发",
+        "questionId": "java-03-Q43"
+      },
+      {
+        "rank": 13,
+        "title": "synchronized 原理与锁升级",
+        "location": "03 并发",
+        "questionId": "java-03-Q17"
+      },
+      {
+        "rank": 14,
+        "title": "volatile 两层语义；DCL 单例为什么要加 volatile",
+        "location": "03 并发",
+        "questionId": "java-10-Q4"
+      },
+      {
+        "rank": 15,
+        "title": "ThreadLocal 原理与内存泄漏",
+        "location": "03 并发",
+        "questionId": "java-03-Q51"
+      },
+      {
+        "rank": 16,
+        "title": "CAS 与 ABA 问题；LongAdder 为什么快",
+        "location": "03 并发",
+        "questionId": null
+      },
+      {
+        "rank": 17,
+        "title": "JVM 内存区域；哪些区域会 OOM",
+        "location": "04 JVM",
+        "questionId": null
+      },
+      {
+        "rank": 18,
+        "title": "对象创建过程；对象在堆上的内存布局",
+        "location": "04 JVM",
+        "questionId": null
+      },
+      {
+        "rank": 19,
+        "title": "判断对象可回收：可达性分析与 GC Roots",
+        "location": "04 JVM",
+        "questionId": null
+      },
+      {
+        "rank": 20,
+        "title": "CMS/G1/ZGC 原理与对比；如何选收集器",
+        "location": "04 JVM",
+        "questionId": null
+      },
+      {
+        "rank": 21,
+        "title": "类加载过程与双亲委派；如何打破",
+        "location": "04 JVM",
+        "questionId": null
+      },
+      {
+        "rank": 22,
+        "title": "线上 CPU 100% / OOM / 频繁 Full GC 怎么排查",
+        "location": "04 JVM / 10 场景",
+        "questionId": "java-04-Q64"
+      },
+      {
+        "rank": 23,
+        "title": "Bean 生命周期；循环依赖与三级缓存",
+        "location": "05 Spring",
+        "questionId": null
+      },
+      {
+        "rank": 24,
+        "title": "Spring 事务失效的场景（自调用/异常被吞等）",
+        "location": "05 Spring",
+        "questionId": null
+      },
+      {
+        "rank": 25,
+        "title": "JDK 动态代理与 CGLIB 区别",
+        "location": "05 Spring",
+        "questionId": "java-01-Q66"
+      },
+      {
+        "rank": 26,
+        "title": "Spring Boot 自动装配原理",
+        "location": "05 Spring",
+        "questionId": "java-05-Q57"
+      },
+      {
+        "rank": 27,
+        "title": "为什么用 B+ 树；聚簇索引与回表；索引失效场景",
+        "location": "06 MySQL",
+        "questionId": "java-07-Q78"
+      },
+      {
+        "rank": 28,
+        "title": "事务隔离级别与 MVCC、ReadView",
+        "location": "06 MySQL",
+        "questionId": "go-index-Q150"
+      },
+      {
+        "rank": 29,
+        "title": "redo log / undo log / binlog 区别与两阶段提交",
+        "location": "06 MySQL",
+        "questionId": "java-06-Q62"
+      },
+      {
+        "rank": 30,
+        "title": "缓存穿透/击穿/雪崩；缓存与数据库一致性",
+        "location": "07 Redis",
+        "questionId": null
+      }
+    ],
+    "go": [
+      {
+        "rank": 1,
+        "title": "GMP 调度模型 / goroutine 调度原理",
+        "note": "11 家公司考",
+        "questionId": null
+      },
+      {
+        "rank": 2,
+        "title": "TCP 三次握手/四次挥手/TIME_WAIT",
+        "note": "10 家",
+        "questionId": null
+      },
+      {
+        "rank": 3,
+        "title": "MySQL 索引 / B+ 树 vs B 树",
+        "note": "10 家",
+        "questionId": null
+      },
+      {
+        "rank": 4,
+        "title": "map 底层实现 / 遍历无序 / 并发不安全",
+        "note": "8 家",
+        "questionId": null
+      },
+      {
+        "rank": 5,
+        "title": "channel 底层 / 关闭的 chan 读写 / 有无缓冲",
+        "note": "8 家",
+        "questionId": null
+      },
+      {
+        "rank": 6,
+        "title": "事务隔离级别 / MVCC / 幻读",
+        "note": "7 家",
+        "questionId": null
+      },
+      {
+        "rank": 7,
+        "title": "Go GC：三色标记 + 写屏障 + 演进",
+        "note": "7 家",
+        "questionId": null
+      },
+      {
+        "rank": 8,
+        "title": "进程/线程/协程区别",
+        "note": "6 家",
+        "questionId": "java-09-Q54"
+      },
+      {
+        "rank": 9,
+        "title": "HTTPS / TLS 握手",
+        "note": "6 家",
+        "questionId": "java-09-Q36"
+      },
+      {
+        "rank": 10,
+        "title": "分布式锁 + Kafka 不丢消息",
+        "note": "各 6 家",
+        "questionId": "java-07-Q57"
+      }
+    ]
+  },
+  "docs": [
+    {
+      "id": "java-readme",
+      "language": "java",
+      "title": "Java 题库总览",
+      "description": "总说明、复习路径与最高频 30 题速查"
+    },
+    {
+      "id": "go-readme",
+      "language": "go",
+      "title": "Golang 题库总览",
+      "description": "总说明、使用建议与 Top 10 高频题"
+    },
+    {
+      "id": "go-interviews",
+      "language": "go",
+      "title": "真实面经汇编",
+      "description": "字节/腾讯/美团等 17 家公司分轮次真题"
+    },
+    {
+      "id": "go-careers",
+      "language": "go",
+      "title": "岗位与就业方向分析",
+      "description": "岗位职责、薪资与就业方向调研"
+    },
+    {
+      "id": "go-profile",
+      "language": "go",
+      "title": "岗位画像与备考路线",
+      "description": "岗位职责画像 · 技术栈 · 方向差异 · 真实面经摘录 · 四周备考路线"
+    }
+  ]
+}
