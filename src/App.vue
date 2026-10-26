@@ -9,12 +9,17 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import BottomNav from '@/components/BottomNav.vue'
 import SearchCommand from '@/components/SearchCommand.vue'
 import { useTheme } from '@/composables/useTheme'
+import { useCourseStore } from '@/stores/course'
 import { useDataStore } from '@/stores/data'
 
 const dataStore = useDataStore()
+const courseStore = useCourseStore()
 const { isDark, toggle } = useTheme()
 
 dataStore.init()
+// 课程索引与题库相互独立:课程还没加载完也能先渲染页面,
+// 所以这里只发起请求,不把 courseStore 并进下面的 isReady 门控。
+courseStore.init()
 
 const searchOpen = ref(false)
 const mobileNavOpen = ref(false)

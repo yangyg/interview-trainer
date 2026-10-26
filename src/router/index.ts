@@ -11,6 +11,25 @@ const router = createRouter({
     { path: '/stats', name: 'stats', component: () => import('@/views/StatsView.vue') },
     { path: '/wrongbook', name: 'wrongbook', component: () => import('@/views/WrongBookView.vue') },
     { path: '/docs/:id', name: 'doc', component: () => import('@/views/DocView.vue') },
+    // 课程三个层级共用 meta.nav='courses',侧边栏与底栏才能在同一条导航项上高亮
+    {
+      path: '/courses',
+      name: 'courses',
+      component: () => import('@/views/CoursesView.vue'),
+      meta: { nav: 'courses' },
+    },
+    {
+      path: '/courses/:courseId',
+      name: 'course-detail',
+      component: () => import('@/views/CourseDetailView.vue'),
+      meta: { nav: 'courses' },
+    },
+    {
+      path: '/courses/:courseId/lessons/:lessonId',
+      name: 'course-lesson',
+      component: () => import('@/views/CourseLessonView.vue'),
+      meta: { nav: 'courses' },
+    },
     { path: '/:pathMatch(.*)*', redirect: { name: 'home' } },
   ],
   scrollBehavior: () => ({ top: 0 }),

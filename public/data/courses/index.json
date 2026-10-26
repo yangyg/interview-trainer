@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "sourceIndexGeneratedAt": "2026-10-25T12:24:24.715Z",
+  "buildHash": "15a2083933e0",
+  "courses": [
+    {
+      "id": "java-lang-collections",
+      "language": "java",
+      "title": "Java 语言与集合框架",
+      "subtitle": "从语法地基到集合源码，把 Java 的「语言契约」一次讲透",
+      "level": "intro",
+      "prerequisites": [],
+      "outcomes": [
+        "能把源码到字节码再到解释执行的完整链路讲清楚，解释 JVM 各层职责",
+        "说清基本类型、包装类、String 池在内存中到底怎么存，避开装箱与相等的坑",
+        "用 equals / hashCode 契约解释「为什么重写一个就要重写另一个」",
+        "从结构、扩容、哈希冲突讲到 HashMap 与 ConcurrentHashMap 的线程安全边界",
+        "在集合选型题里给出有依据的结论，而不是背「ArrayList 查快增删慢」"
+      ],
+      "order": 1,
+      "firstLessonId": "lang-jvm",
+      "stageCount": 4,
+      "lessonCount": 17,
+      "uniqueQuestionCount": 158,
+      "estimatedMinutes": 776
+    },
+    {
+      "id": "java-concurrency-jvm",
+      "language": "java",
+      "title": "并发编程与 JVM",
+      "subtitle": "从线程内存模型到 GC 调优，把「看不见的运行时」讲清楚",
+      "level": "advanced",
+      "prerequisites": [
+        "java-lang-collections"
+      ],
+      "outcomes": [
+        "用 JMM 的 happens-before 解释可见性与有序性，而不是只背 volatile 两个作用",
+        "说清 synchronized、AQS、CAS 各自的适用边界与代价",
+        "能根据任务类型选择线程池参数，并解释为什么不能随便用无界队列",
+        "画出 JVM 运行时数据区，说明对象从分配到回收的完整生命周期",
+        "面对一次 GC 频繁或内存溢出的线上问题，给出有条理的排查路径"
+      ],
+      "order": 2,
+      "firstLessonId": "thread-basics",
+      "stageCount": 6,
+      "lessonCount": 19,
+      "uniqueQuestionCount": 152,
+      "estimatedMinutes": 1071
+    },
+    {
+      "id": "java-spring",
+      "language": "java",
+      "title": "Spring 全家桶",
+      "subtitle": "从 IoC 容器到事务与 MyBatis，按「框架替你做了什么」来理解",
+      "level": "advanced",
+      "prerequisites": [
+        "java-lang-collections"
+      ],
+      "outcomes": [
+        "说清 Bean 从定义到销毁的完整生命周期，以及各扩展点的执行时机",
+        "解释三级缓存如何解决循环依赖，并说出它解决不了的两种情况",
+        "从代理机制出发讲清 AOP 的织入时机，以及事务失效的典型原因",
+        "说明 Spring Boot 自动配置的触发链路与自定义 starter 的写法",
+        "把 MyBatis 的一级二级缓存、插件拦截、与 Spring 的整合方式讲明白"
+      ],
+      "order": 3,
+      "firstLessonId": "spring-overview",
+      "stageCount": 4,
+      "lessonCount": 10,
+      "uniqueQuestionCount": 94,
+      "estimatedMinutes": 718
+    },
+    {
+      "id": "java-mysql-redis",
+      "language": "java",
+      "title": "MySQL 与 Redis",
+      "subtitle": "从 B+ 树索引到缓存一致性，把「数据存得住、查得快」讲透",
+      "level": "advanced",
+      "prerequisites": [
+        "java-lang-collections"
+      ],
+      "outcomes": [
+        "画出 B+ 树索引结构，解释回表、覆盖索引与最左前缀的成因",
+        "用 MVCC 与锁的配合说清四种隔离级别下的具体现象",
+        "看到一条慢 SQL 时能按执行计划判断问题出在索引、回表还是排序",
+        "说清 Redis 各数据结构的底层编码与适用场景",
+        "在缓存穿透、击穿、雪崩与一致性之间做出明确取舍并给出方案"
+      ],
+      "order": 4,
+      "firstLessonId": "mysql-engine",
+      "stageCount": 6,
+      "lessonCount": 18,
+      "uniqueQuestionCount": 170,
+      "estimatedMinutes": 1254
+    },
+    {
+      "id": "java-distributed-network",
+      "language": "java",
+      "title": "分布式、消息队列与网络",
+      "subtitle": "从一次 RPC 到一条消息的可靠性，打通后端系统的横向知识",
+      "level": "expert",
+      "prerequisites": [
+        "java-mysql-redis"
+      ],
+      "outcomes": [
+        "说清 Kafka 与 RocketMQ 在存储、顺序、事务消息上的设计差异",
+        "用 CAP 与 BASE 解释分布式事务的几种方案各自放弃了什么",
+        "画出 TCP 三次握手与四次挥手的状态迁移，解释 TIME_WAIT 的成因",
+        "从零讲清一次 HTTPS 请求的完整链路与其中的密钥交换",
+        "在网络、操作系统层面解释高并发服务为什么会卡在某个环节"
+      ],
+      "order": 5,
+      "firstLessonId": "mq-overview",
+      "stageCount": 5,
+      "lessonCount": 20,
+      "uniqueQuestionCount": 165,
+      "estimatedMinutes": 1400
+    },
+    {
+      "id": "java-design-algorithm",
+      "language": "java",
+      "title": "系统设计与手撕算法",
+      "subtitle": "把设计模式变成表达工具，把手撕题变成可复述的套路",
+      "level": "expert",
+      "prerequisites": [
+        "java-distributed-network"
+      ],
+      "outcomes": [
+        "用模式的语言描述一段代码的扩展点，而不是只说出模式名字",
+        "面对高并发场景题，按「容量估算 → 分层设计 → 瓶颈与取舍」结构作答",
+        "把 TOP 高频手撕题写成可编译的代码，并讲清边界与复杂度",
+        "在链表、树、DP 三类题上形成稳定的解题起手式",
+        "遇到线上故障能按「现象 → 定位 → 止血 → 复盘」推进"
+      ],
+      "order": 6,
+      "firstLessonId": "design-basics",
+      "stageCount": 5,
+      "lessonCount": 17,
+      "uniqueQuestionCount": 150,
+      "estimatedMinutes": 1370
+    },
+    {
+      "id": "go-language",
+      "language": "go",
+      "title": "Go 语言精要",
+      "subtitle": "从值语义到接口与代码输出题，把 Go 的「反直觉」一次讲清",
+      "level": "intro",
+      "prerequisites": [],
+      "outcomes": [
+        "用值语义与逃逸分析解释 slice、map、string 的共享与拷贝行为",
+        "说清 defer 的执行顺序与闭包捕获变量的真实时机",
+        "掌握接口的静态与动态类型、nil 判断陷阱与类型断言",
+        "看懂并手推常见代码输出题的每一步结果",
+        "知道 Go 与 Java 在设计取舍上的根本差异，而不是逐个语法对比"
+      ],
+      "order": 7,
+      "firstLessonId": "go-value-semantics",
+      "stageCount": 3,
+      "lessonCount": 8,
+      "uniqueQuestionCount": 86,
+      "estimatedMinutes": 359
+    },
+    {
+      "id": "go-concurrency-runtime",
+      "language": "go",
+      "title": "并发模型与运行时",
+      "subtitle": "GMP、channel、GC 与 pprof，Go 工程师的核心竞争力",
+      "level": "advanced",
+      "prerequisites": [
+        "go-language"
+      ],
+      "outcomes": [
+        "画出 GMP 调度模型，解释 goroutine 抢占与 work stealing",
+        "说清 channel 的底层结构与阻塞唤醒机制，避开死锁与泄漏",
+        "用逃逸分析与三色标记解释 Go 的内存分配与 GC 行为",
+        "看到 CPU 或内存异常时，能用 pprof 定位到具体函数",
+        "在高并发场景下做出「加锁 / channel / 原子操作」的合理选择"
+      ],
+      "order": 8,
+      "firstLessonId": "goroutine-scheduling",
+      "stageCount": 4,
+      "lessonCount": 7,
+      "uniqueQuestionCount": 106,
+      "estimatedMinutes": 349
+    },
+    {
+      "id": "go-engineering-system",
+      "language": "go",
+      "title": "网络、存储与分布式",
+      "subtitle": "从工程化实践到分布式系统设计，补齐后端配套知识",
+      "level": "expert",
+      "prerequisites": [
+        "go-concurrency-runtime"
+      ],
+      "outcomes": [
+        "用 go mod、测试与编译部署把项目做到可交付",
+        "说清 net/http 的连接管理、超时设置与常见陷阱",
+        "把 MySQL、Redis、Kafka 的使用要点与 Go 的工程实践结合",
+        "解释 etcd 与 Raft 在服务发现、选主中的作用",
+        "面对系统设计题，按容量、分层、瓶颈、取舍四步给出方案"
+      ],
+      "order": 9,
+      "firstLessonId": "go-engineering",
+      "stageCount": 4,
+      "lessonCount": 10,
+      "uniqueQuestionCount": 112,
+      "estimatedMinutes": 558
+    },
+    {
+      "id": "ai-foundation",
+      "language": "ai",
+      "title": "大模型基础与训练",
+      "subtitle": "从注意力机制到对齐与评测，建立大模型的第一层认知",
+      "level": "intro",
+      "prerequisites": [],
+      "outcomes": [
+        "手推注意力计算的四个矩阵，解释 MQA、GQA 与 MLA 的取舍",
+        "说清 Tokenizer 与词表设计如何影响成本与效果",
+        "解释采样参数、KV Cache 与长上下文之间的相互制约",
+        "把预训练、SFT、偏好对齐三个阶段的目标与数据讲清楚",
+        "用合理的指标与评测方法判断一次训练是否真的有效"
+      ],
+      "order": 10,
+      "firstLessonId": "transformer",
+      "stageCount": 3,
+      "lessonCount": 5,
+      "uniqueQuestionCount": 42,
+      "estimatedMinutes": 279
+    },
+    {
+      "id": "ai-serving-prompt",
+      "language": "ai",
+      "title": "推理部署与 Prompt 工程",
+      "subtitle": "把模型跑起来、跑得便宜，并让它按你要的方式回答",
+      "level": "advanced",
+      "prerequisites": [
+        "ai-foundation"
+      ],
+      "outcomes": [
+        "估算一次推理的显存占用，并解释 PagedAttention 解决了什么",
+        "说清量化、批处理与投机解码各自的加速原理与代价",
+        "设计出稳定、可评测的 Prompt，而不是靠反复试",
+        "用上下文工程控制模型看到的信息与顺序",
+        "识别 Prompt 注入、越权与数据泄漏风险并给出防护"
+      ],
+      "order": 11,
+      "firstLessonId": "inference-basics",
+      "stageCount": 3,
+      "lessonCount": 6,
+      "uniqueQuestionCount": 36,
+      "estimatedMinutes": 222
+    },
+    {
+      "id": "ai-rag-agent",
+      "language": "ai",
+      "title": "RAG 与 Agent 工程",
+      "subtitle": "让模型接上外部知识，并学会自己调用工具",
+      "level": "advanced",
+      "prerequisites": [
+        "ai-serving-prompt"
+      ],
+      "outcomes": [
+        "画出 RAG 的完整链路，并指出每个环节的常见失效点",
+        "说清向量检索、混合检索与重排各自的适用场景",
+        "用可量化的指标评估 RAG，而不是只看回答「像不像」",
+        "解释 Agent 的循环结构、工具调用协议与 MCP 的作用",
+        "为 Agent 设计可靠性与安全边界，避免死循环与越权"
+      ],
+      "order": 12,
+      "firstLessonId": "rag-basics",
+      "stageCount": 4,
+      "lessonCount": 7,
+      "uniqueQuestionCount": 42,
+      "estimatedMinutes": 269
+    },
+    {
+      "id": "ai-production",
+      "language": "ai",
+      "title": "生产化、安全与 AI 协作",
+      "subtitle": "从能跑到敢上线，AI 应用的最后一公里",
+      "level": "expert",
+      "prerequisites": [
+        "ai-rag-agent"
+      ],
+      "outcomes": [
+        "用可量化的手段治理幻觉，而不是靠「提示模型别瞎编」",
+        "说清 AI 应用的合规红线与数据分级处理方式",
+        "设计出可观测、可降级、成本可控的 AI 生产架构",
+        "用工程化方式与模型协作，提高团队整体产出"
+      ],
+      "order": 13,
+      "firstLessonId": "hallucination-safety",
+      "stageCount": 2,
+      "lessonCount": 3,
+      "uniqueQuestionCount": 16,
+      "estimatedMinutes": 168
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   EyeIcon,
@@ -140,6 +140,11 @@ onMounted(() => {
     start(matched.value)
     router.replace({ query: {} })
   }
+})
+
+// 必须成对解绑:否则离开页面后监听仍在,反复进入会叠加多个 handler,一次按键多次评分
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 

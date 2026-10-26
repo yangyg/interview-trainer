@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   AlarmClockIcon,
@@ -9,6 +9,7 @@ import {
   FileTextIcon,
   FlameIcon,
   LayersIcon,
+  RouteIcon,
   TimerIcon,
   TrendingUpIcon,
 } from "@lucide/vue";
@@ -23,6 +24,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { useCourseStore } from "@/stores/course";
 import { useDataStore } from "@/stores/data";
 import { useProgressStore } from "@/stores/progress";
 import { LANG_META } from "@/lib/langs";
@@ -31,6 +33,7 @@ import type { Language } from "@/lib/types";
 const router = useRouter();
 const dataStore = useDataStore();
 const progress = useProgressStore();
+const courseStore = useCourseStore();
 
 const masteryPct = computed(() =>
   dataStore.total
@@ -65,6 +68,43 @@ function goTop(item: { questionId?: string | null }) {
 
 function openDoc(id: string) {
   router.push({ name: "doc", params: { id } });
+}
+
+// ---------- 继续学习 ----------
+const resume = computed(() => courseStore.continueTarget);
+const resumeCourse = computed(() =>
+  resume.value ? courseStore.summaryOf(resume.value.courseId) : undefined,
+);
+const resumeLesson = computed(() => {
+  const t = resume.value;
+  if (!t) return null;
+  return (
+    courseStore.flatLessons(t.courseId).find((x) => x.lesson.id === t.lessonId)
+      ?.lesson ?? null
+  );
+});
+const resumeProgress = computed(() =>
+  resume.value
+    ? courseStore.courseProgress(resume.value.courseId)
+    : { done: 0, total: 0, pct: 0 },
+);
+
+// 只想显示课时标题,但标题在课程 JSON 里,所以按需加载这一门(~30KB)
+watch(
+  () => resume.value?.courseId,
+  (id) => {
+    if (id) void courseStore.loadCourse(id);
+  },
+  { immediate: true },
+);
+
+function goResume() {
+  const t = resume.value;
+  if (!t) return;
+  router.push({
+    name: "course-lesson",
+    params: { courseId: t.courseId, lessonId: t.lessonId },
+  });
 }
 
 function langCard(language: Language) {
@@ -200,6 +240,46 @@ function langCard(language: Language) {
         </CardContent>
       </Card>
     </div>
+
+    <!-- 学习路径:有历史就续上,没历史就引导到第一课 -->
+    <Card v-if="resume && resumeCourse" class="overflow-hidden">
+      <CardContent class="flex flex-wrap items-center gap-4 p-4 sm:p-5">
+        <span
+          class="flex size-10 shrink-0 items-center justify-center rounded-xl text-white"
+          :class="LANG_META[resumeCourse.language].badge"
+        >
+          <RouteIcon class="size-5" />
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="text-[11px] uppercase tracking-wider text-muted-foreground">
+            {{ resumeLesson ? "继续上次的课时" : "从学习路径开始" }}
+          </p>
+          <p class="mt-0.5 truncate text-sm font-medium">
+            {{ resumeCourse.title
+            }}<template v-if="resumeLesson"> · {{ resumeLesson.title }}</template>
+          </p>
+          <div class="mt-2 flex items-center gap-2">
+            <Progress :model-value="resumeProgress.pct" class="h-1.5 max-w-56" />
+            <span class="text-[11px] tabular-nums text-muted-foreground">
+              {{ resumeProgress.done }}/{{ resumeProgress.total }} 课时
+            </span>
+          </div>
+        </div>
+        <div class="flex shrink-0 gap-2">
+          <Button size="sm" @click="goResume">
+            继续学习
+            <ArrowRightIcon />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            @click="router.push({ name: 'courses' })"
+          >
+            全部课程
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 语言专题 -->
     <div class="grid gap-3 lg:grid-cols-3">

@@ -1,5 +1,6 @@
 import MiniSearch from 'minisearch'
 import { defineStore } from 'pinia'
+import { markRaw } from 'vue'
 import type { IndexData, Question, Topic, TopicData } from '@/lib/types'
 
 /** CJK 按二元组分词,拉丁词整词小写——让中文可前缀/模糊检索 */
@@ -67,15 +68,25 @@ export const useDataStore = defineStore('data', {
         const base = import.meta.env.BASE_URL
         const indexRes = await fetch(`${base}data/index.json`)
         if (!indexRes.ok) throw new Error(`加载索引失败(${indexRes.status})`)
-        this.index = (await indexRes.json()) as IndexData
+        const index = (await indexRes.json()) as IndexData
+        // 兼容旧产物:counts 可能缺字段(曾漏写 ai),缺失时按 topics 求和补齐,
+        // 否则首页会显示「AI 0 题」。JSON 是外部输入,不能只靠类型断言。
+        const derived: IndexData['counts'] = { java: 0, go: 0, ai: 0, total: 0 }
+        for (const t of index.topics) derived[t.language] += t.count
+        derived.total = derived.java + derived.go + derived.ai
+        index.counts = { ...derived, ...index.counts }
+        this.index = index
 
         await Promise.all(
           this.index.topics.map(async (topic) => {
             const res = await fetch(`${base}data/${topic.id}.json`)
             if (!res.ok) throw new Error(`加载 ${topic.name} 失败(${res.status})`)
             const data = (await res.json()) as TopicData
-            this.topicQuestions[topic.id] = data.questions
-            for (const q of data.questions) this.questionsById[q.id] = q
+            // 题目是只读数据:markRaw 跳过深层代理,避免 1329 个对象在首次渲染时
+            // 被逐个 Proxy 包装(纯开销,无任何响应式收益)
+            const questions = data.questions.map((q) => markRaw(q))
+            this.topicQuestions[topic.id] = markRaw(questions)
+            for (const q of questions) this.questionsById[q.id] = q
           }),
         )
 

@@ -285,7 +285,7 @@ onBeforeUnmount(stopTimer)
           <CardHeader>
             <CardTitle class="text-base">面试结束</CardTitle>
             <CardDescription>
-              自评通过 {{ score }} / {{ results.length }}(会计为通过,模糊/不会计入错题)
+              自评通过 {{ score }} / {{ results.length }}(会计为通过;模糊次日重见,不会进错题本)
             </CardDescription>
           </CardHeader>
           <CardContent class="flex flex-wrap gap-2">

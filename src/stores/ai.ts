@@ -62,7 +62,43 @@ function defaultConfig(): AiConfig {
 }
 
 const MAX_CHATS = 100
+/** 单条会话正文上限:超出后从最早的消息开始丢弃(保留最近两条) */
+const MAX_CHARS_PER_CHAT = 60_000
+/** 全部会话正文总字符上限:localStorage 通常 5MB,中文按 UTF-16 约 2 字节/字符 */
+const MAX_TOTAL_CHARS = 1_500_000
 const MAX_HISTORY_SENT = 20
+/** 流式写入节流间隔:避免每个 token 都触发一次全量序列化 */
+const STREAM_FLUSH_MS = 200
+
+/** 尾调用节流:高频调用只按固定间隔执行,并提供 flush 保证收尾落盘 */
+function createThrottled<A extends unknown[]>(fn: (...args: A) => void, ms: number) {
+  let last = 0
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pending: A | null = null
+
+  function run() {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (!pending) return
+    const args = pending
+    pending = null
+    last = Date.now()
+    fn(...args)
+  }
+
+  return {
+    call(...args: A) {
+      pending = args
+      if (timer) return
+      const wait = ms - (Date.now() - last)
+      if (wait <= 0) run()
+      else timer = setTimeout(run, wait)
+    },
+    flush: run,
+  }
+}
 
 /** AI 输出为不可信外部内容,渲染前必须消毒 */
 export function renderAiMarkdown(md: string): string {
@@ -72,7 +108,11 @@ export function renderAiMarkdown(md: string): string {
 
 export const useAiStore = defineStore('ai', () => {
   const config = useLocalStorage<AiConfig>('interview-trainer/ai-config-v1', defaultConfig(), { mergeDefaults: true })
-  const chats = useLocalStorage<Record<string, AiMessage[]>>('interview-trainer/ai-chats-v1', {}, { mergeDefaults: true })
+  const chats = useLocalStorage<Record<string, AiMessage[]>>('interview-trainer/ai-chats-v1', {}, {
+    mergeDefaults: true,
+    // 配额写失败默认是静默的:这里显式暴露,便于用户感知「对话将不被保存」
+    onError: (e) => console.warn('[ai] 对话写入 localStorage 失败(可能已超出配额):', e),
+  })
 
   const isConfigured = computed(() => {
     const preset = AI_PRESETS.find((p) => p.id === config.value.providerId)
@@ -113,12 +153,44 @@ export const useAiStore = defineStore('ai', () => {
     chats.value = next
   }
 
-  /** 容量控制:最多保留 MAX_CHATS 道题的会话,按最后一条消息时间清最旧 */
-  function trimChats() {
-    const entries = Object.entries(chats.value)
-    if (entries.length <= MAX_CHATS) return
-    entries.sort((a, b) => (b[1].at(-1)?.ts ?? 0) - (a[1].at(-1)?.ts ?? 0))
-    chats.value = Object.fromEntries(entries.slice(0, MAX_CHATS))
+  /**
+   * 容量控制:此前只限制「会话条数」,不限制字节,单条长解读即可撑爆 5MB 配额。
+   * 现在同时约束:单会话字符数 → 会话数 → 全库总字符数(当前题目优先保留)。
+   */
+  function trimChats(keepId?: string) {
+    const sizeOf = (list: AiMessage[]) => list.reduce((n, m) => n + m.content.length, 0)
+    const next: Record<string, AiMessage[]> = { ...chats.value }
+
+    for (const [id, list] of Object.entries(next)) {
+      if (sizeOf(list) <= MAX_CHARS_PER_CHAT) continue
+      const kept: AiMessage[] = []
+      let sum = 0
+      for (let i = list.length - 1; i >= 0; i--) {
+        sum += list[i].content.length
+        // 至少保留最近两条(一问一答),避免把当前会话截成空壳
+        if (sum > MAX_CHARS_PER_CHAT && kept.length >= 2) break
+        kept.unshift(list[i])
+      }
+      next[id] = kept
+    }
+
+    const entries = Object.entries(next).sort((a, b) => (b[1].at(-1)?.ts ?? 0) - (a[1].at(-1)?.ts ?? 0))
+    const total = entries.reduce((n, [, list]) => n + sizeOf(list), 0)
+    if (entries.length <= MAX_CHATS && total <= MAX_TOTAL_CHARS) {
+      chats.value = next
+      return
+    }
+
+    const survivors: [string, AiMessage[]][] = []
+    let acc = 0
+    for (const [id, list] of entries) {
+      const size = sizeOf(list)
+      const pinned = id === keepId
+      if (!pinned && (survivors.length >= MAX_CHATS || acc + size > MAX_TOTAL_CHARS)) continue
+      survivors.push([id, list])
+      acc += size
+    }
+    chats.value = Object.fromEntries(survivors)
   }
 
   // ---------- 提示词 ----------
@@ -309,6 +381,8 @@ export const useAiStore = defineStore('ai', () => {
     controllers.set(q.id, controller)
     generatingIds.value = { ...generatingIds.value, [q.id]: true }
 
+    const commit = createThrottled((text: string) => updateLastAssistant(q.id, text), STREAM_FLUSH_MS)
+
     try {
       const history = messagesOf(q.id)
         .slice(0, -1)
@@ -319,16 +393,16 @@ export const useAiStore = defineStore('ai', () => {
         ...history,
       ]
       let acc = ''
-      await streamChat(
-        payload,
-        controller.signal,
-        (delta) => {
-          acc += delta
-          updateLastAssistant(q.id, acc)
-        },
-      )
+      // 逐 token 落盘会让每个 delta 都全量序列化整个 chats,改由节流统一提交
+      await streamChat(payload, controller.signal, (delta) => {
+        acc += delta
+        commit.call(acc)
+      })
+      commit.flush()
       if (!acc.trim()) updateLastAssistant(q.id, '(模型未返回内容,请检查模型名或稍后重试)')
     } catch (e) {
+      // 先提交已有增量,再追加错误提示:否则收尾 flush 会把提示覆盖掉
+      commit.flush()
       const prev = messagesOf(q.id).filter((m) => m.role === 'assistant').at(-1)?.content ?? ''
       const msg = e instanceof DOMException && e.name === 'AbortError' ? '已停止生成。' : humanizeFetchError(e)
       updateLastAssistant(q.id, `${prev}\n\n> ⚠️ ${msg}`.trim())
@@ -337,7 +411,7 @@ export const useAiStore = defineStore('ai', () => {
       const next = { ...generatingIds.value }
       delete next[q.id]
       generatingIds.value = next
-      trimChats()
+      trimChats(q.id)
     }
   }
 

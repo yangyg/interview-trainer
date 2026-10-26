@@ -4,7 +4,8 @@
  *   public/data/index.json          专题元数据 / 高频榜 / 文档目录
  *   public/data/{topicId}.json      每专题题目(含预渲染 HTML)
  *   public/data/docs/{id}.json      特殊文档(README/面经/岗位分析)整体渲染
- * 带题数自检:与实测基准(Java 889 / Go 180)比对,偏差时报错退出。
+ * 带题数自检:与逐文件实测基准(Java 889 / Go 357 / AI 136,均为去重前)比对,
+ * 偏差时报错退出。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -131,8 +132,10 @@ function parseJavaTopic(filePath, topicId, language = 'java') {
   let chapter = ''
   let cur = null
 
+  // 注意:chapter 必须取自 cur 自身。若用外层变量,遇到新章节标题时先更新 chapter 再 flush,
+  // 会把上一章最后一题错标成下一章(历史 bug)。flush 也应先于 chapter 赋值。
   const flush = () => {
-    if (cur) questions.push(buildJavaQuestion(cur, topicId, chapter, language))
+    if (cur) questions.push(buildJavaQuestion(cur, topicId, cur.chapter, language))
     cur = null
   }
 
@@ -145,13 +148,13 @@ function parseJavaTopic(filePath, topicId, language = 'java') {
     let m
     if ((m = /^###\s+Q(\d+)\.\s*(.*)$/.exec(t))) {
       flush()
-      cur = { no: `Q${m[1]}`, title: m[2].trim(), body: [], sourceMd: [] }
+      cur = { no: `Q${m[1]}`, title: m[2].trim(), body: [], sourceMd: [], chapter }
       continue
     }
     if (/^#{1,2}\s+/.test(t)) {
-      // 文档标题 / 简介区 / 章节标题:均更新 chapter,首个问题出现前的值不会被用到
-      chapter = t.replace(/^#{1,2}\s+/, '').trim()
+      // 文档标题 / 简介区 / 章节标题:先收尾当前题(用旧 chapter),再更新章节
       if (cur) flush()
+      chapter = t.replace(/^#{1,2}\s+/, '').trim()
       continue
     }
     if (!cur) continue
@@ -196,14 +199,18 @@ function buildJavaQuestion(raw, topicId, chapter, language = 'java') {
     if (n) difficulty = n
   }
 
-  // 答案 = 元信息行之后、来源行之前的全部内容
-  const answerLines = []
-  let metaDone = false
-  for (const l of bodyLines) {
-    if (!metaDone && /^\s*\*\*(频率|难度)\*\*/.test(l)) continue
-    metaDone = true
-    answerLines.push(l)
+  // 答案 = 跳过开头的空行与「**频率**/**难度**」元信息行,取剩余全部内容
+  let start = 0
+  for (;;) {
+    const l = bodyLines[start]
+    if (l === undefined) break
+    if (l.trim() === '' || /^\s*\*\*(频率|难度)\*\*/.test(l)) {
+      start++
+      continue
+    }
+    break
   }
+  const answerLines = bodyLines.slice(start)
   const answerMd = answerLines.join('\n').replace(/^\n+|\n+$/g, '')
   const answerText = mdToText(answerMd)
 
@@ -812,13 +819,13 @@ function main() {
   const goTop = parseGoTopList().map((r) => ({ ...r, questionId: match(r.title) }))
   const aiTop = parseAiTopList().map((r) => ({ ...r, questionId: match(r.title) }))
 
+  // 三语言计数必须与 IndexData.counts 的声明保持一致(此前漏写 ai,导致首页显示 0 题)
+  const counts = { java: 0, go: 0, ai: 0, total: allQuestions.length }
+  for (const q of allQuestions) counts[q.language] += 1
+
   const index = {
     generatedAt: new Date().toISOString(),
-    counts: {
-      java: allQuestions.filter((q) => q.language === 'java').length,
-      go: allQuestions.filter((q) => q.language === 'go').length,
-      total: allQuestions.length,
-    },
+    counts,
     topics,
     topLists: { java: javaTop, go: goTop, ai: aiTop },
     docs: docs.map(({ id, language, title, description }) => ({ id, language, title, description })),
@@ -849,7 +856,7 @@ function main() {
   }
   const linked = javaTop.filter((r) => r.questionId).length + goTop.filter((r) => r.questionId).length + aiTop.filter((r) => r.questionId).length
   console.log(`\n高频榜深链: ${linked}/${javaTop.length + goTop.length + aiTop.length}`)
-  console.log(`合计(去重后): Java ${index.counts.java} 题, Go ${index.counts.go} 题, 共 ${index.counts.total} 题`)
+  console.log(`合计(去重后): Java ${counts.java} 题, Go ${counts.go} 题, AI ${counts.ai} 题, 共 ${counts.total} 题`)
   if (failed) {
     console.error('\n自检未通过:题数与基准不符,请检查解析规则!')
     process.exit(1)

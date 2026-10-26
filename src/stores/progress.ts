@@ -11,7 +11,6 @@ function defaultData(): ProgressData {
     version: 1,
     cards: {},
     history: {},
-    settings: { theme: 'system' },
   }
 }
 
@@ -43,7 +42,8 @@ export const useProgressStore = defineStore('progress', () => {
     if (kind === 'quiz') {
       day.quiz += result === 'mastered' ? 1 : 0
       day.quizTotal += 1
-    } else {
+    } else if (!prev || todayKey(prev.lastTs) !== key) {
+      // 同一道题同一天只计一次:此前在浏览页反复点「会」会不断累加今日学习量
       day.studied += 1
     }
     data.value.history[key] = day
@@ -122,7 +122,6 @@ export const useProgressStore = defineStore('progress', () => {
         version: 1,
         cards: parsed.cards ?? {},
         history: parsed.history ?? {},
-        settings: { ...defaultData().settings, ...parsed.settings },
       }
       return { ok: true, message: `已导入 ${Object.keys(parsed.cards ?? {}).length} 条学习记录` }
     } catch {

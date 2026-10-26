@@ -432,3 +432,41 @@
   @apply border-l-primary/40 bg-muted/40 py-1;
 }
 
+
+/* ── 讲义行内语义标记（RichText 的 [[关键结论]] 与 !!易错!!）───────────────
+   只做两件事：给「该记住的」一个底色，给「容易答错的」一个警示色。
+   密度必须低（单区块 ≤6 处），否则会和正文争夺注意力，效果等同全屏加粗。 */
+:root {
+  --rich-hl-bg: oklch(0.94 0.045 300);
+  --rich-hl-fg: oklch(0.42 0.16 300);
+  --rich-hl-line: oklch(0.72 0.12 300 / 0.55);
+  --rich-danger: oklch(0.55 0.19 18);
+}
+.dark {
+  --rich-hl-bg: oklch(0.42 0.09 300 / 0.42);
+  --rich-hl-fg: oklch(0.88 0.09 300);
+  --rich-hl-line: oklch(0.68 0.14 300 / 0.45);
+  --rich-danger: oklch(0.75 0.15 18);
+}
+
+.rich-hl {
+  background: var(--rich-hl-bg);
+  color: var(--rich-hl-fg);
+  box-shadow: inset 0 -1px 0 var(--rich-hl-line);
+  border-radius: 0.2188rem;
+  padding: 0.03em 0.22em;
+  font-weight: 500;
+  /* 跨行时每行都有底色，而不是只在首尾 */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.rich-danger {
+  color: var(--rich-danger);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: color-mix(in oklab, var(--rich-danger) 55%, transparent);
+}

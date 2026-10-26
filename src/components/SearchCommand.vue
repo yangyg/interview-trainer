@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { BookOpenIcon, CalculatorIcon, HomeIcon, LayersIcon, NotebookIcon, SearchIcon, TimerIcon } from '@lucide/vue'
+import { SearchIcon } from '@lucide/vue'
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,6 +11,9 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
+import { MAIN_NAV } from '@/lib/nav'
+import { LANG_META } from '@/lib/langs'
+import { useCourseStore } from '@/stores/course'
 import { useDataStore } from '@/stores/data'
 import { useEventListener } from '@vueuse/core'
 
@@ -19,8 +22,18 @@ const query = ref('')
 
 const router = useRouter()
 const dataStore = useDataStore()
+const courseStore = useCourseStore()
 
 const results = computed(() => dataStore.searchQuestions(query.value, 20))
+
+/** ⌘K 面板里也能直接搜课程名,不必先记住它在哪个语言下 */
+const courseHits = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return courseStore.courses.slice(0, 6)
+  return courseStore.courses
+    .filter((c) => `${c.title} ${c.subtitle}`.toLowerCase().includes(q))
+    .slice(0, 6)
+})
 
 useEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -28,15 +41,6 @@ useEventListener('keydown', (e) => {
     open.value = !open.value
   }
 })
-
-const navActions = [
-  { icon: HomeIcon, label: '首页', to: { name: 'home' } },
-  { icon: BookOpenIcon, label: '题库浏览', to: { name: 'browse' } },
-  { icon: LayersIcon, label: '背题卡片', to: { name: 'flashcards' } },
-  { icon: TimerIcon, label: '模拟面试', to: { name: 'quiz' } },
-  { icon: CalculatorIcon, label: '学习统计', to: { name: 'stats' } },
-  { icon: NotebookIcon, label: '错题本', to: { name: 'wrongbook' } },
-]
 
 function goQuestion(questionId: string, topicId: string) {
   open.value = false
@@ -67,15 +71,28 @@ function simpleFilter(value: string, search: string): number {
     <CommandInput v-model="query" placeholder="搜索题目 / 关键词,如:HashMap、GMP、索引" />
     <CommandList class="max-h-[60vh]">
       <CommandGroup v-if="!query" heading="快捷导航">
-        <CommandItem v-for="item in navActions" :key="item.label" :value="item.label" @select="go(item.to)">
+        <CommandItem v-for="item in MAIN_NAV" :key="item.key" :value="item.label" @select="go(item.to)">
           <component :is="item.icon" />
           {{ item.label }}
         </CommandItem>
       </CommandGroup>
 
-      <template v-else>
-        <CommandEmpty v-if="!results.length">没有匹配的题目</CommandEmpty>
-        <CommandGroup v-else heading="题目">
+      <CommandGroup v-if="courseHits.length" :heading="query ? '相关课程' : '课程'">
+        <CommandItem
+          v-for="c in courseHits"
+          :key="c.id"
+          :value="`${c.title} ${c.subtitle}`"
+          @select="go({ name: 'course-detail', params: { courseId: c.id } })"
+        >
+          <span class="size-2 shrink-0 rounded-full" :class="LANG_META[c.language].bar" />
+          <span class="truncate">{{ c.title }}</span>
+          <span class="ml-auto shrink-0 text-xs text-muted-foreground">{{ c.lessonCount }} 课时</span>
+        </CommandItem>
+      </CommandGroup>
+
+      <template v-if="query">
+        <CommandEmpty v-if="!results.length && !courseHits.length">没有匹配的题目</CommandEmpty>
+        <CommandGroup v-else-if="results.length" heading="题目">
           <CommandItem
             v-for="q in results"
             :key="q.id"

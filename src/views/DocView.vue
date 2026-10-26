@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Skeleton } from '@/components/ui/skeleton'
+import { LANG_META } from '@/lib/langs'
 import { useDataStore } from '@/stores/data'
 import type { Language } from '@/lib/types'
 
@@ -41,7 +42,7 @@ watch(docId, (id) => load(id), { immediate: true })
   <div class="mx-auto max-w-4xl">
     <div class="mb-5">
       <p class="text-xs text-muted-foreground">
-        面经与资料 · {{ language === 'go' ? 'Golang' : 'Java' }}
+        面经与资料 · {{ LANG_META[language].label }}
       </p>
       <h1 class="mt-1 text-xl font-semibold tracking-tight">{{ meta?.title ?? '文档' }}</h1>
       <p v-if="meta?.description" class="mt-0.5 text-sm text-muted-foreground">{{ meta.description }}</p>

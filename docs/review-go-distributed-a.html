@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>教程评审 · 分布式基础与一致性</title>
+<style>
+  :root{
+    --bg:#0c0c0e; --panel:#141418; --panel2:#191920; --line:#26262e;
+    --fg:#ececf1; --fg2:#b9b9c6; --fg3:#83838f;
+    --violet:#a78bfa; --violet-dim:#7c5cd6;
+    --rose:#fb7185; --amber:#fbbf24; --emerald:#34d399; --sky:#38bdf8;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:15px; line-height:1.72; letter-spacing:.01em;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:920px; margin:0 auto; padding:56px 28px 96px}
+
+  /* ── 头部 ── */
+  .kicker{font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--violet); margin:0 0 14px}
+  h1{font-size:30px; line-height:1.28; font-weight:650; margin:0 0 10px; letter-spacing:-.01em}
+  .sub{color:var(--fg2); font-size:15px; margin:0 0 26px; max-width:44em}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin:0 0 40px}
+  .chip{
+    font-size:11.5px; font-family:var(--mono); color:var(--fg2);
+    border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:4px 10px;
+  }
+  .chip b{color:var(--fg); font-weight:600}
+
+  /* ── 分节 ── */
+  h2{font-size:19px; font-weight:620; margin:52px 0 6px; letter-spacing:-.005em; display:flex; align-items:baseline; gap:10px}
+  h2 .num{font-family:var(--mono); font-size:12px; color:var(--violet); font-weight:500; letter-spacing:.04em}
+  .lead{color:var(--fg2); font-size:14px; margin:0 0 22px; max-width:46em}
+
+  /* ── 评分条 ── */
+  .score{border:1px solid var(--line); border-radius:14px; background:var(--panel); overflow:hidden}
+  .row{display:grid; grid-template-columns:132px 1fr 52px; gap:16px; align-items:center; padding:13px 18px; border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .k{font-size:13.5px; font-weight:560; color:var(--fg)}
+  .bar{height:6px; border-radius:999px; background:#232330; overflow:hidden}
+  .bar i{display:block; height:100%; border-radius:999px}
+  .row .v{font-family:var(--mono); font-size:13px; text-align:right; color:var(--fg2)}
+
+  /* ── 证据卡 ── */
+  .ev{border:1px solid var(--line); border-radius:14px; background:var(--panel); padding:20px 22px; margin:0 0 16px}
+  .ev-h{display:flex; align-items:center; gap:9px; margin:0 0 12px}
+  .tag{font-size:10.5px; font-family:var(--mono); font-weight:600; letter-spacing:.06em; padding:2px 7px; border-radius:5px}
+  .tag.bad{color:var(--rose); background:rgba(251,113,133,.11); border:1px solid rgba(251,113,133,.28)}
+  .tag.warn{color:var(--amber); background:rgba(251,191,36,.1); border:1px solid rgba(251,191,36,.26)}
+  .tag.ok{color:var(--emerald); background:rgba(52,211,153,.1); border:1px solid rgba(52,211,153,.26)}
+  .ev-t{font-size:14.5px; font-weight:600; margin:0}
+  .ev p{font-size:14px; color:var(--fg2); margin:0 0 10px}
+  .ev p:last-child{margin-bottom:0}
+  .ev strong{color:var(--fg); font-weight:600}
+  code{font-family:var(--mono); font-size:.86em; background:#20202a; border:1px solid #2b2b36; border-radius:4px; padding:1px 4px; color:#dcdce8}
+  .quote{
+    font-size:13.5px; color:var(--fg2); background:var(--panel2); border-left:3px solid var(--violet-dim);
+    border-radius:0 8px 8px 0; padding:11px 15px; margin:12px 0;
+  }
+  .quote .b{color:var(--fg); font-weight:600}
+
+  /* ── 加粗通胀对比 ── */
+  .cmp{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:16px 0 4px}
+  @media(max-width:720px){.cmp{grid-template-columns:1fr}}
+  .cmp > div{border:1px solid var(--line); border-radius:11px; padding:15px 16px; background:var(--panel2)}
+  .cmp h4{margin:0 0 9px; font-size:11px; letter-spacing:.1em; text-transform:uppercase; font-family:var(--mono); font-weight:600}
+  .cmp .now h4{color:var(--rose)} .cmp .new h4{color:var(--emerald)}
+  .cmp p{margin:0; font-size:13.5px; line-height:1.75; color:var(--fg2)}
+  .cmp .now p b, .cmp .now p strong{color:var(--fg); font-weight:640}
+  .cmp .new p strong{color:var(--fg); font-weight:700}
+  .hl{background:rgba(167,139,250,.17); border-radius:3px; padding:0 3px; color:#d9ccff; box-shadow:inset 0 -1px 0 rgba(167,139,250,.45)}
+  .danger{color:var(--rose); font-weight:600}
+
+  /* ── 表 ── */
+  table{width:100%; border-collapse:collapse; font-size:13px; margin:14px 0 6px}
+  th{text-align:left; font-size:11px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--fg3); padding:8px 10px; border-bottom:1px solid var(--line)}
+  td{padding:10px; border-bottom:1px solid #1e1e26; color:var(--fg2); vertical-align:top}
+  td:first-child{color:var(--fg); font-weight:540}
+  tr:last-child td{border-bottom:0}
+
+  /* ── 优先级 ── */
+  .p0,.p1,.p2{border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:0 0 12px; background:var(--panel)}
+  .p0{border-left:3px solid var(--rose)}
+  .p1{border-left:3px solid var(--amber)}
+  .p2{border-left:3px solid var(--sky)}
+  .p-h{display:flex; align-items:center; gap:9px; margin:0 0 8px}
+  .p-lv{font-family:var(--mono); font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:5px}
+  .p0 .p-lv{color:var(--rose); background:rgba(251,113,133,.12)}
+  .p1 .p-lv{color:var(--amber); background:rgba(251,191,36,.12)}
+  .p2 .p-lv{color:var(--sky); background:rgba(56,189,248,.12)}
+  .p-h h4{margin:0; font-size:14px; font-weight:600}
+  .p0 ul,.p1 ul,.p2 ul{margin:0; padding-left:18px}
+  .p0 li,.p1 li,.p2 li{font-size:13.5px; color:var(--fg2); margin:5px 0}
+  .p0 li::marker,.p1 li::marker,.p2 li::marker{color:var(--fg3)}
+
+  /* ── 改写示范 ── */
+  .demo{border:1px solid rgba(52,211,153,.24); border-radius:14px; background:rgba(52,211,153,.035); padding:22px 24px; margin:18px 0 0}
+  .demo h4{margin:0 0 12px; font-size:11px; letter-spacing:.11em; text-transform:uppercase; color:var(--emerald); font-family:var(--mono); font-weight:600}
+  .demo p{font-size:14.5px; line-height:1.82; color:var(--fg2); margin:0 0 12px}
+  .demo p:last-child{margin-bottom:0}
+  .demo b{color:var(--fg); font-weight:600}
+  .step{display:inline-block; font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--emerald); border:1px solid rgba(52,211,153,.3); border-radius:4px; padding:0 5px; margin-right:7px; vertical-align:1px}
+  .aside{font-size:12px; color:var(--fg3); border-top:1px solid var(--line); margin-top:14px; padding-top:11px; line-height:1.65}
+  footer{margin-top:56px; padding-top:20px; border-top:1px solid var(--line); color:var(--fg3); font-size:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="kicker">教程抽样评审 · 第 1 期</p>
+  <h1>《分布式基础与一致性》逐条体检</h1>
+  <p class="sub">
+    按「通俗易懂 / 由浅入深 / 深入原理 / 发散联想 / 表现手段」五条标准逐项核对。
+    结论先说：<b style="color:var(--fg)">内容深度达标，表达手段严重欠账</b>——这一课把 66% 的文字加粗了，等于一句话都没强调。
+  </p>
+  <div class="meta">
+    <span class="chip">样本 <b>go-distributed-a</b></span>
+    <span class="chip">20 区块 · 67 分钟</span>
+    <span class="chip">正文 <b>15952</b> 字</span>
+    <span class="chip">关联题 12 · 正文拆解 <b>4</b></span>
+    <span class="chip">类比 <b style="color:var(--rose)">0</b></span>
+    <span class="chip">动画 / 交互 <b style="color:var(--rose)">0</b></span>
+  </div>
+
+  <!-- 1 -->
+  <h2><span class="num">01</span>五维评分</h2>
+  <p class="lead">评分只看「读者能不能真的学会」，不看知识点覆盖了多少。同一课在全站横向位置：深度前 10%，表达后 30%。</p>
+  <div class="score">
+    <div class="row">
+      <div class="k">通俗易懂</div>
+      <div class="bar"><i style="width:68%;background:linear-gradient(90deg,var(--amber),#f59e0b)"></i></div>
+      <div class="v">6.8</div>
+    </div>
+    <div class="row">
+      <div class="k">由浅入深</div>
+      <div class="bar"><i style="width:84%;background:linear-gradient(90deg,var(--violet-dim),var(--violet))"></i></div>
+      <div class="v">8.4</div>
+    </div>
+    <div class="row">
+      <div class="k">深入原理</div>
+      <div class="bar"><i style="width:92%;background:linear-gradient(90deg,#0d9488,var(--emerald))"></i></div>
+      <div class="v">9.2</div>
+    </div>
+    <div class="row">
+      <div class="k">发散联想</div>
+      <div class="bar"><i style="width:78%;background:linear-gradient(90deg,#0284c7,var(--sky))"></i></div>
+      <div class="v">7.8</div>
+    </div>
+    <div class="row">
+      <div class="k">表现手段</div>
+      <div class="bar"><i style="width:38%;background:linear-gradient(90deg,#9f1239,var(--rose))"></i></div>
+      <div class="v">3.8</div>
+    </div>
+  </div>
+
+  <!-- 2 -->
+  <h2><span class="num">02</span>最致命的单点：加粗通胀</h2>
+  <p class="lead">这是全篇最大的可读性杀手，也是唯一一个「改一处、通篇受益」的问题。</p>
+
+  <div class="ev">
+    <div class="ev-h"><span class="tag bad">P0</span><p class="ev-t">66.4% 的文字是加粗的，平均每 32 字一次</p></div>
+    <p>夸张吗？不夸张。全课 15952 字，落在 <code>**…**</code> 里的是 <strong>10599 字</strong>，共 <strong>497 处</strong>加粗标记。渲染出来的效果是：满屏黑体，读者的眼睛找不到落点，只能从头读到尾——<strong>这正是「读不下去」的生理原因</strong>。</p>
+    <div class="quote">
+      <span class="b">原文（第 0 区块）</span><br>
+      <span class="b">C(Consistency,一致性):这里的「一致性」特指</span><span class="b">线性一致性</span><span class="b">(linearizability)——所有节点在任意时刻看到的都是同一份、最新的数据…</span>
+      <span class="b">它既不是数据库的约束一致性,也不是「约束不被破坏」,更不是「副本最终会一样」——</span><span class="b">那叫最终一致,和 CAP 的 C 恰好相反</span><span class="b">。</span>
+    </div>
+    <p>整段只有「那叫最终一致，和 CAP 的 C 恰好相反」值得强调，其余全是底噪。当强调密度超过 15%，强调就变成了<strong>排版噪音</strong>。</p>
+
+    <div class="cmp">
+      <div class="now">
+        <h4>现在 · 66% 加粗</h4>
+        <p><b>C(Consistency,一致性):这里的「一致性」特指</b><b>线性一致性</b><b>(linearizability)——所有节点在任意时刻看到的都是同一份、最新的数据。</b><b>它既不是数据库的约束一致性,也不是「约束不被破坏」。</b></p>
+      </div>
+      <div class="new">
+        <h4>目标 · 10% 加粗 + 一层语义色</h4>
+        <p>CAP 里的 C 专指 <strong>线性一致性</strong>（linearizability）：读到的必须是最新写入的值。它<span class="danger">不是</span>数据库的约束一致性，也不是「副本最终会一样」——后者叫<span class="hl">最终一致</span>，和 CAP 的 C 恰好相反。</p>
+      </div>
+    </div>
+    <p style="margin-top:14px">右边这版只做三件事：<b>只加粗术语</b>（线性一致性）、<b>用紫色底色标出「这一课的新概念」</b>（最终一致）、<b>用红色标出「常被答错的点」</b>（不是）。密度从 66% 降到 10%，信息量反而变多了——因为读者终于知道该看哪儿。</p>
+  </div>
+
+  <!-- 3 -->
+  <h2><span class="num">03</span>五条标准逐项核对</h2>
+
+  <!-- 通俗易懂 -->
+  <div class="ev">
+    <div class="ev-h"><span class="tag warn">6.8</span><p class="ev-t">通俗易懂：概念精度很高，但门槛一上来就在天花板</p></div>
+    <p><strong>做得好的：</strong>开篇第一句就拆穿误读——「绝大多数错误回答都从背错定义开始」。这是很好的判断，直接把读者从「背书模式」拽到「理解模式」。限流那节用「一起变慢比拒绝一部分更糟」解释雪崩，也很到位。</p>
+    <p><strong>问题一：没有入口场景。</strong>全文第一个词就是 C/A/P 三个字母。读者没有任何「我遇到过这个问题」的锚点，只能从抽象定义开始爬。而这一课最适合的开场其实是一个具体场面：<em>双十一零点，北京机房和上海机房的网络断了 3 分钟，用户下单会怎样？</em>——一句话就把分区、可用性、一致性全带出来了。</p>
+    <p><strong>问题二：整课 0 个类比。</strong>20 个区块里 analogy 计数为 <b>0</b>。全站 147 课有 55 课是这样，这一课只是其中最典型的一篇。而分布式恰恰是最需要生活类比的领域——「分布式锁」可以类比成酒店房卡，「最终一致」可以类比成两家分行事后对账，「幂等」可以类比成存支票时柜员核对流水号。现在这些位置全部由抽象描述硬填。</p>
+  </div>
+
+  <!-- 由浅入深 -->
+  <div class="ev">
+    <div class="ev-h"><span class="tag ok">8.4</span><p class="ev-t">由浅入深：坡度对，但缺少「先跑通再打补丁」的两段式</p></div>
+    <p><strong>做得好的：</strong>区块顺序是一条清晰的认知链——<code>定义 → 纠正误读 → 为什么只能选 AP → 靠什么收敛 → 事务谱系 → 幂等 → 锁 → 哈希 → 限流 → 熔断 → 超时重试</code>。从「一个词」推到「一套体系」，没有跳跃。</p>
+    <p><strong>可以更好的：</strong>现在是「一次讲到位」，缺了两个特别好用的手法。</p>
+    <p>① <b>版本演进式</b>：分布式锁那节其实有这个骨架（SETNX+EXPIRE → 一条命令 → value 唯一 → Lua 比对 → fencing token），但写成了平铺的五段，没有把「为什么每一版都不够」做成显式的闯关感。加一句「<em>到这里，90% 的人以为完事了——但下面这个坑，连 Redis 官方文档都不提</em>」，节奏立刻不一样。</p>
+    <p>② <b>反事实提问</b>：一致性哈希那节写了「3 台扩到 4 台，75% 迁移」，很好。但没有紧接着问「<em>那如果我不扩容，只加一台只读副本呢？</em>」——一个反问就能把「一致性哈希解决的是分配，不是扩容」这个边界钉死。</p>
+  </div>
+
+  <!-- 深入原理 -->
+  <div class="ev">
+    <div class="ev-h"><span class="tag ok">9.2</span><p class="ev-t">深入原理：这是全课最强的一项，已经到机制层</p></div>
+    <p>举三处真正「往下挖了一层」的地方，这些是拉开分档的关键，值得保留并复制到其他课：</p>
+    <p>① <b>Redlock 的争议</b>——不回避「这个方案有争议，Kleppmann 那篇质疑值得读」，并给出工程结论：要锁的正确性就用 etcd，只是防重复劳动 Redis 够用。这种「有争议就说有争议」的态度，比给一个干净答案更值钱。</p>
+    <p>② <b>P2C 为什么存在</b>——「纯随机会出现羊群效应：所有请求涌向此刻最空的机器，把它立刻打满」。这句话把一个算法存在的理由讲透了，而不是罗列「轮询/加权/最少连接/哈希/P2C」五个名词。</p>
+    <p>③ <b>漏桶与令牌桶的唯一区别</b>——「桶里能不能攒令牌」。一句话说清两个容易混的算法，这是高手的写法。</p>
+    <p style="color:var(--fg3);font-size:13px">唯一的遗憾：深是深在「文字」里，没有深在「图」里。4 个图示全是结果快照（矩阵表、flow 链条、时序、状态机），没有一个展示<b>内部结构</b>——比如 Redis 主从复制丢锁那一刻，主库内存里的 key、从库的 key、客户端的持锁认知，这三者的错位没有一张图能看见。</p>
+  </div>
+
+  <!-- 发散联想 -->
+  <div class="ev">
+    <div class="ev-h"><span class="tag ok">7.8</span><p class="ev-t">发散联想：边界说得很好，横向串联还不够</p></div>
+    <p><strong>做得好的：</strong>一致性哈希那节主动划边界——「它只解决分配，不解决热点」，并且补了 Redis Cluster 用 16384 槽而不是一致性哈希。这是典型的「一个好答案后面还有一句」，面试里就是拉开差距的那句。</p>
+    <p><strong>不足：</strong>联想基本是「同层横向」（CAP → 各种中间件选型），缺少三种更高级的联想：</p>
+    <p>① <b>跨课纵向</b>：这一课讲了 Redis 分布式锁，但没回头指向前置的「Redis 单线程模型」——锁的「原子性为什么必须靠一条命令」根因在单线程，两课之间应该有一根线。</p>
+    <p>② <b>反向联想</b>：「如果没有分布式锁，这个业务会怎么坏？」——现在只从「怎么加锁」正向讲，没有让读者体验「不加会死得多惨」。</p>
+    <p>③ <b>延伸到真实系统</b>：熔断三态机讲得很完整，但没有一处提「Envoy / Sentinel / gobreaker 分别怎么实现这三态、参数叫什么」。面试官追问「你用过什么」，答不出来就白讲了。</p>
+  </div>
+
+  <!-- 表现手段 -->
+  <div class="ev">
+    <div class="ev-h"><span class="tag bad">3.8</span><p class="ev-t">表现手段：只有「字」和「表」，没有颜色语义、没有动画、没有交互</p></div>
+    <p>这是得分最低的一项，也是离用户要求最远的一项。逐项对照：</p>
+    <table>
+      <thead><tr><th>手段</th><th>当前实现</th><th>缺什么</th></tr></thead>
+      <tbody>
+        <tr><td>颜色区分</td><td>只有灰阶层级 + 主题紫，语义色仅出现在 <code>split</code> 区块</td><td>没有「关键结论 / 易错 / 坑 / 结论」四类语义色</td></tr>
+        <tr><td>字号区分</td><td>标题 15px、正文 15px、注 12px</td><td>正文内部零变化，没有「一句话结论」的大字</td></tr>
+        <tr><td>类比比喻</td><td><b style="color:var(--rose)">0 处</b></td><td>整课没有生活锚点</td></tr>
+        <tr><td>图示</td><td>4 个：matrix / flow / sequence / state</td><td>全是结果快照，无内部结构图、无对比动画</td></tr>
+        <tr><td>动画</td><td><b style="color:var(--rose)">0</b>（仅页面切换淡入）</td><td>锁过期时序、熔断三态切换、扩容迁移——这些都是天然该动的</td></tr>
+        <tr><td>交互组件</td><td><b style="color:var(--rose)">0</b>（除手写块折叠）</td><td>无「点一下切换状态」「拖一拖看迁移」「算一算 QPS」</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:12px">最该做成交互的是<b>限流四种算法</b>——那是一段文字讲不清、但一个可拖动的桶一眼就懂的东西。其次是<b>锁过期时序</b>，天然适合做成「点播放，看 A 和 B 怎么撞车」。</p>
+  </div>
+
+  <!-- 4 -->
+  <h2><span class="num">04</span>三个根因</h2>
+  <p class="lead">表面是「写得不生动」，往下追三层，其实是三个结构性问题。</p>
+
+  <div class="ev">
+    <div class="ev-h"><span class="tag warn">根因一</span><p class="ev-t">写入流程里没有「类比」和「为什么」这两个必填位</p></div>
+    <p>校验脚本要求 <code>concept</code> + <code>principle</code> + <code>question</code> 必填，<code>analogy</code> 只是「三选一」里的可选项。于是写作时最省力的路径就是——能不加类比就不加。结果：全站 1362 个区块里 <code>analogy</code> 只有 71 个（5%），<code>why</code> 只有 <b style="color:var(--rose)">10 个（0.7%）</b>。用户要的「是什么、为什么、更深的原理」，中间的「为什么」几乎是空的。</p>
+  </div>
+
+  <div class="ev">
+    <div class="ev-h"><span class="tag warn">根因二</span><p class="ev-t">强调手段只有一种，而它被用到了 66%</p></div>
+    <p>行内标记只支持 <code>**粗体**</code> 和 <code>`代码`</code>。当作者想强调时，唯一的动作就是加粗——497 次之后，这个动作失去了意义。缺的不是「更努力地写」，而是<strong>多两种标记</strong>：一种标「关键结论」，一种标「容易答错」。</p>
+  </div>
+
+  <div class="ev">
+    <div class="ev-h"><span class="tag warn">根因三</span><p class="ev-t">图示是「静态快照」，不是「过程」</p></div>
+    <p>9 种图示类型全部是一次性渲染的静态结构。分布式、并发、GC 这类主题的本质是<b>状态随时间变化</b>，而静态图恰好把这个维度丢掉了。锁过期那个时序图已经画到了 6 条消息，但读者看不到「时间往前走」——这恰恰是理解「为什么会误删」的关键。</p>
+  </div>
+
+  <!-- 5 -->
+  <h2><span class="num">05</span>改造清单</h2>
+  <p class="lead">按「投入产出比」排序。P0 只改两层代码 + 一个脚本，就能覆盖全部 147 课。</p>
+
+  <div class="p0">
+    <div class="p-h"><span class="p-lv">P0</span><h4>降加粗 + 加两种语义标记（渲染层 + 脚本批量降密）</h4></div>
+    <ul>
+      <li><code>RichText.vue</code> 增加 <code>==关键结论==</code>（紫色底衬）与 <code>!!易错!!</code>（红色文字）两种标记，与现有 <code>**</code> / <code>`</code> 并列</li>
+      <li>写一个密度检查：单区块加粗超过 15% 就报错，纳入 <code>build-courses.mjs</code> 的 fail-fast</li>
+      <li>用脚本对全站 147 课做一次「降密」：每段只保留第一处或最后一处加粗，其余转为普通文本</li>
+    </ul>
+  </div>
+
+  <div class="p1">
+    <div class="p-h"><span class="p-lv">P1</span><h4>把 analogy 与 why 提为必填，缺口补在「概念」与「原理」之间</h4></div>
+    <ul>
+      <li>校验规则：每课至少 1 个 <code>analogy</code>，<code>analogy</code> 必须带 <code>text</code> + <code>mapping</code> + <code>limit</code>（边界比类比本身更重要）</li>
+      <li>先补 55 个「0 类比」课时，每课一段 150 字生活类比 + 3~4 条映射</li>
+      <li><code>why</code> 区块从 10 个提升到「每个大概念一个」，重点补「为什么不是另一种做法」</li>
+    </ul>
+  </div>
+
+  <div class="p2">
+    <div class="p-h"><span class="p-lv">P2</span><h4>给「过程类」图示加播放，给「计算类」加交互</h4></div>
+    <ul>
+      <li><code>sequence</code> 增加「逐条播放」按钮：点一次走一条消息，锁过期那种时序立刻可懂</li>
+      <li><code>state</code> 增加「点状态看转移条件」的悬停交互，熔断三态不用读文字</li>
+      <li>新增一个 <code>sim</code> 区块：令牌桶可拖动速率/容量，实时看「通过 / 拒绝」的条形变化</li>
+    </ul>
+  </div>
+
+  <!-- 6 -->
+  <h2><span class="num">06</span>改写示范：把 CAP 那段变成能读懂的样子</h2>
+  <p class="lead">同样的知识点，换一套写法。注意它做了什么：先用生活场景兜住，再给术语，最后落到「面试怎么答」。</p>
+
+  <div class="demo">
+    <h4>重写 · CAP 的三个字母</h4>
+    <p><span class="step">钩子</span>一家银行在北京、上海各有一个分行，各自记账，中间靠一条电话线对账。某天电话线被施工挖断了。</p>
+    <p><span class="step">冲突</span>这时上海来了一位客户要取 10 万。柜员有两个选择：一是告诉他「系统故障，今天办不了」；二是照本地账本先给钱，等电话通了再和北京对账。前者让客户当场炸毛，后者可能出现「同一笔钱被取两次」。</p>
+    <p><span class="step">术语</span>这就是 CAP：<strong>电话线断掉</strong>叫 <b>P</b>（分区容忍）；<strong>「今天办不了」</strong>是选了 <b>C</b>（一致性）——宁可拒绝，也不让两边账本不一样；<strong>「先给钱再对账」</strong>是选了 <b>A</b>（可用性）——宁可短暂不一致，也要能办业务。</p>
+    <p><span class="step">纠错</span>所以「CAP 三选二」是<span class="danger">错的</span>。你没法要求「电话线别断」——它由施工队和天气决定。P 不是选项，是<span class="hl">前提</span>。真正要你选的只有一句：<strong>断线那一刻，你要一致还是要可用？</strong></p>
+    <p><span class="step">加深</span>注意 C 的精确含义：它要求「任何时刻读到的都是最新值」，这叫<b>线性一致性</b>。它和「最终一致」恰好相反——后者正是「先给钱，今晚对账」的那条路。</p>
+    <div class="aside">
+      这一版把原文 640 字压到 300 字，但多了四样东西：一个能记住的场面、一组一一对应的术语映射、一句纠错、一句可直接背下来的句式。加粗密度从 66% 降到 8%。
+    </div>
+  </div>
+
+  <footer>
+    <span>评审对象：go-engineering-system / go-distributed-a</span>
+    <span>量化口径：加粗占比 = 加粗内字符数 ÷ 去标记后总字符数</span>
+  </footer>
+
+</div>
+</body>
+</html>

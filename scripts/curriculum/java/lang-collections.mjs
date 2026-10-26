@@ -1,0 +1,6947 @@
+/**
+ * Java · 语言与集合框架
+ * java-01(97) + java-02(61) = 158 题 / 4 阶段 / 17 课时
+ */
+export default {
+  id: 'java-lang-collections',
+  language: 'java',
+  title: 'Java 语言与集合框架',
+  subtitle: '从语法地基到集合源码，把 Java 的「语言契约」一次讲透',
+  level: 'intro',
+  order: 1,
+  prerequisites: [],
+  outcomes: [
+    '能把源码到字节码再到解释执行的完整链路讲清楚，解释 JVM 各层职责',
+    '说清基本类型、包装类、String 池在内存中到底怎么存，避开装箱与相等的坑',
+    '用 equals / hashCode 契约解释「为什么重写一个就要重写另一个」',
+    '从结构、扩容、哈希冲突讲到 HashMap 与 ConcurrentHashMap 的线程安全边界',
+    '在集合选型题里给出有依据的结论，而不是背「ArrayList 查快增删慢」',
+  ],
+  stages: [
+    {
+      id: 'foundation',
+      title: 'A · 类型与运行机制地基',
+      goal: '建立「Java 代码如何运行」与「值到底存在哪」两张基础地图',
+      summary:
+        '先不碰集合与并发，只回答两个最底层的问题：一段 Java 代码从源文件到执行经过哪些环节；一个变量在内存里究竟是什么形态。这两张地图立住之后，后面所有「为什么」都能挂靠上来。',
+      lessons: [
+        {
+          id: 'lang-jvm',
+          title: 'JVM、字节码与编译执行',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['JVM 基础概念'] }],
+          content: {
+            intro:
+              '这一节要解决的是「Java 代码到底怎么跑起来」。面试官问 JVM 很少是要你默写内存图，而是看你能否把源码、字节码、类加载、解释与即时编译串成一条完整链路，并说清每一环坏掉会表现成什么现象。把这条链路先跑通，后面讲运行时数据区、GC、类加载时你会有明确的挂靠点，而不是背一堆孤立名词。本节按执行顺序走一遍，每个环节只留一个能在面试里复述的结论。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '先把四个名字拆开：规范、实现、运行环境、开发包',
+                body: [
+                  '「JVM」这个词在面试里最容易糊成一团，因为它同时指三样东西：一份文档、一个进程、一个抽象层。**JVM 规范**（The Java Virtual Machine Specification）只定义两件事——class 文件长什么样、指令集怎么执行；它没说这个虚拟机用什么语言写、跑在哪个系统上。HotSpot 是这份规范最主流的实现（OpenJDK 里那个），GraalVM、OpenJ9 是另外两份实现，它们执行的是同一份 class 文件。',
+                  '所以「JVM 是虚拟的」不是说它不存在，而是说它把真实机器的差异挡在下面：字节码里没有寄存器编号、没有页表、没有系统调用号，只有 `iload`、`invokevirtual` 这类面向对象的指令。真实机器怎么完成这些动作，由每个平台的实现自己翻译。',
+                ],
+                term: {
+                  name: '字节码(Bytecode)',
+                  def: 'javac 把 .java 编译出的 .class 文件里的指令序列。它既不是源码也不是机器码：基于操作数栈的指令集，与平台无关，执行时由 JVM 翻译成目标平台的机器指令。',
+                },
+                points: [
+                  '**规范**：定义 class 文件格式与指令语义，任何人都能照着实现一份 JVM',
+                  '**实现**：HotSpot（OpenJDK 默认）、GraalVM、OpenJ9，各自带解释器与 JIT',
+                  '**进程**：`java Hello` 启动的是一个操作系统进程，内部跑着一个 JVM 实例',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'JDK / JRE / JVM 的真实包含关系',
+                diagram: {
+                  type: 'layers',
+                  items: [
+                    { label: 'JDK', note: 'javac、javadoc、jar、jlink、jcmd、jstack、jmap', tone: 'primary' },
+                    { label: 'JRE', note: 'Java 核心类库（模块化后的 java.base 等）+ java 启动器' },
+                    { label: 'JVM', note: '类加载器 · 运行时数据区 · 执行引擎 · 垃圾回收器' },
+                    { label: '操作系统 / 硬件', note: 'JVM 通过 JNI 与本地系统交互' },
+                  ],
+                  caption:
+                    '包含关系是 JDK ⊃ JRE ⊃ JVM。最上面那层工具不是运行必需的，但线上排查问题几乎全靠它。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: '一次 java Hello 背后真实发生的六个阶段',
+                body: [
+                  '把这条链路记住，比背十张内存图有用：面试官问「类加载做什么」「为什么第一次请求慢」，答案全都挂在这条链上。',
+                ],
+                steps: [
+                  {
+                    title: '编译：javac 把 .java 变成 .class',
+                    detail:
+                      '经过词法分析、语法分析、语义分析、字节码生成四步。产物是**与平台无关的字节码**，不是机器码。这一步在构建机上完成，线上运行环境通常不带 javac。',
+                  },
+                  {
+                    title: '启动：java 命令创建 JVM 进程',
+                    detail:
+                      '启动器按 `JAVA_HOME` 找到 libjvm 动态库，加载它、创建 JVM 实例，再把 `Hello.class` 的位置告诉它。此刻你的 main 还没开始执行。',
+                  },
+                  {
+                    title: '类加载：加载 → 链接 → 初始化',
+                    detail:
+                      '链接又分验证、准备、解析三步。**准备阶段**给静态变量分配内存并赋零值（是 0 而不是代码里写的 10），**初始化阶段**才执行 `<clinit>` 把 `static int x = 10` 真正赋成 10。「静态变量为什么是 0」这个经典疑问就出在这里。',
+                  },
+                  {
+                    title: '首次执行：解释器逐条翻译字节码',
+                    detail:
+                      '解释器不做优化，看到一条 `iload_1` 就翻译一小段机器码执行。所以**启动快、峰值慢**——这就是「Java 冷启动慢」的根源，不是 JVM 不行，是它这时候还没开始干活。',
+                  },
+                  {
+                    title: '热点探测：计数器发现某个方法被反复调用',
+                    detail:
+                      'HotSpot 用方法调用计数器加回边计数器采样。超过阈值（`-XX:CompileThreshold`，C1 量级在千次）就向编译线程提交编译请求，这个方法是「热点方法」。',
+                  },
+                  {
+                    title: 'JIT 编译：把热点字节码编译成本地机器码',
+                    detail:
+                      'C1 编得快、优化浅，负责快速接管；C2 编得慢、优化激进（内联、逃逸分析、循环展开），负责榨峰值。编译完成后这个方法直接跳机器码，不再进解释器。',
+                  },
+                ],
+                takeaway:
+                  '一句话串完：**javac 产出与平台无关的字节码；JVM 先解释执行保启动，再把热点方法 JIT 成本地机器码保峰值。**',
+              },
+              {
+                kind: 'diagram',
+                title: '`java Hello` 的时间线：谁在什么时候动',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['shell', 'launcher', 'JVM', 'ClassLoader', '执行引擎'],
+                  messages: [
+                    { from: 'shell', to: 'launcher', text: '输入 java Hello，启动器按 JAVA_HOME 找到 libjvm' },
+                    { from: 'launcher', to: 'JVM', text: '加载动态库、创建 JVM 实例。此刻 main 一行都还没跑' },
+                    { from: 'JVM', to: 'ClassLoader', text: '请求加载 Hello 类：加载 → 验证 → 准备 → 解析' },
+                    { from: 'ClassLoader', to: 'JVM', text: '返回 Class 对象。注意：静态变量此刻是零值', reply: true },
+                    { from: 'JVM', to: '执行引擎', text: '执行 <clinit>，静态变量才拿到源码里写的值' },
+                    { from: 'JVM', to: '执行引擎', text: '调用 main，解释器逐条翻译字节码' },
+                    { from: '执行引擎', to: 'JVM', text: '热点方法交给 JIT，之后直接跳机器码', reply: true },
+                  ],
+                  caption:
+                    '第 4 步与第 5 步的先后关系，就是「静态变量为什么先是 0」的时间顺序答案。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '`static int x = 10` 在两个阶段的内存里分别是什么',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '① 准备阶段',
+                      note: '链接的第 2 步：只分配内存并赋零值',
+                      tone: 'warn',
+                      slots: [
+                        { label: 'x', value: '0  ← 零值', tone: 'warn' },
+                        { label: 'flag', value: 'false' },
+                        { label: 'ref', value: 'null' },
+                      ],
+                    },
+                    {
+                      name: '② 初始化阶段',
+                      note: '执行 <clinit>：才跑 static 赋值语句',
+                      tone: 'primary',
+                      slots: [
+                        { label: 'x', value: '10  ← 源码写的值', tone: 'primary' },
+                        { label: 'flag', value: 'true' },
+                        { label: 'ref', value: 'new Obj()' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '两列是同一个变量在两个时刻的状态，不是两块内存。补充一句可加分：`static final int` 若编译期可确定，会被记进常量池的 ConstantValue 属性，准备阶段就已是真值，不走这条零值路径。',
+                },
+              },
+              {
+                kind: 'analogy',
+                title: '字节码像 PDF，JVM 像阅读器',
+                text: '用 Word 写份文档发给别人，对方缺字体、版本不同，排版就散了——这相当于把 .java 直接给出去。导出成 PDF，版面被固定成一份与软件无关的描述，谁的电脑打开都一样——这就是字节码。真正干活的是阅读器：Windows 版、Mac 版、手机版各写一份，但读的是同一份 PDF。JVM 就是那个阅读器，只是它比阅读器多做一件事：读着读着会把常用页面重排成更快的版本，那就是 JIT。',
+                mapping: [
+                  { real: 'Word 源文件', tech: '.java 源码' },
+                  { real: '导出 PDF', tech: 'javac 编译成 .class' },
+                  { real: '各平台 PDF 阅读器', tech: '各平台的 JVM 实现（HotSpot x86 / ARM）' },
+                  { real: '阅读器按习惯重排加速', tech: 'JIT 把热点方法编译成本地机器码' },
+                ],
+                limit:
+                  'PDF 是死的，谁打开都一样快；字节码是活的，同一份 .class 在纯解释、C2、AOT 下的性能能差好几倍。所以跨平台跨的是**语义**，不包括性能。',
+              },
+              {
+                kind: 'question',
+                title: '字节码与「编译解释并存」',
+                questionId: 'java-01-Q3',
+                intent:
+                  '这题在筛你有没有把「编译」当成一个笼统动作。想听的是：编译到哪一层、解释的是什么、JIT 又是什么，三者为何不冲突。',
+                points: [
+                  '字节码是 javac 产出的**中间表示**：操作数栈式指令、与平台无关、存在 .class 里',
+                  '「编译」指 javac 把源码编译成字节码；「解释」指 JVM 逐条把字节码翻成机器指令执行',
+                  'JIT 在**运行时**再把热点字节码编译成本地机器码，于是「解释 + 编译」两套并行',
+                  '并存的理由：解释器省掉编译等待、保启动；JIT 靠运行时 profile 做激进优化、保峰值',
+                ],
+                depth:
+                  '补一句能拉开档次：JIT 看得见**运行时信息**——哪个分支真的走过、这个对象有没有逃逸。这是静态编译拿不到的，所以 Java 峰值能超过 C++ 的某些场景。',
+                followup:
+                  '「那为什么不全部 JIT？」——编译本身要花时间和内存，冷代码编译是纯浪费，所以要热点探测，只编值得编的。',
+              },
+              {
+                kind: 'principle',
+                title: 'JIT 具体优化了什么：三个能举例子的动作',
+                body: [
+                  '如果只会说「JIT 把字节码编译成机器码」，那只是复述定义。下面三个动作，任何一个能举出例子，可信度立刻不同。',
+                ],
+                steps: [
+                  {
+                    title: '方法内联（Method Inlining）',
+                    detail:
+                      '把被调方法的字节码直接塞进调用点，消掉调用开销。更关键的是**它让后续优化成为可能**：代码到了同一个方法里，常量传播、死代码消除才有用武之地。所以 JIT 的优化顺序是「内联先行」。',
+                  },
+                  {
+                    title: '逃逸分析（Escape Analysis）',
+                    detail:
+                      '判断一个对象会不会跑出方法或线程之外。不逃逸就可以**栈上分配**甚至**标量替换**——本该 new 在堆上的对象被拆成几个局部变量，连 GC 压力都省了。这是 Java 能追上 C++ 的关键之一。',
+                  },
+                  {
+                    title: '去虚拟化（Devirtualization）',
+                    detail:
+                      '`invokevirtual` 原本要查虚方法表。若 JIT 观察到某调用点历史上**只出现过一种实际类型**，就优化成直接调用，并挂一个守卫。这就是「Java 多态不影响性能」在热路径上成立的原因。',
+                  },
+                ],
+                takeaway:
+                  '还有反面：假设一旦被打破（比如第二个实现类出现），JVM 会**去优化**，退回解释执行重新收集 profile。JIT 是「乐观假设 + 失败回退」，不是一次性翻译。',
+              },
+              {
+                kind: 'diagram',
+                title: '同一个方法在 JVM 里的状态迁移',
+                diagram: {
+                  type: 'state',
+                  states: [
+                    { label: '解释执行', note: '逐条翻译，无优化' },
+                    { label: 'C1 编译', note: '内联 + 去虚拟化，快速接管' },
+                    { label: 'C2 编译', note: '逃逸分析 + 循环展开，榨峰值' },
+                    { label: '已去优化', note: '退回解释器重跑', tone: 'primary' },
+                  ],
+                  transitions: [
+                    '调用计数过阈值',
+                    'profile 足够且仍是热点',
+                    '乐观假设被打破',
+                  ],
+                  back: { from: 4, to: 1, label: '重新计数、重新 profile，热起来会再编译一次' },
+                  caption:
+                    '关键点：第 4 个状态不是终点，而是回到起点。「编译」在这张图上是可逆的，这是 JIT 与静态编译最本质的区别。',
+                },
+              },
+              {
+                kind: 'compare',
+                title: '四种执行方式的取舍',
+                head: ['执行方式', '优化程度', '启动开销', '峰值性能', '典型场景'],
+                rows: [
+                  ['解释器', '无', '几乎为零', '低', '冷启动、只跑一两次的代码'],
+                  ['C1（Client）', '浅：内联、去虚拟化', '小', '中', '启动阶段快速接管、桌面应用'],
+                  ['C2（Server）', '激进：逃逸分析、循环展开', '大', '高', '长时间运行的服务端热点代码'],
+                  ['AOT（native-image）', '编译期静态优化', '无，直接机器码', '高但缺运行时信息', 'Serverless、CLI、容器冷启动敏感'],
+                ],
+                note: '分层编译（Java 7 起默认）就是「先 C1 后 C2」：方法先被 C1 编译快速跑起来，攒够 profile 再交给 C2 重编。`-XX:+PrintCompilation` 能看到这个过程。',
+              },
+              {
+                kind: 'question',
+                title: 'AOT 与 JIT 的取舍',
+                questionId: 'java-01-Q7',
+                intent:
+                  '在筛你是否理解「运行时信息」的价值。只答「AOT 启动快、JIT 运行快」是背结论，答不出代价就等于没学。',
+                points: [
+                  'AOT 在**构建期**就把字节码编译成目标平台机器码，运行时不解释也不 JIT，启动接近原生程序',
+                  '代价一：丢掉运行时 profile，做不了逃逸分析、去虚拟化这类**基于观测**的优化，峰值通常低于 JIT',
+                  '代价二：产物绑定平台与架构，一份镜像不能跨平台；反射、动态代理需要额外配置，甚至直接不支持',
+                  '代价三：构建期长、内存占用高（GraalVM native-image 编译时很吃内存）',
+                ],
+                depth:
+                  '判断标准可以说得很具体：**短生命周期、冷启动敏感**的负载（Serverless 函数、CLI 工具）选 AOT；**长驻、热路径稳定**的服务选 JIT。这也是 Spring Boot 3 同时保留 JIT 与 native 两种打包的原因。',
+                followup:
+                  '「能不能两者都要？」——能，**AOT + profile-guided**：先 AOT 出镜像保启动，再用线上 profile 重新 AOT 一次，GraalVM 的 PGO 就是这个思路。',
+              },
+              {
+                kind: 'diagram',
+                title: '跨平台到底跨的是哪一层',
+                diagram: {
+                  type: 'flow',
+                  items: [
+                    { label: 'Hello.java', note: '源码，人写' },
+                    { label: 'javac', note: '构建期' },
+                    { label: 'Hello.class', note: '字节码，唯一产物' },
+                    { label: '各平台 JVM', note: 'x86 / ARM，Win / Linux' },
+                    { label: '机器码', note: '运行期翻译' },
+                  ],
+                  caption:
+                    '分叉点在第 3 步之后：同一份 .class 喂给不同平台的 JVM，各自翻译。所以「一次编译，到处运行」的边界是「到处都有 JVM」。',
+                },
+              },
+              {
+                kind: 'concept',
+                title: 'native 方法：JVM 给自己留的后门',
+                body: [
+                  '`native` 修饰的方法**没有方法体**，实现不在 Java 里，而在本地库（`.dll` / `.so` / `.dylib`）里，通过 **JNI** 调用。声明它只是告诉 JVM：这个调用点别找字节码，去加载对应的本地符号。',
+                  '它存在的理由很实在：文件 IO、网络、时钟、线程调度最终都要落到操作系统，JVM 自己也得用。翻 `Thread.start0()`、`System.currentTimeMillis()`、`Object.hashCode()` 的源码，底层全是 native。另外还有历史包袱——早期 Java 性能不足，压缩、加密、图形这些库都是 C 实现后桥接进来的。',
+                  '代价同样明确：native 方法**不受 JVM 管理**，出事没有字节码行号、看不到 Java 栈帧，崩溃往往是一个 `hs_err_pid.log` 加一段 C 栈；而且它打破了「一次编写到处运行」，每个平台得带不同的本地库。',
+                ],
+                term: {
+                  name: 'JNI（Java Native Interface）',
+                  def: '一套 C 语言约定，让 JVM 能调用本地库、本地库也能回调 Java 方法。JDK 21 起提供了更轻量的 FFM API（Panama）作为替代方案。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'native 方法的存在理由与代价',
+                questionId: 'java-01-Q8',
+                intent:
+                  '看你能不能把「语言特性」落回「平台边界」。答「调用 C 代码」是及格，答出「为什么必须有它」才是这题的分水岭。',
+                points: [
+                  '定义：用 Java 声明、用 C/C++ 实现，通过 JNI 调用，方法体不在字节码里',
+                  '必要性：文件、网络、线程、时钟等系统调用只能由操作系统完成，JVM 自身也依赖 native',
+                  '典型例子：`Thread.start0`、`System.currentTimeMillis`、`Object.hashCode`、`Unsafe` 系列',
+                  '代价：脱离 JVM 安全管理与栈帧，崩溃难定位；破坏跨平台；JNI 边界有调用开销，不能放极热路径',
+                ],
+                depth:
+                  '加分点：JDK 21 的 **FFM API（Panama）** 用 MethodHandle 替代 JNI，省掉手写 C 胶水层，而且**能被 JIT 内联**——JNI 调用是 JIT 的优化黑盒，FFM 不是。',
+              },
+              {
+                kind: 'question',
+                title: 'JVM / JDK / JRE 的区别',
+                questionId: 'java-01-Q1',
+                intent:
+                  '基础题，但答得清楚说明你脑子里有层次。多数人只会说「JDK 包含 JRE 包含 JVM」，漏掉「各自解决什么问题」。',
+                points: [
+                  'JVM：执行字节码的虚拟机，管类加载、内存管理、GC、解释与 JIT。**它本身是规范，HotSpot 是其中最主流的实现**',
+                  'JRE：JVM + 核心类库 + 启动器，是「能跑 Java 程序」的最小集合；JDK 9 之后不再单独发布，用 jlink 按需裁剪',
+                  'JDK：JRE + 开发工具（javac、javadoc、jar、jlink、jcmd、jstack、jmap）',
+                  '选型结论：**运行只要 JRE，排障必须 JDK**——jstack、jmap、jcmd 全在 JDK 里',
+                ],
+                depth:
+                  '顺带提一句容器实践：Docker 镜像普遍基于 JDK 而不是 JRE，因为要留着 jcmd 做诊断；追求体积才用 jlink 裁出最小运行时。',
+              },
+            ],
+            outline: [
+              '源码 → javac 生成与平台无关的字节码 → 类加载 → 解释执行 + JIT 热点编译',
+              'JVM 是规范，HotSpot 是实现；「跨平台」跨的是字节码这一层，不是源码',
+              'JDK / JRE / JVM 是包含关系，JDK 额外带编译器与诊断工具',
+              '解释器保启动速度、JIT 保峰值性能，两者协作而非二选一',
+            ],
+            pitfalls: [
+              '把「一次编译到处运行」说成「Java 不需要编译」，实际是编译到字节码这个中间态',
+              '只答 JVM 是虚拟机，不答它管什么（加载、内存管理、GC、执行引擎），信息量为零',
+            ],
+          },
+        },
+        {
+          id: 'lang-types',
+          title: '基本类型、包装类与自动装箱',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['数据类型与变量'] }],
+          content: {
+            intro:
+              '基本类型看似是入门内容，但它决定了后面两章的走向：String 池、equals 与 ==、HashMap 的 key 能不能用。这一节把「变量存在栈还是堆」「装箱到底发生了什么」「Integer 缓存为什么是 -128 到 127」三个问题连起来讲。搞懂这三件事，你就不会再被 if (a == b) 的诡异结果绊住。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '变量是一个格子，格子里放的东西有两种',
+                body: [
+                  '理解 Java 的类型系统，只需要抓住一件事：**变量本身永远是一个固定大小的格子**，差别在于格子里装的是「值」还是「地址」。声明 `int a = 10`，格子里就是二进制 10；声明 `Integer b = new Integer(10)`，格子里是一个指向堆对象的引用（在 64 位 HotSpot 上通常是 4 字节的压缩指针，或 8 字节的普通指针）。',
+                  '这个区别决定了后面所有行为：基本类型比较的是值本身，引用类型用 `==` 比较的是地址，所以两个内容相同的 `Integer` 用 `==` 可能是 false。所谓「值语义」和「引用语义」，说的就是这件事，不是什么抽象概念。',
+                ],
+                term: {
+                  name: '值语义 / 引用语义',
+                  def: '值语义指变量的内容就是数据本身，赋值即复制（`int b = a` 后两者互不影响）；引用语义指变量的内容是一个地址，赋值只是复制地址，两个变量指向同一个对象（改一个另一个也变）。Java 的基本类型是值语义，对象引用是引用语义。',
+                },
+                points: [
+                  '**Java 没有「对象变量」，只有「对象引用变量」**——`String s = "a"` 里 s 是引用，不是对象',
+                  '参数传递一律是**值传递**：传引用时复制的是地址，所以方法内改不了指向，但能改对象内容',
+                  '`==` 对基本类型比值，对引用比地址；`equals` 默认也是比地址，除非被重写',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '八种基本类型的大小，以及它们对应的包装类',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['位数', '包装类', '默认值', '备注'],
+                  rows: [
+                    ['byte', '8', 'Byte', '0', 'IO 读写字节流的基本单位'],
+                    ['short', '16', 'Short', '0', '很少用，运算时会提升为 int'],
+                    ['int', '32', 'Integer', '0', '默认整型字面量类型'],
+                    ['long', '64', 'Long', '0L', '字面量要加 L，否则先按 int 解析'],
+                    ['float', '32', 'Float', '0.0f', '有效精度约 7 位十进制'],
+                    ['double', '64', 'Double', '0.0d', '默认浮点字面量类型，精度约 15-16 位'],
+                    ['char', '16', 'Character', '\\u0000', '无符号，UTF-16 码元'],
+                    ['boolean', 'JVM 未规定', 'Boolean', 'false', 'HotSpot 用 int 表示，数组中是 1 字节'],
+                  ],
+                  caption:
+                    '记住「4/8 分界」：int、float 占 4 字节，long、double 占 8 字节；byte 1、short 2、char 2。boolean 是唯一没有明确规定大小的。',
+                },
+              },
+              {
+                kind: 'concept',
+                title: '装箱不是「转换」，是隐式地 new 了一个对象',
+                body: [
+                  '`Integer a = 10` 这行代码，编译器会改成 `Integer.valueOf(10)`。注意是 `valueOf` 而不是 `new Integer(10)`——这个替换是 javac 在**编译期**做的，叫自动装箱（autoboxing）。反过来 `int b = a` 会改成 `a.intValue()`，叫自动拆箱。',
+                  '关键在 `valueOf` 的内部实现：它先查一张缓存表，命中就返回缓存里的那个对象，没命中才 `new`。这张表就是 `IntegerCache`，默认覆盖 **-128 到 127**。所以 `Integer a = 127, b = 127` 时 a 和 b 指向同一个对象，`a == b` 为 true；换成 128 就各 new 一个，为 false。这不是 bug，是 JDK 为了减少小整数对象创建做的优化。',
+                ],
+                points: [
+                  '`Integer.valueOf(int)` 命中缓存返回同一对象；`new Integer(10)` **永远**是新对象（已废弃）',
+                  '缓存范围：Integer 默认 -128~127（上限可用 `-XX:AutoBoxCacheMax` 调大，下限不可调）',
+                  'Character 缓存 0~127；Byte、Short、Long、Boolean 的缓存范围也是 -128~127（Boolean 就两个常量）',
+                  '拆箱有 NPE 风险：`Integer x = null; int y = x;` 会在 `intValue()` 处抛空指针',
+                ],
+              },
+              {
+                kind: 'principle',
+                title: '127 与 128 之间到底发生了什么',
+                body: [
+                  '把这两行代码在脑子里的执行顺序走一遍，比背结论可靠得多。',
+                ],
+                steps: [
+                  {
+                    title: 'javac 把字面量装箱改写成 valueOf 调用',
+                    detail:
+                      '`Integer a = 127` 编译后等价于 `Integer a = Integer.valueOf(127)`。这一步是编译器行为，运行时没有任何「装箱」的专门指令。',
+                  },
+                  {
+                    title: 'valueOf 先判断是否落在缓存区间',
+                    detail:
+                      '源码是 `if (i >= IntegerCache.low && i <= IntegerCache.high) return IntegerCache.cache[i + (-IntegerCache.low)];`。low 固定 -128，high 默认 127。',
+                  },
+                  {
+                    title: '命中则直接返回缓存数组里的那个引用',
+                    detail:
+                      '127 命中，a 和 b 拿到的是**数组里同一个元素**，所以 `a == b` 为 true。这两个变量指向同一个堆对象。',
+                  },
+                  {
+                    title: '越界则 new 一个新对象',
+                    detail:
+                      '128 不命中，走 `new Integer(128)`，a 和 b 是两个不同对象，地址不同，`a == b` 为 false。此时 `a.equals(b)` 仍然是 true，因为 equals 比的是内部的 value。',
+                  },
+                ],
+                takeaway:
+                  '结论不是「Integer 比较要用 equals」这么一句口诀，而是：**`==` 比的是引用，装箱可能复用对象，所以结果取决于缓存命中与否。** 用 `equals` 或先拆成 int 才是稳的。',
+              },
+              {
+                kind: 'diagram',
+                title: '127 与 128 在内存里落在哪一格',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '栈 · main 的栈帧',
+                      note: '局部变量表，每格 4 字节',
+                      tone: 'primary',
+                      slots: [
+                        { label: 'a  (int)', value: '10' },
+                        { label: 'b  (Integer)', value: 'ref', ref: 'cache[255]', tone: 'primary' },
+                        { label: 'c  (Integer)', value: 'ref', ref: 'Integer(128) #1', tone: 'warn' },
+                        { label: 'd  (Integer)', value: 'ref', ref: 'Integer(128) #2', tone: 'warn' },
+                      ],
+                    },
+                    {
+                      name: '堆 · IntegerCache.cache[]',
+                      note: '类加载时一次建好 256 个，此后永远复用',
+                      slots: [
+                        { label: 'cache[0]', value: '-128' },
+                        { label: '…', value: '…' },
+                        { label: 'cache[255]', value: '127', tone: 'primary' },
+                      ],
+                    },
+                    {
+                      name: '堆 · 普通对象区',
+                      note: '每次 valueOf 越界都新建',
+                      slots: [
+                        { label: 'Integer(128) #1', value: 'value=128', tone: 'warn' },
+                        { label: 'Integer(128) #2', value: 'value=128', tone: 'warn' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    'b 命中缓存，指向的是缓存数组里的那一格；c 和 d 指向两个不同对象。所以 `==` 判的不是「值是否相等」，而是「是否落在同一格」。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Integer 127 / 128 的经典陷阱',
+                questionId: 'java-01-Q12',
+                intent:
+                  '这题几乎必考，但面试官想听的不是「127 true、128 false」，而是你能不能说出**为什么**。只报答案会被追一句「为什么」，然后卡住。',
+                points: [
+                  '`a == b` 为 true，`c == d` 为 false',
+                  '原因是自动装箱调用 `Integer.valueOf()`，命中 IntegerCache（-128~127）时返回同一对象',
+                  '127 命中缓存 → 同一引用 → `==` 为 true；128 越界 → 各自 new → 地址不同 → false',
+                  '`c.equals(d)` 为 true，因为 Integer 的 equals 比较内部 int 值',
+                ],
+                depth:
+                  '再补一层：如果把 `d` 声明成 `int d = 128`，`c == d` 会变成 true——因为这时触发**拆箱**，两边都退化成 int 比较值。所以「== 的结果取决于有没有触发拆箱」这句话，比背 127/128 更有价值。',
+                followup:
+                  '「那缓存范围能改吗？」——能，`-XX:AutoBoxCacheMax=1000` 调上限，下限 -128 不可改。改动后同一份代码行为会变，所以线上不要依赖缓存做逻辑判断。',
+              },
+              {
+                kind: 'concept',
+                title: 'float / double 存不准，是因为它们存的是二进制科学计数法',
+                body: [
+                  '`0.1 + 0.2 != 0.3` 不是 Java 的错，是所有用 IEEE 754 的语言共同的结果。float 和 double 的结构是「1 位符号 + 指数 + 尾数」（float 是 1+8+23，double 是 1+11+52），本质是 **±1.xxx × 2^n** 这种形式。',
+                  '问题在于：十进制小数转二进制时，只有分母是 2 的幂的分数才能除尽。0.5、0.25、0.125 都行，但 0.1 转成二进制是 0.0001100110011…无限循环。存进 23 位或 52 位尾数时被截断，误差就此产生，后续运算会把误差放大。',
+                ],
+                term: {
+                  name: 'IEEE 754',
+                  def: '浮点数的二进制表示标准。一个 float 由符号位 s、指数 e、尾数 m 组成，值为 (-1)^s × 1.m × 2^(e-127)。因为尾数位数有限，绝大多数十进制小数只能被近似表示。',
+                },
+              },
+              {
+                kind: 'analogy',
+                title: '就像十进制写不完 1/3',
+                text: '用十进制写 1/3，得到 0.333333…，你永远写不完，只能截断成 0.333。三个 0.333 相加得到 0.999，不是 1。二进制写 0.1 是同一回事：0.1 在二进制里是 0.000110011001100… 的无限循环，float 只留 23 位，剩下的被丢掉。所以误差不是「算错了」，而是「一开始就存了个近似值」。',
+                mapping: [
+                  { real: '十进制写不完 1/3', tech: '二进制写不完 0.1' },
+                  { real: '只能记到 0.333', tech: 'float 只保留 23 位尾数' },
+                  { real: '3 × 0.333 = 0.999', tech: '0.1 + 0.2 = 0.30000000000000004' },
+                ],
+                limit:
+                  '类比只能解释「为什么有误差」，解释不了「误差有多大」。要判断两个浮点数是否相等，用 `Math.abs(a - b) < 1e-6` 这种阈值比较，而不是 `==`。',
+              },
+              {
+                kind: 'question',
+                title: '浮点精度丢失与解法',
+                questionId: 'java-01-Q13',
+                intent:
+                  '看你能不能把「精度丢失」归因到**表示方式**，而不是含糊地说「浮点数不准」。答出 IEEE 754 就说明你懂底层。',
+                points: [
+                  '浮点数用二进制科学计数法存储，尾数位数有限（float 23 位、double 52 位）',
+                  '0.1 这类十进制小数转二进制是无限循环，存进去时被截断，误差由此产生',
+                  '误差会在连续运算中累积放大，所以 `0.1 + 0.2 != 0.3`',
+                  '解法：金额等精确场景用 `BigDecimal`；比较浮点用差值阈值；展示时用 `DecimalFormat` 控制位数',
+                ],
+                depth:
+                  '能说出具体数字更加分：`0.1 + 0.2` 实际得到 `0.30000000000000004`，`1.0 - 0.9` 得到 `0.09999999999999998`。这不是随机误差，是确定的、可复现的结果。',
+                followup:
+                  '「BigDecimal 就一定准吗？」——不一定，`new BigDecimal(0.1)` 传 double 进来时误差已经存在，必须用 `new BigDecimal("0.1")`。',
+              },
+              {
+                kind: 'diagram',
+                title: '浮点数判等：两种写法，两种结果',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '错：用 == 或 equals 直接比',
+                    tone: 'bad',
+                    items: [
+                      '`0.1 + 0.2 == 0.3` 恒为 false，这个 if 分支永远进不去',
+                      '两个算出来「应该相等」的 double，因尾数舍入不同判为不等',
+                      '金额用 double 逐笔累加，误差越滚越大，对账时差几分钱',
+                    ],
+                  },
+                  right: {
+                    title: '对：先定误差范围再比较',
+                    tone: 'good',
+                    items: [
+                      '`Math.abs(a - b) < 1e-9`，阈值按业务精度定，不是凭感觉',
+                      '金额用 `new BigDecimal("0.1")` 从字符串构造，全程不碰 double',
+                      '`BigDecimal` 判等用 `compareTo(b) == 0`，不用 `equals`',
+                    ],
+                  },
+                  caption:
+                    '最后一条最容易错：`BigDecimal.equals` 连 scale 一起比，`2.0` 与 `2.00` 返回 false；`compareTo` 只比数值。',
+                },
+              },
+              {
+                kind: 'handwrite',
+                title: '手写订单金额求和',
+                lang: 'java',
+                prompt:
+                  '给一组订单明细金额，求总额，要求精确到分、四舍五入符合财务习惯，并说明为什么不能用 double 累加。',
+                signature: 'BigDecimal total(List<BigDecimal> amounts)',
+                plan: [
+                  {
+                    title: '类型先定对：入参和返回值都是 BigDecimal',
+                    detail:
+                      '不要收 double 再转——误差在你拿到参数之前就已经产生了，进来之后转不回去。这一步答出来，面试官就知道你踩过这个坑。',
+                  },
+                  {
+                    title: '构造只走字符串或 valueOf',
+                    detail:
+                      '`new BigDecimal(0.1)` 实际得到 0.1000000000000000055511151231257827…，因为用的是 double 的二进制近似值。`new BigDecimal("0.1")` 才是精确的 0.1。',
+                  },
+                  {
+                    title: '累加用 add，且必须接住返回值',
+                    detail:
+                      'BigDecimal 是不可变类，`sum.add(a)` 返回新对象，原对象不变。写 `sum.add(a);` 不加赋值，是这里最常见的低级错误。',
+                  },
+                  {
+                    title: '最后统一 setScale 定精度和舍入方式',
+                    detail:
+                      '金额统一 2 位、`RoundingMode.HALF_UP`。如果财务规则要求「四舍六入五成双」，换成 `HALF_EVEN`——顺带说明这也是 IEEE 754 的默认舍入。',
+                  },
+                  {
+                    title: '收口补一句代价',
+                    detail:
+                      'BigDecimal 是不可变对象 + 任意精度运算，比 double 慢一个量级以上，只在金额、费率这类必须精确的地方用，别拿去跑科学计算。',
+                  },
+                ],
+                skeleton: `BigDecimal total(List<BigDecimal> amounts) {
+    BigDecimal sum = TODO;          // 从什么开始累加?
+    for (BigDecimal a : amounts) {
+        if (TODO) continue;         // 空值怎么处理?
+        sum = TODO;                 // 用什么方法?要接住返回值吗?
+    }
+    return TODO;                    // 保留几位?什么舍入方式?
+}`,
+                solution: `BigDecimal total(List<BigDecimal> amounts) {
+    BigDecimal sum = BigDecimal.ZERO;
+    for (BigDecimal a : amounts) {
+        if (a == null) continue;              // 明细里可能有空值
+        sum = sum.add(a);                     // 不可变:必须接住返回值
+    }
+    return sum.setScale(2, RoundingMode.HALF_UP);
+}`,
+                complexity:
+                  '时间 O(n)，n 为明细条数；额外空间 O(1)（每次 add 产生临时对象，但只持有 sum 一个引用）。常数因子比 double 高约一个数量级。',
+                traps: [
+                  '`sum.add(a);` 忘了赋值——BigDecimal 不可变，这行什么也没干',
+                  '`new BigDecimal(0.1)` 用 double 构造，一进去就带着误差',
+                  '`equals` 会连 scale 一起比，`2.0` 与 `2.00` 判为不等，判等要用 `compareTo() == 0`',
+                  '`divide` 遇到除不尽（如 1/3）直接抛 `ArithmeticException`，必须显式给 scale 与 RoundingMode',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '自动装箱的原理与性能代价',
+                questionId: 'java-01-Q11',
+                intent:
+                  '想听的是「编译期改写 + valueOf 缓存」这一整套机制，以及你能不能举出一个真实的性能陷阱。',
+                points: [
+                  '装箱：`Integer a = 1` 被 javac 改写成 `Integer.valueOf(1)`；拆箱：`int b = a` 改写成 `a.intValue()`',
+                  '`valueOf` 命中 IntegerCache（-128~127）时复用对象，否则新建',
+                  '性能代价一：循环里大量装箱会产生大量短命对象，加剧 GC（如 `Long sum` 在循环里累加）',
+                  '性能代价二：拆箱有 null 风险；`Integer` 与 `int` 混用时的拆箱是隐式的，报错位置很难看出来',
+                ],
+                depth:
+                  '举一个真实场景：`Map<Long, Long>` 里做计数，每次 `get` 后 `put` 都在装箱/拆箱，QPS 高的接口里这部分开销能占到可观比例；换成 `LongAdder` 或基本类型数组能明显下降。',
+              },
+              {
+                kind: 'compare',
+                title: '成员变量、静态变量、局部变量：三个维度一起看',
+                head: ['维度', '成员变量（实例）', '静态变量', '局部变量'],
+                rows: [
+                  ['存储位置', '堆中的对象实例内', '方法区（JDK 8+ 元空间）', '栈帧的局部变量表'],
+                  ['生命周期', '随对象创建与回收', '随类加载到类卸载', '随方法调用结束消失'],
+                  ['默认值', '有（0 / false / null）', '有（同左）', '**没有**，必须先赋值'],
+                  ['线程安全', '单对象内共享，需同步', '所有实例共享，需同步', '方法私有，天然安全'],
+                  ['可用修饰符', 'public/private/final/volatile…', '同上 + static', '只能加 final'],
+                ],
+                note: '一句话记法：**局部变量在栈上、必须初始化；成员变量在堆上、有默认值；静态变量在方法区、全类共享。**',
+              },
+              {
+                kind: 'question',
+                title: '成员变量与局部变量的区别',
+                questionId: 'java-01-Q17',
+                intent:
+                  '基础题，但能把「存储位置 / 生命周期 / 默认值 / 线程安全」四条串起来答的不到一半。',
+                points: [
+                  '存储：成员变量随对象在堆上（静态变量在方法区），局部变量在栈帧的局部变量表',
+                  '生命周期：成员变量跟对象同生共死，局部变量只在方法调用期间存在',
+                  '默认值：成员变量有默认值（0/false/null），局部变量没有，使用前必须赋值，否则编译不过',
+                  '修饰符：局部变量只能加 `final`，不能有访问修饰符，也不能 `static`',
+                ],
+                depth:
+                  '追问「为什么局部变量不给默认值」时，答**编译期可验证性**：局部变量的作用域小、赋值路径可以被编译器完全分析，强制初始化能在编译期就挡住「用了未赋值变量」的 bug；成员变量受多线程与反射影响，无法静态确定，只能给默认值兜底。',
+              },
+              {
+                kind: 'principle',
+                title: '静态方法为什么访问不了非静态成员',
+                body: [
+                  '很多人把这条当语法规定背下来，其实原因只有一个：**静态方法没有 this**。',
+                ],
+                steps: [
+                  {
+                    title: '非静态成员属于「某个对象」，访问时必须有一个对象引用',
+                    detail:
+                      '`name` 这个字段在内存里不是独立存在的，它是某个 `Person` 实例的一块区域。写 `name` 时，编译器实际生成的是 `this.name`。',
+                  },
+                  {
+                    title: '静态方法在类加载后就能调用，此时可能一个实例都没有',
+                    detail:
+                      '`Person.staticMethod()` 不需要 new 对象。如果它内部访问 `this.name`，this 从哪来？没有来源，所以编译器直接拒绝。',
+                  },
+                  {
+                    title: '编译器选择在编译期就报错，而不是运行时判空',
+                    detail:
+                      '这是「尽早失败」的设计：能在编译期确定的错误，不该留到线上。同理，静态方法里也不能用 `super`。',
+                  },
+                  {
+                    title: '反过来，非静态方法可以访问静态成员',
+                    detail:
+                      '因为静态成员属于类，只要类加载了就能访问，而实例方法执行时类一定已经加载。方向是单向的。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**静态方法没有 this，非静态成员依赖 this 定位。** 记住这个因果，就不用背规则了。',
+              },
+              {
+                kind: 'concept',
+                title: '两个常被忽略的细节：char 的编码，boolean 的大小',
+                body: [
+                  '`char` 是 2 字节**无符号**整数，取值 0~65535，表示一个 **UTF-16 码元（code unit）**。所以它能存中文——汉字基本都在 BMP（基本多文种平面）内，一个码元装得下。但 emoji 这类超出 BMP 的字符需要**两个 char 组成的代理对（surrogate pair）**，用一个 char 装不下，`"😀".length()` 返回的是 2 而不是 1。',
+                  '`boolean` 的大小是个经典争议：**JVM 规范没有规定它的字节数**，只规定它支持 true/false 两个字面量。HotSpot 的实现是：单个 boolean 变量在栈帧里占 4 字节（用 int 承载），boolean 数组里每个元素占 1 字节。所以「boolean 占 1 bit」是错的，「占 1 字节」也不严谨——要看上下文。',
+                ],
+                points: [
+                  '`char c = \'中\'` 合法，因为「中」的码点 U+4E2D 在 2 字节范围内',
+                  '超出 U+FFFF 的字符（如 emoji）用 `codePointCount` 统计才是真实字符数',
+                  'boolean 数组元素 1 字节，单个变量按 int 处理；不要用它的字节数做内存估算',
+                  '如果要处理完整的 Unicode 字符（含 emoji），用 `int` 存码点或 `String.codePoints()`',
+                ],
+              },
+            ],
+            outline: [
+              '八种基本类型的大小与取值范围；boolean 在 JVM 中按 int 承载而非 1 bit',
+              '局部变量在栈帧的局部变量表中，对象实例在堆，引用本身只是一个地址值',
+              '自动装箱调用 Integer.valueOf，命中缓存范围时返回同一对象',
+              'Integer 缓存默认 -128~127，可通过 -XX:AutoBoxCacheMax 调整上界',
+            ],
+            pitfalls: [
+              '两个 Integer 用 == 比较，128 为 false 而 127 为 true，本质是缓存命中与否',
+              '三目运算符存在类型提升，Integer 与 int 混用会触发拆箱，可能抛 NPE',
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: 'object-model',
+      title: 'B · 对象模型与语言契约',
+      goal: '掌握对象从创建到销毁的契约：相等性、继承、异常与语言细节',
+      summary:
+        '这一阶段进入面向对象的核心契约。面试里真正的分水岭不是「知道多态」，而是能解释「重写 equals 为什么必须重写 hashCode」「finally 与 return 谁先执行」「内部类为什么持有外部类引用」。这些都是编译器和 JVM 层面的确定性规则，答得出来就是功底。',
+      lessons: [
+        {
+          id: 'string-pool',
+          title: 'String 不可变与常量池',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['String'] }],
+          content: {
+            intro:
+              'String 是 Java 里被问得最多、也最容易答得浮于表面的类型。这一节不背结论，而是从「为什么要设计成不可变」推下去：不可变才能安全共享，才能缓存哈希，才能进常量池。想清楚这条因果链，字符串常量池、intern、拼接优化、StringBuilder 的存在理由就都不需要死记了。最后会落到一道高频题：new String("a") 到底创建了几个对象。',
+            sections: [
+              {
+                kind: 'concept',
+                title: 'String 内部就是一个「被锁住的数组」',
+                body: [
+                  '打开 JDK 8 的源码，String 的三个核心字段是 `private final char value[]`、`private int hash`、`private final int count`。JDK 9 之后 value 变成 `byte[]` 加一个 `byte coder` 标记编码，这就是 **Compact Strings**：内容全是 Latin-1 字符（英文、数字）时每字符只占 1 字节，含中文才退化成 UTF-16。',
+                  '关键不在 `final` 修饰符，而在于 **String 从不把 value 数组暴露出去**：没有 `getValue()`，构造时做防御性拷贝，任何「修改」方法（substring、concat、replace）都返回新对象。所以哪怕用反射把 final 改了，也只是你自己玩坏了自己的引用，别人手里的那个 String 依然是安全的。',
+                ],
+                term: {
+                  name: '不可变对象（Immutable Object）',
+                  def: '对象创建后其内部状态不可被观察者改变。实现手段有三条：所有字段 final、不提供修改方法、构造时对可变字段做防御性拷贝、不返回内部可变引用。String 是把这三条都做到位的典型。',
+                },
+                points: [
+                  '**JDK 8**：`final char[] value`，每字符固定 2 字节',
+                  '**JDK 9+**：`byte[] value` + `byte coder`，纯 Latin-1 内容内存减半',
+                  '不可变 ≠ 加个 final：真正起作用的是「不泄漏内部数组 + 所有修改都返回新对象」',
+                ],
+              },
+              {
+                kind: 'why',
+                title: '为什么非要把 String 设计成不可变',
+                body: [
+                  '如果 String 可变，下面四件事会同时崩掉：常量池无法共享（改了 A 就改了 B，因为它们指向同一块）、hashCode 无法缓存（每次都要重算，HashMap 的 key 会失效）、线程安全无从谈起（任何共享都可能被改）、以及安全校验形同虚设（传进 `Class.forName` 或数据库连接串的字符串可能在中途被换掉）。',
+                  '所以不可变不是「设计偏好」，是**为了让共享成立**。反过来说，一旦你理解了这份收益，也就理解了 StringBuilder 为什么必须存在：需要频繁改的时候，就不能共享，那就得有一个独占的可变缓冲区。',
+                ],
+                without:
+                  '假设 String 可变：`String a = "abc"; String b = "abc";` 这两行拿的是同一个常量池对象，`b.toUpperCase()` 会把 a 也改掉。HashMap 里存了 100 个字符串 key，其中任意一个被改，哈希桶位置全部错乱，get 直接失效。',
+              },
+              {
+                kind: 'diagram',
+                title: '字面量、new、intern 三者的落点',
+                diagram: {
+                  type: 'layers',
+                  items: [
+                    { label: '栈上的引用变量', note: 's1 / s2 / s3,只存地址', tone: 'primary' },
+                    { label: '字符串常量池(StringTable)', note: 'JDK 7 起位于堆中,存字符串实例的引用', tone: 'primary' },
+                    { label: '堆中的 String 对象', note: 'new String("abc") 在这里另建一个' },
+                    { label: '底层的 byte[] / char[]', note: '真正装字符的数组' },
+                  ],
+                  caption:
+                    '字面量先查池,有就复用、没有就建;new 一定在堆上新造;intern 是「把堆上这个对象的引用登记进池,并返回池中那个」。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '`String s1 = "abc"; String s2 = new String("abc");` 的真实布局',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '栈 · 引用变量',
+                      note: '只存地址',
+                      tone: 'primary',
+                      slots: [
+                        { label: 's1', value: 'ref', ref: '池对象 "abc"', tone: 'primary' },
+                        { label: 's2', value: 'ref', ref: 'new 出来的 "abc"', tone: 'warn' },
+                      ],
+                    },
+                    {
+                      name: '堆 · StringTable',
+                      note: 'JDK 7+ 位于堆中，条目存的是引用',
+                      slots: [{ label: 'entry "abc"', value: '→ 池对象', tone: 'primary' }],
+                    },
+                    {
+                      name: '堆 · String 实例',
+                      slots: [
+                        { label: '池对象 "abc"', value: 'byte[] #1', tone: 'primary' },
+                        { label: 'new 出来的 "abc"', value: 'byte[] #2', tone: 'warn' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '`s1 == s2` 为 false：两个 String 对象地址不同。补一个老版本细节可加分：JDK 8 及以前 `new String` 是共享同一个 `char[]` 的（「两个对象、一个数组」），JDK 9+ 引入 Compact Strings 后不保证共享。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '执行一条 `ldc "abc"` 时发生了什么',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['字节码', 'JVM', 'StringTable', '堆'],
+                  messages: [
+                    { from: '字节码', to: 'JVM', text: 'ldc #7 —— 取常量池第 7 项，内容为 "abc"' },
+                    { from: 'JVM', to: 'StringTable', text: '查表：有没有内容等于 "abc" 的条目？' },
+                    { from: 'StringTable', to: 'JVM', text: '命中 → 直接返回池中那个 String 的引用', reply: true },
+                    { from: 'JVM', to: '堆', text: '未命中 → 新建 String 实例，并把引用登记进 StringTable' },
+                    { from: '堆', to: 'JVM', text: '返回新对象的引用', reply: true },
+                  ],
+                  caption:
+                    '同一字面量在整个进程生命周期里只会走一次「新建」路径，之后全是命中。这就是两个字面量 `==` 成立的全部原因。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: 'new String("abc") 到底创建了几个对象',
+                body: [
+                  '这道题的争议全在「前提」上：池里有没有 "abc"。答「一个」或「两个」都不完整，完整答案必须分情况。',
+                ],
+                steps: [
+                  {
+                    title: '先看字面量 "abc"：它要在常量池里存在',
+                    detail:
+                      '类加载的解析阶段，或第一次执行到 `ldc` 指令时，JVM 检查 StringTable 里有没有内容为 "abc" 的条目。没有就创建一个 String 实例并登记，**这一步可能产生 1 个对象**。',
+                  },
+                  {
+                    title: '再看 new String(...)：它一定在堆上创建',
+                    detail:
+                      '`new` 指令无条件在堆上分配一个 String 对象，把刚才那个常量池对象的字符数组引用交给它（构造器内部做拷贝或共享，取决于版本）。**这一步必然产生 1 个对象**。',
+                  },
+                  {
+                    title: '所以答案是「1 个或 2 个」',
+                    detail:
+                      '池中原本没有 "abc" → 池里建 1 个 + new 建 1 个 = **2 个**；池中已有 → 只有 new 那 1 个 = **1 个**。注意 new 出来的对象**不在池里**，两者地址不同，`==` 为 false。',
+                  },
+                  {
+                    title: '如果追问「那 new String("abc").intern() 呢」',
+                    detail:
+                      'intern 检查池里有没有 "abc"，有就返回池中引用（丢弃 new 出来的那个），所以 `s == "abc"` 变成 true。但那个 new 出来的对象依然创建了，只是立刻变成垃圾。',
+                  },
+                ],
+                takeaway:
+                  '答题模板：**分情况 + 说清谁在池里谁在堆上 + 补一句 == 的结果**。只答数字，无论答 1 还是 2 都会被追问到卡住。',
+              },
+              {
+                kind: 'question',
+                title: 'new String 创建几个对象',
+                questionId: 'java-01-Q23',
+                intent:
+                  '这是「知不知道常量池」的探针。面试官真正在意的不是数字，而是你能否区分「池中对象」和「堆上新对象」。',
+                points: [
+                  '答案分情况：常量池中已有 "abc" 时创建 **1 个**（只有 new 的那个）；没有时创建 **2 个**（池中 1 个 + 堆上 1 个）',
+                  'new 出来的对象在堆上，不在常量池里，两者地址不同，`==` 为 false',
+                  '`new String("abc").intern() == "abc"` 为 true，因为 intern 返回池中已有引用',
+                  '补充：`new String(char[])` 这类构造只创建 1 个对象，不含字面量',
+                ],
+                depth:
+                  '能补一句字节码层面更稳：字面量由 `ldc` 指令触发 StringTable 检查，`new` 由 `new` 指令分配——两条指令各管一件事，所以「几个对象」本质上是在问这两条指令各创建了什么。',
+              },
+              {
+                kind: 'principle',
+                title: '「+」拼接：编译期折叠，还是运行期 new',
+                body: [
+                  '同一个加号，在不同场景下生成完全不同的字节码，这是 Java 里最容易被忽略的编译期优化。',
+                ],
+                steps: [
+                  {
+                    title: '全是字面量：编译期直接折叠成一个常量',
+                    detail:
+                      '`String s = "a" + "b"`，javac 在编译期就算出 "ab"，字节码里只有一条 `ldc "ab"`。所以 `String s1 = "ab"; String s2 = "a" + "b"; s1 == s2` 为 **true**——s2 根本没有发生运行时拼接。',
+                  },
+                  {
+                    title: '含变量（JDK 8）：改写成 StringBuilder 链式调用',
+                    detail:
+                      '`s = a + b + c` 被改写成 `new StringBuilder().append(a).append(b).append(c).toString()`。每次循环拼接都 new 一个 StringBuilder，这是「循环里用 + 拼接慢」的直接原因。',
+                  },
+                  {
+                    title: '含变量（JDK 9+）：改用 invokedynamic + StringConcatFactory',
+                    detail:
+                      '不再生成 StringBuilder，而是链接到一个运行时生成的拼接方法。好处是 JIT 能看到整体，做更激进的内联与常量传播，通常比手写 StringBuilder 还快。',
+                  },
+                  {
+                    title: '所以「循环用 + 慢」这句话要加限定',
+                    detail:
+                      '在 JDK 9+ 的单次拼接上，`+` 已经不慢了；慢的是**循环**场景——每次迭代都产生一个中间 String，O(n²) 的拷贝量。这里该用 StringBuilder 或 `String.join`。',
+                  },
+                ],
+                takeaway:
+                  '记住两个边界：**编译期能算出来的就折叠，算不出来的才在运行期拼。** 判断依据是有没有变量参与。',
+              },
+              {
+                kind: 'diagram',
+                title: '循环拼接的拷贝量：n 翻 10 倍，代价翻 100 倍',
+                diagram: {
+                  type: 'scale',
+                  items: [
+                    { label: 'StringBuilder', value: 20000, display: '≈2 万字符', note: '只拷扩容那几次' },
+                    { label: '+ n=1000', value: 5000000, display: '≈500 万', note: '每次都复制前缀' },
+                    { label: '+ n=10000', value: 500000000, display: '≈5 亿', note: '平方级增长' },
+                  ],
+                  caption:
+                    '按每次追加 10 字符估算的累计字符拷贝量。`+` 每次都要把已有前缀整体复制一遍，总量是 n²/2 量级；StringBuilder 按倍数扩容，总拷贝量是几何级数，均摊下来每次 append 只摊到常数。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '字符串拼接的底层原理与循环性能',
+                questionId: 'java-01-Q26',
+                intent:
+                  '筛的是「你是否知道编译期优化」。只会说「+ 底层是 StringBuilder」会被 JDK 9 的 invokedynamic 反驳。',
+                points: [
+                  '编译期可确定的字面量拼接会被**折叠成常量**，不产生运行时开销',
+                  'JDK 8 及以前：含变量的拼接改写成 `StringBuilder.append()` 链，最后 `toString()`',
+                  'JDK 9+：改用 `invokedynamic` + `StringConcatFactory`，由 JIT 优化，通常优于手写 StringBuilder',
+                  '循环里用 `+` 慢，是因为每次迭代都生成新的中间 String，拷贝量随长度平方增长',
+                ],
+                depth:
+                  '解法要说具体：循环内拼接用 `StringBuilder`（预设容量更好），或 `String.join` / `Collectors.joining`；但注意**不要在循环外复用同一个 StringBuilder 到多线程**，它不是线程安全的。',
+                followup:
+                  '「StringBuilder 和 StringBuffer 怎么选？」——单线程用 StringBuilder；StringBuffer 每个方法都加 synchronized，现在基本只在老代码里见到。',
+              },
+              {
+                kind: 'compare',
+                title: 'String / StringBuilder / StringBuffer',
+                head: ['维度', 'String', 'StringBuilder', 'StringBuffer'],
+                rows: [
+                  ['可变性', '不可变', '可变', '可变'],
+                  ['线程安全', '安全（不可变天然安全）', '**不安全**', '安全（方法加 synchronized）'],
+                  ['性能', '每次修改产生新对象', '最快', '比 StringBuilder 慢（锁开销）'],
+                  ['适用场景', '常量、key、配置、少量拼接', '单线程大量拼接', '多线程共享缓冲区（少见）'],
+                  ['底层', 'byte[]（JDK 9+）', 'byte[] + count', '同 StringBuilder，但方法同步'],
+                ],
+                note: '选择顺序几乎是固定的：**默认 String，需要频繁改就 StringBuilder，只有确实多线程共享才考虑 StringBuffer。**',
+              },
+              {
+                kind: 'concept',
+                title: 'intern()：手动把堆上的字符串「登记」进池',
+                body: [
+                  '`intern()` 的语义是：如果常量池里已经有内容相同的字符串，返回池中的那个引用；没有就把当前对象的引用**登记**进池，再返回它。注意 JDK 7 之后登记的是**堆上对象的引用**，而不是复制一份字符串——这是和 JDK 6 的关键差异。',
+                  'JDK 6 时字符串常量池在永久代，intern 要把字符内容拷贝进永久代，代价高且容易 OOM；JDK 7 把池搬到堆里之后，intern 只需登记引用，成本大幅下降。这也是「JDK 7 之后可以放心用 intern 做去重」这句话的由来。',
+                ],
+                points: [
+                  'JDK 6：池在永久代，intern 复制字符串内容 → 代价高、易 OOM',
+                  'JDK 7+：池在堆中，intern 只登记引用 → 成本低',
+                  '典型用途：大量重复字符串（如日志字段、枚举值）去重，节省内存',
+                  '风险：池是全局的，intern 大量**不重复**的字符串会让 StringTable 膨胀，反而拖慢',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'intern 的作用与版本差异',
+                questionId: 'java-01-Q25',
+                intent:
+                  '这题的分水岭是「JDK 7 把池搬到了堆」。答不出这个版本差异，说明你背的是旧资料。',
+                points: [
+                  '作用：返回常量池中内容相同的字符串引用，实现字符串复用',
+                  '池中已有 → 直接返回池中引用；没有 → 把当前引用登记进池并返回',
+                  'JDK 6 池在永久代，intern 需复制内容，代价高；JDK 7+ 池移入堆，只登记引用',
+                  '代价：StringTable 是全局结构，大量不重复的 intern 会造成表膨胀与额外 GC 扫描',
+                ],
+                depth:
+                  '举个能落地的场景：解析日志时把「服务名」「状态码」这类低基数（distinct 值很少）的字段 intern 掉，内存能降一个量级；但对 traceId 这种高基数字段 intern，会把内存问题变成更严重的 StringTable 膨胀。',
+              },
+              {
+                kind: 'code',
+                title: 'StringBuilder 的扩容：为什么「预设容量」有用',
+                lang: 'java',
+                code: `// AbstractStringBuilder.ensureCapacityInternal
+private void ensureCapacityInternal(int minimumCapacity) {
+    if (minimumCapacity - value.length > 0) {
+        value = Arrays.copyOf(value,
+                newCapacity(minimumCapacity));   // 通常是 old * 2 + 2
+    }
+}
+
+// newCapacity 的核心逻辑
+int newCapacity = oldCapacity << 1;          // 翻倍
+newCapacity += 2;                            // 再 +2
+if (newCapacity - minCapacity < 0) newCapacity = minCapacity;
+if (newCapacity - MAX_ARRAY_SIZE > 0) newCapacity = hugeCapacity(minCapacity);`,
+                caption: '扩容 = 申请新数组 + 全量拷贝，是 StringBuilder 唯一的显著开销',
+                notes: [
+                  { line: 'oldCapacity << 1', text: '左移一位等于乘 2,扩容按 2 倍走,均摊到每次 append 是 O(1)' },
+                  { line: 'Arrays.copyOf', text: '每次都复制整个数组,所以能提前算出长度就该预设容量' },
+                  { line: 'new StringBuilder(1024)', text: '预设容量直接省掉前几次扩容与拷贝,大字符串拼接时收益明显' },
+                ],
+              },
+              {
+                kind: 'handwrite',
+                title: '手写一个最简 StringBuilder',
+                lang: 'java',
+                prompt:
+                  '不许用 java.lang.StringBuilder，自己实现一个支持 append(String)、自动扩容、最后 toString() 的可变字符缓冲区。写完后要能解释扩容为什么按倍数走。',
+                signature: `final class MiniBuilder {
+    MiniBuilder append(String s);   // 返回 this,支持链式调用
+    @Override String toString();    // 只输出有效区间
+}`,
+                plan: [
+                  {
+                    title: '用两个字段撑起全部状态',
+                    detail:
+                      '一个 `char[] buf` 装字符、一个 `int count` 记已用长度。**关键是不能用 `buf.length` 当有效长度**——容量和长度是两件事，混用就会输出一堆空格。',
+                  },
+                  {
+                    title: 'append 只做三件事：算需求、按需扩容、批量拷贝',
+                    detail:
+                      '先算 `count + s.length()` 看够不够，不够就扩到至少这么大；然后一次 `getChars` 批量拷进去，比逐字符赋值快得多；最后更新 count。',
+                  },
+                  {
+                    title: '扩容按 1.5 倍，而不是每次 +1',
+                    detail:
+                      '按倍数增长，总拷贝量是几何级数（1+2+4+…），均摊到每次 append 是 O(1)；每次只加一点则退化成 O(n²)。选 1.5 倍而非 2 倍，是在「扩容次数」和「空间浪费」之间取折中。',
+                  },
+                  {
+                    title: 'toString 必须只拷有效区间',
+                    detail:
+                      '`new String(buf, 0, count)` 拷贝 0 到 count 这一段。如果直接 `new String(buf)`，容量里那些没用的 `\\u0000` 会一并输出，这是最典型的翻车点。',
+                  },
+                  {
+                    title: '补上溢出与 null 两个边界',
+                    detail:
+                      '`old * 2` 在超大容量下会溢出成负数，要判断并退回上限；`append(null)` 要按 JDK 行为输出字符串 "null"，不能抛 NPE。',
+                  },
+                ],
+                skeleton: `final class MiniBuilder {
+    private char[] buf;
+    private int count;                 // 已用长度,不是容量
+
+    MiniBuilder append(String s) {
+        if (s == null) s = TODO;                   // JDK 行为是什么?
+        int need = TODO;                            // 需要多少空间
+        if (need > buf.length) grow(need);
+        TODO;                                       // 把 s 批量拷进 buf
+        count = need;
+        return this;                                // 链式调用
+    }
+
+    private void grow(int minCap) {
+        int next = TODO;                            // 按几倍扩?
+        if (next < minCap) next = minCap;
+        buf = Arrays.copyOf(buf, next);
+    }
+
+    @Override public String toString() {
+        return TODO;                                // 只拷有效区间
+    }
+}`,
+                solution: `final class MiniBuilder {
+    private char[] buf;
+    private int count;
+
+    MiniBuilder(int cap) { buf = new char[Math.max(16, cap)]; }
+
+    MiniBuilder append(String s) {
+        if (s == null) s = "null";                  // 与 JDK 保持一致
+        int need = count + s.length();
+        if (need > buf.length) grow(need);
+        s.getChars(0, s.length(), buf, count);      // 批量拷贝,比逐字符快
+        count = need;
+        return this;
+    }
+
+    private void grow(int minCap) {
+        int old = buf.length;
+        int next = old + (old >> 1);                // 1.5 倍
+        if (next < minCap) next = minCap;           // 一次要得多就按需求走
+        if (next < 0) next = Integer.MAX_VALUE - 8; // 溢出保护
+        buf = Arrays.copyOf(buf, next);
+    }
+
+    @Override public String toString() {
+        return new String(buf, 0, count);           // 只拷有效区间
+    }
+}`,
+                complexity:
+                  'append 均摊 O(1)：扩容总拷贝量是几何级数，摊到每次是常数。toString 是 O(n) 的一次性拷贝。空间 O(n)，且 1.5 倍扩容最多浪费约 1/3 容量。',
+                traps: [
+                  '把 `buf.length` 当有效长度用，结果 toString 输出一堆 `\\u0000` 或空格',
+                  '扩容时 `Arrays.copyOf(buf, minCap)` 只按需求扩，下次 append 又得扩一次，退化成频繁拷贝',
+                  '忘记 `count = need`，后续 append 全写在同一个位置，后面的内容被覆盖',
+                  '`old * 2` 在超大容量下溢出为负，`new char[负数]` 直接抛 NegativeArraySizeException',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'String 为什么不可变',
+                questionId: 'java-01-Q21',
+                intent:
+                  '最高频的 String 题。想听的是**收益链**，不是「因为加了 final」。只答 final 会被反问「那反射改了 final 为什么还不影响别人」。',
+                points: [
+                  '实现方式：内部数组 private final、不提供任何修改方法、构造时防御性拷贝、修改操作一律返回新对象',
+                  '收益一：**可以安全共享** —— 常量池复用同一个对象不会互相影响',
+                  '收益二：**hashCode 可缓存** —— String 把 hash 存在字段里，作为 HashMap key 时不必每次重算',
+                  '收益三：**天然线程安全** —— 无需同步即可在多线程间传递',
+                  '收益四：**安全性** —— 类名、URL、数据库连接串不会被中途篡改',
+                ],
+                depth:
+                  '加分说法：不可变让 String 适合做 **HashMap 的 key** 和 **并发场景的配置值**，因为「值不变」是这两类用途的前提。代价是每次修改都产生新对象，这正是 StringBuilder 存在的理由。',
+                followup:
+                  '「反射能把 final 改掉吗？」——JDK 8 可以通过反射改 value 数组内容，但 JDK 17 起模块系统默认禁止对 java.base 做深度反射，会抛 InaccessibleObjectException。',
+              },
+            ],
+            outline: [
+              '不可变带来线程安全、哈希缓存、常量池共享三大收益，代价是每次修改都产生新对象',
+              '字面量先进常量池，new String 在堆上另建对象，intern 手动入池并返回池中引用',
+              '编译期可确定的拼接会被折叠为常量，含变量则退化为 StringBuilder 或 invokedynamic',
+              'Java 9 起底层由 char[] 改为 byte[] + coder，紧凑字符串让 Latin-1 内容省一半内存',
+            ],
+            pitfalls: [
+              '说 String 不可变却把原因答成「final 修饰」，final 只是手段，真正保证不可变的是不暴露内部数组',
+              '忘记字符串常量池在 JDK 7 已从永久代搬到堆中，导致对 GC 行为的判断出错',
+            ],
+          },
+        },
+        {
+          id: 'oop-model',
+          title: '继承、多态与初始化顺序',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['面向对象'] }],
+          content: {
+            intro:
+              '面向对象这一章的题很少考定义，几乎都在考两件事：**执行顺序**和**动态分派**。父类构造器里调用被子类重写的方法会发生什么、静态块与实例块谁先跑、重载和重写分别在哪一步定死、对象传参到底传了什么——这些问题的答案都写在类初始化流程与 invokevirtual 语义里，想通一次就再也不会记错。本节先把「三大特性」串成一条因果链，再用内存图和时序图把多态与传参讲到字节码层面，最后压成一张初始化顺序表和一段模板方法的手写代码。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '三大特性不是三个知识点，而是同一条因果链',
+                body: [
+                  '封装、继承、多态经常被并列背诵，但它们其实是一条链：**封装**把数据与操作捆成对象并划出边界，决定「谁能改」；**继承**复用父类的边界并允许子类改写其中一部分，决定「改哪里」；**多态**是「改写之后，调用方不必知道自己手里是谁」，决定「调用方不用改」。没有继承与重写，多态无从谈起；没有多态，继承就退化成代码复制。',
+                  '所以被问到「三大特性是什么」时，只报定义只能拿到及格分。真正加分的是把三者连起来说：**封装管住状态，继承打开扩展点，多态让扩展点对调用方不可见。** 后面所有问题——重载与重写、接口与抽象类、值传递、初始化顺序——都是这条链上的具体推论。',
+                ],
+                term: {
+                  name: '动态绑定（后期绑定 / 动态分派）',
+                  def: '方法调用在**运行时**才确定执行哪个实现，而不是编译期写死。与之对应的静态绑定（前期绑定）在编译期就把调用目标定下来，例如 static 方法、private 方法、构造器与 final 方法。Java 默认实例方法走动态绑定，这是多态的实现机制。',
+                },
+                points: [
+                  '封装 = 访问控制 + 不泄漏内部可变状态，它让「对象」成为一个可信的单位',
+                  '继承 = 复用 + 可覆盖，它打开了扩展点，同时也引入了耦合（父类改，子类可能坏）',
+                  '多态 = 同一个调用点，按**实际类型**执行不同实现，它让扩展点可以「后加」而不动老代码',
+                ],
+              },
+              {
+                kind: 'why',
+                title: '为什么需要多态：把「类型判断」从调用方挪进类型系统',
+                body: [
+                  '没有多态时，凡「不同对象做不同事」都要在调用处写分支：`if (a instanceof Dog) ((Dog) a).bark(); else if (a instanceof Cat) ((Cat) a).meow();`。这段代码的问题不是丑，而是**它必须知道所有类型**。每加一种动物，这段分支就要改一次，而它往往在别人维护的类里——改一处，整块逻辑都要重新回归。',
+                  '多态把这个分支挪进了类型内部：调用方只写 `animal.speak()`，「speak 具体做什么」写在各自的类里。新增类型时调用方一行不动，这就是**开闭原则**真正落地的形态。代价也很明确：调用方必须依赖一个共同父类型，并且每次调用多一次「查表找实现」的开销——下一节会看到，这个开销小到只是一次数组寻址。',
+                ],
+                without:
+                  '反证：JDK 的 `Collections.sort(list, comparator)` 就是多态。它并不知道你按年龄比还是按姓名比，它只调 `compare(a, b)`。若没有多态，JDK 就得为每一种排序规则写一个 sort 方法，或者接受一个 int 类型的「排序策略编号」并在内部 switch——那正是 20 年前 C 风格 API 的样子。',
+              },
+              {
+                kind: 'diagram',
+                title: '同一个需求：分支写法 vs 多态写法',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '调用方负责判断类型',
+                    tone: 'bad',
+                    items: [
+                      '每个调用点都要 instanceof + 强转',
+                      '新增一种类型 → 所有分支点都要改',
+                      '漏改一处就是运行时漏判，编译期不报错',
+                      '强转写错 → ClassCastException 只在跑到的分支才炸',
+                    ],
+                  },
+                  right: {
+                    title: '类型自己负责行为',
+                    tone: 'good',
+                    items: [
+                      '调用方只依赖父类型的一个方法',
+                      '新增类型 = 新增一个类，老代码零改动',
+                      '漏实现方法 → 编译期直接报错（abstract）',
+                      '新增后忘记注册？不存在这个概念，多态不需要注册表',
+                    ],
+                  },
+                  caption:
+                    '代价要诚实说：多态把「谁做什么」分散到了各个类里，读代码时不能在同一个文件里看完所有分支。所以它适合「类型会持续增加」的场景，不适合只有两三种固定分支的场景。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: '多态的三个条件，与 invokevirtual 的四步执行',
+                body: [
+                  '面试常问「多态的条件」，标准答案是三条：有继承或实现关系、子类重写父类方法、父类引用指向子类对象。但只背这三条，遇到「为什么父类引用调不到子类特有方法」还是会卡住。补上「编译期看左边、运行期看右边」这句，整条链路就闭合了。',
+                ],
+                steps: [
+                  {
+                    title: '编译期：javac 只认引用类型，不认对象类型',
+                    detail:
+                      '`Animal a = new Dog(); a.speak();` 编译时 javac 查的是 **Animal 有没有 speak**，与 Dog 无关。所以 `a.fetch()`（Dog 独有）编不过，必须先强转。反过来，父类有的方法即使子类没重写也能调。这就是「编译看左边」。',
+                  },
+                  {
+                    title: '运行期：invokevirtual 先取对象的实际类型',
+                    detail:
+                      '执行 `invokevirtual` 时，JVM 从操作数栈顶取出对象引用，读它的**对象头里的 Klass Pointer**，拿到这个对象真正的类元数据（Dog 的 Klass）。这一步完全跳过「变量声明的是什么类型」。这就是「运行看右边」。',
+                  },
+                  {
+                    title: '查虚方法表：一次数组寻址，不是字符串比较',
+                    detail:
+                      '每个 Klass 有一张 vtable。槽位编号由**父类首次声明该方法的顺序**决定，子类重写就替换对应槽位的函数指针，新增方法追加在末尾、不能重排。所以 JVM 拿到的其实是常量池里就存好的**下标**，运行期只需按下标读一次数组。',
+                  },
+                  {
+                    title: '反例：哪些调用没有多态',
+                    detail:
+                      '`static` 方法用 `invokestatic`、`private` 方法 / 构造器 / `super.xxx()` 用 `invokespecial`，都是编译期绑定，压根不查 vtable。`final` 方法走 invokevirtual，但 JIT 知道它不会被重写，会直接**去虚拟化**内联掉。这解释了三个常见追问：为什么静态方法不能重写、为什么 private 方法不算重写、为什么 final 方法更快。',
+                  },
+                ],
+                takeaway:
+                  '一句话收口：**javac 只认引用类型，运行期认对象实际类型，两者之间由 vtable 的一次数组寻址连接。** 这三句足以覆盖多态相关的全部追问。',
+              },
+              {
+                kind: 'diagram',
+                title: '多态靠什么实现：对象头里那根「类型指针」',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '栈 · 局部变量表',
+                      note: '只有地址',
+                      tone: 'primary',
+                      slots: [{ label: 'a', value: 'ref', ref: '堆中的 Dog 实例', tone: 'primary' }],
+                    },
+                    {
+                      name: '堆 · Dog 实例',
+                      note: '对象本体',
+                      slots: [
+                        { label: 'Mark Word', value: '哈希 / GC 年龄 / 锁标志' },
+                        { label: 'Klass Pointer', value: '→ Dog 的类元数据', tone: 'primary' },
+                        { label: '实例字段', value: 'name / age' },
+                      ],
+                    },
+                    {
+                      name: '方法区 · Klass + vtable',
+                      note: '每个类一份',
+                      slots: [
+                        { label: 'vtable[0]', value: 'speak → Dog.speak()', tone: 'primary' },
+                        { label: 'vtable[1]', value: 'eat → Animal.eat（未重写）' },
+                        { label: 'vtable[2]', value: 'fetch（Dog 新增，追加在末尾）', tone: 'warn' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '关键在「槽位编号由父类决定」：Animal 编译出的 0 号槽，在 Dog 的 vtable 里仍然是 0 号槽。所以父类引用能调到子类实现，靠的不是名字匹配，而是同一张表的同一个下标。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '执行 `a.speak()` 的那一瞬间发生了什么',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['字节码', 'JVM', 'Dog 实例', 'Dog 的 Klass'],
+                  messages: [
+                    { from: '字节码', to: 'JVM', text: 'invokevirtual #12 // Animal.speak:()V' },
+                    { from: 'JVM', to: 'Dog 实例', text: '取栈顶引用，读对象头的 Klass Pointer' },
+                    { from: 'Dog 实例', to: 'JVM', text: '返回 Dog 的 Klass 地址', reply: true },
+                    { from: 'JVM', to: 'Dog 的 Klass', text: '用常量池里已算好的 vtable 下标取值' },
+                    { from: 'Dog 的 Klass', to: 'JVM', text: '返回 Dog.speak 的入口地址', reply: true },
+                    { from: 'JVM', to: '字节码', text: '跳转执行 —— 这就是动态分派' },
+                  ],
+                  caption:
+                    '全程没有一次字符串比较或方法名查找。下标在编译期就写进常量池了，运行期只是「取对象 → 取 Klass → 按下标读数组 → 跳转」，所以多态的调用开销接近普通间接调用。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '什么是多态？底层原理是什么？',
+                questionId: 'java-01-Q33',
+                intent:
+                  '这是分水岭题。答「同一个接口不同实现」只能算背过定义；面试官想听的是**动态分派**这四个字背后的指令与数据结构，以及你是否知道它的边界（字段没有多态、静态方法没有多态）。',
+                points: [
+                  '先给定义与三个条件：有继承/实现、子类重写、父类引用指向子类对象',
+                  '区分两种多态：编译期多态 = 重载（静态分派），运行期多态 = 重写（动态分派），面试重点是后者',
+                  '原理说到指令层：`invokevirtual` / `invokeinterface` 在运行期取**实际类型**，通过 vtable 定位实现入口，即动态绑定',
+                  '必须补边界：父类引用调不到子类特有方法（需强转）；**实例字段没有多态**，字段访问看引用的静态类型',
+                ],
+                depth:
+                  '拉开分档的是这一句：「vtable 的槽位顺序由父类决定，子类只能替换不能重排，所以下标在编译期就能确定，运行期只是一次数组寻址。」再补「静态方法走 invokestatic、private 方法与构造器走 invokespecial，都不参与动态分派」，追问就基本封死了。',
+                followup:
+                  '如果继续追问「字段为什么没有多态」：字段访问编译成 `getfield`，偏移量在编译期按**引用类型**的布局算好了，而子类可能新增字段、偏移不同。方法可以靠一张表间接找，字段为了性能必须直接按偏移读，两者取舍不同。',
+              },
+              {
+                kind: 'compare',
+                title: '重载与重写：一个在编译期定，一个在运行期定',
+                head: ['维度', '重载 Overload', '重写 Override'],
+                rows: [
+                  ['发生位置', '同一个类中（父子类之间也算）', '父子类之间，或接口与实现类之间'],
+                  ['方法名', '必须相同', '必须相同'],
+                  ['参数列表', '**必须不同**（个数 / 类型 / 顺序）', '**必须完全相同**'],
+                  ['返回值', '可以不同', '相同，或协变（子类返回更具体的类型）'],
+                  ['绑定时机', '编译期，按参数的**静态类型**选定', '运行期，按对象的**实际类型**选定'],
+                  ['访问权限', '无限制', '不能比父类更严格（public 不能改成 protected）'],
+                  ['异常', '无限制', '不能抛出更宽的检查异常'],
+                ],
+                note: '一句判断口诀：**参数一样还同名，就是重写；参数不同，就是重载。** 另外三个「看起来像重写、其实不是」：static 方法（隐藏而非重写）、private 方法（子类同名方法是新方法）、final 方法（根本不允许）。',
+              },
+              {
+                kind: 'principle',
+                title: '值传递：形参拿到的永远是副本',
+                body: [
+                  '「Java 是值传递还是引用传递」之所以常年吵不清，是因为「副本」的粒度不同：基本类型的副本是**数值本身**，引用类型的副本是**引用的值**（也就是地址）。两种情况下 Java 做的动作完全一致——把值拷一份放进形参，只是拷贝的内容一个像数字、一个像门牌号。',
+                  '所以正确表述只有一句：**Java 只有值传递；对象传的是「对象引用的值」。** 由此推出两条可直接用于答题的结论：通过形参能改对象内容（因为按地址找到了同一个对象），但不能让调用者的引用改指向（因为改的是副本里的地址）。',
+                ],
+                steps: [
+                  {
+                    title: '调用时：实参先求值，得到一个「值」',
+                    detail:
+                      '`change(sb)` 里，实参 `sb` 求值的结果是它当前持有的地址（比如 0x1A2B）。注意这一步取的是**值**，不是变量本身。',
+                  },
+                  {
+                    title: '进入方法：这个值被拷进形参',
+                    detail:
+                      '形参是方法栈帧里的一个新变量。它和调用者的 `sb` 是两个独立的变量，只是此刻装着同一个地址。**引用传递的定义是「形参与实参是同一个变量（别名）」**，Java 从来没有做到这一点。',
+                  },
+                  {
+                    title: '透过形参改对象内容：生效',
+                    detail:
+                      '`sb.append("!")` 的语义是「按形参里的地址找到堆对象，改这个对象的内部状态」。两个变量指着同一个对象，所以调用者返回后看到内容已变。这常常被误当成「引用传递的证据」。',
+                  },
+                  {
+                    title: '给形参重新赋值：无效',
+                    detail:
+                      '`sb = new StringBuilder("new")` 只修改了形参这个变量里装的地址，让它指向新对象。调用者的变量一动没动，返回后依然指向原对象。这一行是整道题的判据。',
+                  },
+                  {
+                    title: '推论：`swap(a, b)` 必然失败',
+                    detail:
+                      '交换两个形参的数值，方法返回后形参随栈帧销毁，调用者的两个变量毫无变化。想「换回来」只能返回一个容器或数组，让调用者自己重新赋值。',
+                  },
+                ],
+                takeaway:
+                  '答题模板：**先下结论（只有值传递）→ 再说清「对象传的是引用的值」→ 用 append 生效 / 重新赋值无效 / swap 失败三个现象反证。** 最后补一句「引用传递要求形参与实参是同一变量，Java 做不到」，就没有追问空间了。',
+              },
+              {
+                kind: 'diagram',
+                title: '一次 `change(sb)` 调用里，内存中到底有几个变量',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '调用方栈帧 · main',
+                      note: '原变量',
+                      slots: [{ label: 'sb', value: '0x1A2B', ref: '堆中的 "a"', tone: 'primary' }],
+                    },
+                    {
+                      name: '被调方栈帧 · change',
+                      note: '形参，是副本',
+                      slots: [{ label: 'sb（形参）', value: '0x1A2B 的副本', ref: '调用时指向同一个对象', tone: 'warn' }],
+                    },
+                    {
+                      name: '堆',
+                      note: '对象本体',
+                      slots: [
+                        { label: 'StringBuilder "a"', value: 'value=[a] count=1' },
+                        { label: 'StringBuilder "new"', value: '重新赋值之后才出现', tone: 'warn' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '两个变量，一个对象。`sb = new StringBuilder("new")` 之后，形参改指新对象（虚线那根），原变量还指着旧对象——这就是「改不了指向」的画面。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '`append` 生效、`= new` 无效，差别只在「改对象」还是「改变量」',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '改对象：调用方看得见',
+                    tone: 'good',
+                    items: [
+                      '`sb.append("!")` 按地址找到堆对象',
+                      '改的是对象内部的数组与 count',
+                      '返回后调用者读 sb，内容已经变了',
+                    ],
+                  },
+                  right: {
+                    title: '改变量：只有形参自己知道',
+                    tone: 'bad',
+                    items: [
+                      '`sb = new StringBuilder("new")`',
+                      '形参里装的地址被替换成新的',
+                      '调用者的 sb 仍指向原对象，毫无变化',
+                    ],
+                  },
+                  caption:
+                    '口诀：**点号调方法 = 改对象，等号赋值 = 改变量。** 前者跨方法可见，后者随栈帧一起销毁。String 的「方法内改不了」也是这个道理：它不可变，任何「修改」都会返回新对象，等于给形参重新赋值。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Java 是值传递还是引用传递？',
+                questionId: 'java-01-Q36',
+                intent:
+                  '这是最容易「答对结论、说错理由」的一题。面试官在意的不是你选哪个词，而是你能不能解释「为什么对象能改内容、却不能改指向」。',
+                points: [
+                  '结论先行：**Java 只有值传递**，没有引用传递',
+                  '传基本类型 = 拷贝数值；传对象 = 拷贝「引用的值」（地址）',
+                  '因此方法内可改对象内容（同一个堆对象），但无法让调用者的引用改指向',
+                  '反证三连：`append` 生效、`sb = new` 无效、`swap(int,int)` 无效',
+                  '点出定义差异：引用传递要求形参与实参是同一个变量，Java 做不到',
+                ],
+                depth:
+                  '能补一句常见误解的来源就更稳：「基本类型值传递、对象引用传递」这种说法把「传的内容」当成了「传递方式」。传递方式只有一种，都是拷贝；变的只是拷贝的东西是数字还是地址。',
+                followup:
+                  '追问「数组呢」：数组是对象，同样传引用的值，所以 `void f(int[] a) { a[0] = 9; }` 生效，`a = new int[]{1};` 无效。追问「String 为什么改不了」：不可变 + 重新赋值等于改副本，两个原因叠加。',
+              },
+              {
+                kind: 'principle',
+                title: '父子类初始化：一条 6 步时间线',
+                body: [
+                  '这道题有标准答案，但背下来容易在「静态块只跑一次」「实例块在构造器之前」两处翻车。理解方式是把它拆成两件独立的事：**类初始化**由类加载触发，全进程只做一次；**实例初始化**由 new 触发，每次一个对象做一次。',
+                ],
+                steps: [
+                  {
+                    title: '父类静态：静态字段赋值 + 静态块（按源码顺序）',
+                    detail:
+                      '只在父类**首次被初始化**时执行一次。注意是「按书写顺序」：静态块写在静态字段声明之前，就读不到后面才赋的值。触发时机不一定是你 new 子类，访问父类的静态成员同样会触发。',
+                  },
+                  {
+                    title: '子类静态：静态字段赋值 + 静态块',
+                    detail:
+                      '同样只执行一次。顺序是父类全部静态先完成，再到子类——所以子类静态块里可以安全读取父类的静态字段，反之不行。',
+                  },
+                  {
+                    title: '父类实例变量 + 实例块（按源码顺序）',
+                    detail:
+                      '每次 new 都执行。此时子类字段**还没有任何赋值动作**，只停留在「分配内存后统一置零值」的状态。这一步是后面那个经典陷阱的根源。',
+                  },
+                  {
+                    title: '父类构造方法',
+                    detail:
+                      '子类构造器里的 `super()`（隐式或显式）触发它。所以「先有父类构造、后有子类字段赋值」不是实现细节，而是语言规定的顺序。',
+                  },
+                  {
+                    title: '子类实例变量 + 实例块',
+                    detail:
+                      '父类构造返回后才轮到子类。到这一步，子类字段才真正拿到代码里写的值。',
+                  },
+                  {
+                    title: '子类构造方法',
+                    detail:
+                      '最后执行。所以子类构造器里读自己的字段是安全的，父类构造器里读子类字段是不安全的。',
+                  },
+                ],
+                takeaway:
+                  '记为：**静父 → 静子 → 实父 → 造父 → 实子 → 造子**。前两步一组（每个类一次），后四步一组（每个对象一次）。这六步能推出本章几乎所有的顺序题。',
+              },
+              {
+                kind: 'diagram',
+                title: '`new B()` 的执行时间线（A 是父类，B 继承 A）',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['new B()', '类 A', '类 B', 'B 实例'],
+                  messages: [
+                    { from: 'new B()', to: '类 A', text: '触发 A 初始化（已初始化则跳过）' },
+                    { from: '类 A', to: 'new B()', text: 'A 静态字段赋值 + 静态块：打印 1', reply: true },
+                    { from: 'new B()', to: '类 B', text: '触发 B 初始化' },
+                    { from: '类 B', to: 'new B()', text: 'B 静态字段赋值 + 静态块：打印 3', reply: true },
+                    { from: 'new B()', to: 'B 实例', text: '分配内存，所有字段先置零值（0 / null / false）' },
+                    { from: 'B 实例', to: '类 A', text: '执行 A 的实例块与 A()：打印 2' },
+                    { from: 'new B()', to: 'B 实例', text: '执行 B 的实例块与字段赋值' },
+                    { from: 'B 实例', to: 'new B()', text: '执行 B()：打印 4，返回引用', reply: true },
+                  ],
+                  caption:
+                    '输出 1 3 2 4。注意第 5 步「先全部置零值」——它排在所有构造逻辑之前，正是下一节那个陷阱的伏笔。如果之后再 `new B()`，前两步会整体跳过，输出只剩 2 4。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '父类构造器里调用可重写方法：读到的是子类的「零值」',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '直觉：子类字段应该已经赋值',
+                    tone: 'bad',
+                    items: [
+                      '`new Child("child")` 之后 name 当然是 "child"',
+                      '父类构造器里调 log()，应该打印 child',
+                      '结果打印 null，看起来像编译器 bug',
+                    ],
+                  },
+                  right: {
+                    title: '实际：分派生效，但字段还没赋值',
+                    tone: 'warn',
+                    items: [
+                      'log() 被子类重写 → 动态分派走 Child.log()',
+                      '此刻 Child 的实例字段仍是 null（第 5 步置的零值）',
+                      '所以输出 null，而不是构造参数里的值',
+                    ],
+                  },
+                  caption:
+                    '两个机制叠加的结果：**方法分派看实际类型（所以进了子类实现），字段赋值却排在父类构造之后（所以还是零值）**。工程结论很硬：构造器里只调 private / final / static 方法，或者把可重写方法挪到构造完成之后再调。',
+                },
+              },
+              {
+                kind: 'handwrite',
+                title: '手写模板方法：流程锁在父类，只把「填空」开放给子类',
+                lang: 'java',
+                prompt:
+                  '面试官：「用模板方法模式写一个数据导入流程——读数据、校验、入库、发通知，四步顺序固定，但读和校验的细节每种数据源不同。要求子类**无法改变执行顺序**。」这题考的是「你知不知道 final 在框架设计里的用途」。',
+                signature:
+                  'abstract class ImportTemplate {\n    public final void run(String source);\n    protected abstract List<Row> read(String source);\n    protected abstract void validate(List<Row> rows);\n    protected void afterSave(int count);   // 钩子\n}',
+                plan: [
+                  {
+                    title: '把不变的流程写成 final 方法',
+                    detail:
+                      '`run()` 加 final，子类不能重写，执行顺序就成了不可破坏的契约。这是模板方法的立身之本——顺序属于业务规则，不属于扩展点。',
+                  },
+                  {
+                    title: '把变化的步骤抽成 abstract',
+                    detail:
+                      'read / validate 必须由子类实现，声明为 `protected abstract`。注意是 protected 而不是 public：对外只暴露 `run()`，子类不该被直接调用中间步骤。',
+                  },
+                  {
+                    title: '留一个钩子方法给「可选扩展」',
+                    detail:
+                      '`afterSave(int count)` 给空的默认实现，子类想加逻辑再覆盖，不想管就完全不理。**有默认实现的空方法叫钩子**，它是模板方法与「全抽象接口」的关键区别。',
+                  },
+                  {
+                    title: '绝不在父类构造器里调用 run()',
+                    detail:
+                      '这会把上一节的陷阱原样复现：构造器里调 run() → 调子类 read() → 此时子类字段还是零值，直接 NPE 或读到 null 配置。正确做法是让调用方显式 new 完再 run，或用静态工厂方法。',
+                  },
+                  {
+                    title: '把资源与异常统一收在父类',
+                    detail:
+                      'try-finally 释放连接、统一转译异常都放在 run() 里，子类只写自己那一步的业务逻辑。扩展点越窄，子类越不可能写错。',
+                  },
+                ],
+                skeleton:
+                  'abstract class ImportTemplate {\n\n    public ??? void run(String source) {      // TODO 1:让子类无法改变执行顺序\n        List<Row> rows = read(source);\n        validate(rows);\n        int n = save(rows);\n        afterSave(n);\n        notify(n);\n    }\n\n    protected ??? List<Row> read(String source);      // TODO 2:必须由子类实现\n    protected ??? void validate(List<Row> rows);     // TODO 3\n\n    private int save(List<Row> rows) { /* 公共步骤:子类不该重写 */ return 0; }\n\n    // TODO 4:写一个「可选步骤」的钩子,默认什么都不做\n}',
+                solution:
+                  'abstract class ImportTemplate {\n\n    /** 流程锁死:final 让子类无法改变顺序 */\n    public final void run(String source) {\n        List<Row> rows = read(source);\n        validate(rows);\n        int n = save(rows);\n        afterSave(n);      // 钩子:默认空实现,子类可选覆盖\n        notify(n);\n    }\n\n    /** 必须实现的步骤 */\n    protected abstract List<Row> read(String source);\n\n    protected abstract void validate(List<Row> rows);\n\n    /** 公共步骤:private,子类不可见也不可改 */\n    private int save(List<Row> rows) {\n        int n = 0;\n        for (Row r : rows) {\n            if (db.insert(r)) n++;\n        }\n        return n;\n    }\n\n    /** 钩子:留空,子类按需覆盖 */\n    protected void afterSave(int count) { }\n\n    protected void notify(int count) {\n        log.info("导入完成:{} 条", count);\n    }\n}\n\nclass CsvImport extends ImportTemplate {\n    @Override\n    protected List<Row> read(String path) {\n        return Csv.parse(path);          // 只填自己那一步\n    }\n\n    @Override\n    protected void validate(List<Row> rows) {\n        for (Row r : rows) {\n            if (r.id() == null) {\n                throw new IllegalArgumentException("id 不能为空");\n            }\n        }\n    }\n}',
+                complexity:
+                  'O(n)，n 为行数；模板方法本身零额外开销。`run()` 是 final，JIT 可以放心内联，比「用接口 + 每次委托」的写法少一层间接调用。',
+                traps: [
+                  '`run()` 忘了加 final —— 子类一重写，顺序契约当场作废',
+                  '在父类构造器里调用 `run()` —— 子类字段还是零值，必然读到 null',
+                  '把抽象方法声明成 public —— 对外暴露了中间步骤，调用方可以绕过 run()',
+                  '每一步都写成 abstract —— 没有默认实现的模板方法，只是「更麻烦的接口」',
+                  '`notify` 命名与 Object.notify 撞名 —— 无意中「重写」了 wait/notify 协议，改成 `notifyDone` 之类',
+                ],
+              },
+              {
+                kind: 'compare',
+                title: '接口与抽象类：到底什么时候用哪个',
+                head: ['维度', '抽象类', '接口'],
+                rows: [
+                  ['本质', '一个「不完全的类」，可以有状态与实现', '一组能力契约，JDK 8 起也允许 default / static 方法'],
+                  ['成员变量', '任意（final / 非 final / static / 实例）', '只能是 `public static final` 常量'],
+                  ['方法', 'abstract 与具体方法都可以', '抽象方法 + default / static / private 方法'],
+                  ['构造器', '**有**（不能 new，但子类要靠它初始化父类部分）', '没有'],
+                  ['继承数量', '单继承，一个类只能 extends 一个', '多实现，可 implements 多个'],
+                  ['语义', '**is-a**：Dog 是一种 Animal', '**can-do**：Comparable 表示「可比较」'],
+                  ['何时选', '需要共享状态、复用代码、固化模板流程', '需要跨继承树给不相关的类加同一项能力'],
+                ],
+                note: '选型只需要两个判据：**要不要共享可变状态**（要 → 抽象类）、**这项能力会不会被血缘无关的类需要**（会 → 接口）。两者还能叠加：抽象类实现接口并给出骨架实现，子类只补差异——JDK 的 `AbstractList` 就是 `List` 的骨架实现。顺带回答「为什么不支持类的多重继承」：多继承会让 `a.foo()` 出现两个候选实现（菱形问题），还让对象布局与 `super` 语义产生歧义；接口不受影响，因为实现要么唯一，要么必须显式 `Xxx.super.foo()` 指定。',
+              },
+              {
+                kind: 'question',
+                title: '构造方法的特点与父子类初始化顺序',
+                questionId: 'java-01-Q44',
+                intent:
+                  '这道题一半是语法细节（构造器能不能被重写、有没有返回值），一半是执行顺序。面试官通常会先听顺序，答对了再追问「静态块跑几次」来确认你不是背的。',
+                points: [
+                  '构造器特点：与类同名、**没有返回值**（连 void 都不能写）、new 时自动调用',
+                  '**不能被重写，可以被重载**；不写时编译器送一个默认无参构造，一旦手写有参构造，默认无参就消失',
+                  '顺序：父类静态 → 子类静态 → 父类实例块与字段 → 父类构造 → 子类实例块与字段 → 子类构造',
+                  '补一句「静态部分只在类初始化时执行一次，之后再 new 只有后四步」——这句话是分档点',
+                  '能现场写出 `static{A1} A(){} static{B3} B(){}` 输出 `1 3 2 4` 的例子最稳',
+                ],
+                depth:
+                  '再深一层可以补：所有字段在分配内存后先被统一置零值（0 / null / false），然后才按上面顺序赋值。所以父类构造器里读子类字段拿到的是 null 而不是「未定义」——这是 Java 与 C++ 行为不同的地方。',
+              },
+              {
+                kind: 'compare',
+                title: 'final、finally、finalize：拼写像，职责毫无关系',
+                head: ['关键字', '作用域', '到底管什么'],
+                rows: [
+                  ['`final`', '修饰类 / 方法 / 变量', '类不可被继承；方法不可被重写；变量只能赋值一次（引用不可变，对象内容仍可变）'],
+                  ['`finally`', 'try 语句块', '无论是否抛异常都执行的清理块；`System.exit()` 或 JVM 崩溃时不执行'],
+                  ['`finalize`', 'Object 的方法', 'GC 前的一次回调，**JDK 9 起已废弃**，行为不可预期，绝不应用它释放资源'],
+                ],
+                note: '三个追加细节常被问：① `final` 修饰引用只锁住「指向」，`final List l` 仍可 `l.add(x)`；② `finally` 里写 `return` 会吞掉 try 里的异常与返回值，是明确的代码坏味道；③ `finalize` 的替代是 `try-with-resources` 或 `Cleaner`。',
+              },
+              {
+                kind: 'concept',
+                title: '剩下四个必考小问：static、this/super、内部类、创建对象',
+                body: [
+                  '**static** 的含义是「属于类而不属于实例」：静态变量全类共享一份（随类加载初始化，在方法区/元空间）、静态方法没有 `this` 因而不能直接访问实例成员、静态块在类初始化时执行一次、静态内部类不持有外部类实例引用。最后一点是实用考点：`HashMap.Node` 用静态内部类，正是因为它不需要外部实例，省掉一根引用也就不会延长外部对象的生命周期。',
+                  '**this 与 super** 都是「指向当前对象」的引用，区别在编译期的解析方式：`this.m()` 走当前类的成员查找，`super.m()` 走 `invokespecial` 直接调用父类实现，**跳过动态分派**——这正是「子类重写方法里想调父类原实现」的唯一正确写法。两者都必须放在构造器第一行，且不能同时用。',
+                  '**内部类**分四种：成员内部类（持有 `Outer.this`）、静态内部类（不持有，可独立创建）、局部内部类（定义在方法里）、匿名内部类（只用一个实例，JDK 8 起可简写为 lambda 的前提是函数式接口）。一个高频细节：匿名内部类访问的局部变量必须是 final 或 effectively final——因为它捕获的是**副本**，若允许修改，内外两份就不同步了。',
+                ],
+                points: [
+                  '创建对象五种方式：`new` / 反射（`Constructor.newInstance`，Spring IoC 用的）/ `clone`（需实现 Cloneable）/ 反序列化 / `Unsafe.allocateInstance`（**不执行构造方法**，提到即加分）',
+                  '抽象类**不能被 final 修饰**——final 表示「不可继承」，abstract 要求「必须被继承」，语义互斥，编译器直接报错',
+                  '抽象类**有构造方法**，只是不能 `new`；它的构造器由子类的 `super()` 调用，用来初始化父类那部分状态',
+                  '静态内部类不持有外部引用，适合做单例与集合节点；非静态内部类持有 `Outer.this`，容易造成外部对象无法回收',
+                  '`this()` 与 `super()` 都必须在构造器第一行，二选一；都不写时编译器插入 `super()`',
+                ],
+              },
+            ],
+            outline: [
+              '类初始化顺序：父类静态 → 子类静态 → 父类实例块与构造 → 子类实例块与构造',
+              '重载在编译期按静态类型决定，重写在运行期按实际类型经 vtable 分派',
+              'Java 只有值传递，对象传的是「引用的值」，能改内容不能改指向',
+              '父类构造器中调用可重写方法会触发子类实现，此时子类字段尚未赋值',
+            ],
+            pitfalls: [
+              '在父类构造器里调用被子类重写的方法，读到的是子类字段的零值（0 或 null），不是构造参数',
+              '把重载也当成运行时多态，实际上参数类型在编译期就定死了',
+              '说「对象是引用传递」——传递方式只有一种，变的只是拷贝的内容是数值还是地址',
+            ],
+          },
+        },
+        {
+          id: 'equals-contract',
+          title: 'equals / hashCode / Comparable 契约',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['Object 与对象相等性'] }],
+          content: {
+            intro:
+              '这是一节纯粹的契约课，也是后面 HashMap 能正常工作的前提。三个方法各管一件事：equals 定义逻辑相等，hashCode 决定落在哪个桶，compareTo 决定排序位置。它们之间必须满足一致性约束，一旦破坏，集合的行为就会变得「不可解释」——对象 put 进去却 get 不出来，或者 Set 里出现两个「相等」的元素。',
+            sections: [
+              {
+                kind: 'concept',
+                title: 'Object 是一份最小契约，不是一个「空类」',
+                body: [
+                  '所有类都隐式继承 Object，它提供的方法不多，但每一个都在定义「一个 Java 对象至少应该具备什么能力」：能比较（equals）、能取哈希（hashCode）、能自我描述（toString）、能复制（clone）、能交代类型（getClass）、能等待与唤醒（wait/notify）、能被回收前做最后清理（finalize，已废弃）。',
+                  '面试常问「Object 有哪些方法」，答全名字只是及格。真正有价值的是能说清**哪些被建议重写、哪些不该用**：equals、hashCode、toString 几乎每个值对象都该重写；clone 设计有缺陷，实践中更推荐拷贝构造器；finalize 在 JDK 9 标记废弃、JDK 18 起默认关闭。',
+                ],
+                term: {
+                  name: '对象契约（Object Contract）',
+                  def: 'Object 中每个可重写方法都附带一组语义约定（javadoc 里写明）。违反约定的类在单独使用时看不出问题，一旦进入集合、并发容器或框架，就会以「莫名其妙的行为」暴露出来。',
+                },
+                points: [
+                  '**必须理解语义**：equals、hashCode、toString、getClass',
+                  '**建议重写**：equals / hashCode / toString（值对象三件套）',
+                  '**谨慎使用**：clone（浅拷贝陷阱、构造器不执行）、finalize（已废弃）',
+                  '**不要调用**：wait / notify（应使用 juc 的并发工具）',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '两种「相等」：地址相等与逻辑相等',
+                body: [
+                  '`==` 是语言层面的运算符，做的事固定：基本类型比值，引用类型比地址。它不可被重写。`equals` 是 Object 的方法，默认实现就是 `return this == obj`，但它**可以被重写**，用来表达「内容相同即相等」。',
+                  '所以要回答「== 和 equals 的区别」，本质是回答「谁决定相等语义」：`==` 由语言决定、永远比地址；`equals` 由类自己决定、默认也是比地址。String、Integer 这些类重写了 equals，于是出现了「内容相同就相等」的效果；而你自己写的类如果不重写，`equals` 和 `==` 完全等价。',
+                ],
+                points: [
+                  '`==` 不可重写；`equals` 可重写，默认等价于 `==`',
+                  '基本类型没有 equals，只有 `==`；用包装类时两者行为可能不同',
+                  '`Objects.equals(a, b)` 内部先判 null，是更安全的写法',
+                ],
+              },
+              {
+                kind: 'principle',
+                title: 'HashMap 同时用到 hashCode 和 equals，各管一段',
+                body: [
+                  '很多人背下了「重写 equals 必须重写 hashCode」，但说不清两者分工。把 put 的流程走一遍就明白了：**hashCode 负责缩小范围，equals 负责在范围内确认。**',
+                ],
+                steps: [
+                  {
+                    title: '算哈希：用 key 的 hashCode 定位到某个桶',
+                    detail:
+                      'HashMap 对 `hashCode()` 做扰动（`h ^ (h >>> 16)`），再与数组长度取模，得到桶下标。这一步只用 hashCode，**根本不看 equals**。',
+                  },
+                  {
+                    title: '在桶内线性比较：用 equals 找那个 key',
+                    detail:
+                      '桶里可能有多个节点（链表或红黑树）。逐个用 `equals` 比较，命中就覆盖 value 并返回旧值。',
+                  },
+                  {
+                    title: '如果只重写了 equals，不重写 hashCode',
+                    detail:
+                      '两个逻辑相等的对象，hashCode 仍是 Object 给的**地址派生值**，落到不同的桶。于是 put 时找不到已有 key，直接插入新节点，HashMap 里出现两个「相等」的 key，get 时也可能落到另一个桶里找不回来。',
+                  },
+                  {
+                    title: '如果只重写 hashCode，不重写 equals',
+                    detail:
+                      '两个对象落到同一个桶，但 equals 仍比地址，判定为不同 key，于是同一桶里堆两个节点——**桶内冲突**，查询退化为线性扫描，不会丢数据但性能变差。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**hashCode 决定「去哪个桶找」，equals 决定「桶里哪个是它」。少任何一个，这套两段式定位都会失效。**',
+              },
+              {
+                kind: 'diagram',
+                title: '一次 `map.put(key, value)` 的完整定位过程',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['HashMap', 'key.hashCode()', 'table[]', '桶内节点'],
+                  messages: [
+                    { from: 'HashMap', to: 'key.hashCode()', text: '取哈希，再做扰动：h ^ (h >>> 16)' },
+                    { from: 'key.hashCode()', to: 'HashMap', text: '返回一个 int', reply: true },
+                    { from: 'HashMap', to: 'table[]', text: '(n - 1) & hash → 桶下标。这一步只用 hashCode' },
+                    { from: 'table[]', to: '桶内节点', text: '桶空 → 直接放入；桶非空 → 进入下一阶段' },
+                    { from: '桶内节点', to: 'HashMap', text: 'hash 相同且 equals 为 true → 覆盖 value', reply: true },
+                    { from: 'HashMap', to: '桶内节点', text: '全都不同 → 挂链表尾；链长 ≥8 且容量 ≥64 转红黑树' },
+                  ],
+                  caption:
+                    '两个阶段的分工一眼可见：hashCode 只负责「去哪找」，equals 只负责「是不是它」。漏写任何一个，另一段就退回默认的地址比较，定位必然错位。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '桶内查找要比较几次',
+                diagram: {
+                  type: 'scale',
+                  items: [
+                    { label: '直接命中', value: 1, display: '1 次', note: '数组下标直达' },
+                    { label: '红黑树 32', value: 5, display: '≤5 次', note: 'log₂32' },
+                    { label: '链表 8', value: 8, display: '≤8 次', note: '逐节点 equals' },
+                    { label: '全冲突 1000', value: 1000, display: '≤1000 次', note: '退化线性' },
+                  ],
+                  caption:
+                    '这就解释了树化的意义：把最坏情况从 O(n) 压到 O(log n)。但如果所有 key 的 hashCode 都相同，树化也只能救到 log n——所以「分布均匀」比「树化」更根本，这也是重写 hashCode 时要用 31 这类质数的原因。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '为什么重写 equals 必须重写 hashCode',
+                questionId: 'java-01-Q47',
+                intent:
+                  '最高频的集合地基题。能讲出「两段式定位」的候选人，比背结论的明显高一个档次。',
+                points: [
+                  'hashCode 用于**定位桶**，equals 用于**桶内确认**，两者分工不同、缺一不可',
+                  '只重写 equals：逻辑相等的两个对象 hashCode 不同 → 落到不同桶 → HashSet 出现重复元素、HashMap get 不到',
+                  '只重写 hashCode：落同一桶但 equals 判不等 → 桶内冲突，查询退化为链表扫描',
+                  '契约要求：`equals` 返回 true 时，两个对象的 `hashCode` 必须相等；反之不要求',
+                ],
+                depth:
+                  '补一个可验证的现象：把只重写 equals 的对象放进 HashSet 两次，`size()` 会是 2，`contains()` 返回 false——因为 contains 也是先算哈希再找桶，两次算出来的桶不是同一个。',
+                followup:
+                  '「那 hashCode 相同但 equals 不等的对象呢？」——允许，这就是哈希冲突。HashMap 用链表/红黑树处理，代价是查询变慢，不影响正确性。',
+              },
+              {
+                kind: 'question',
+                title: 'equals 相等与 hashCode 相等的方向性',
+                questionId: 'java-01-Q48',
+                intent:
+                  '考的是你有没有真正记住契约的**方向**。这题答反了，说明前面全是背的。',
+                points: [
+                  '`equals` 相等 → `hashCode` **一定**相等（契约强制要求）',
+                  '`hashCode` 相等 → `equals` **不一定**相等（哈希冲突是正常的）',
+                  '反过来记更好用：hashCode 不同 → equals 一定不等，可以据此快速短路',
+                  '实现 hashCode 时用 31 这类质数参与计算，是为了让分布更均匀、减少冲突',
+                ],
+                depth:
+                  '31 这个数字有具体原因：`31 * i == (i << 5) - i`，JVM 能把它优化成移位与减法，比乘法快；同时 31 是奇质数，散列效果不差。这是「性能与分布的折中」，不是随便选的。',
+              },
+              {
+                kind: 'diagram',
+                title: '漏写一半，两种不同的坏法',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '只重写 equals（漏 hashCode）',
+                    tone: 'bad',
+                    items: [
+                      'hashCode 仍是地址派生值 → 两个「相等」对象落到不同桶',
+                      '`set.add(a); set.add(b)` 之后 size() 是 2',
+                      '`map.put(k, v)` 之后 get 拿不到，遍历却又看得见',
+                      '性质：**数据看起来丢了**，属于正确性故障',
+                    ],
+                  },
+                  right: {
+                    title: '只重写 hashCode（漏 equals）',
+                    tone: 'warn',
+                    items: [
+                      '落到同一个桶，但 equals 仍比地址 → 判为不同 key',
+                      '同一桶里堆两个节点，桶内冲突',
+                      '查询从 O(1) 退化为线性扫描，数据越多越慢',
+                      '性质：**数据不丢，但性能劣化**，属于性能故障',
+                    ],
+                  },
+                  caption:
+                    '契约只有一条方向：equals 相等 → hashCode 必须相等。漏掉任何一半，两段式定位都会断，只是断的位置不同。',
+                },
+              },
+              {
+                kind: 'compare',
+                title: '重写 equals 必须满足的五条约定',
+                head: ['约定', '含义', '违反后的典型现象'],
+                rows: [
+                  ['自反性', '`x.equals(x)` 恒为 true', '集合里 contains 自己返回 false'],
+                  ['对称性', '`x.equals(y)` 与 `y.equals(x)` 结果一致', '两个不同类互相 equals，List.contains 结果取决于顺序'],
+                  ['传递性', 'x=y 且 y=z，则 x=z', '父类子类混用 equals 时，集合去重结果不稳定'],
+                  ['一致性', '只要参与比较的字段不变，多次调用结果不变', '对象放进 HashSet 后又被修改，再也查不到'],
+                  ['非空性', '`x.equals(null)` 恒为 false，且不能抛 NPE', '集合操作中抛出空指针，排查困难'],
+                ],
+                note: '这五条不是学术洁癖。集合、缓存、ORM 框架全都依赖它们成立，破坏了就会出现「偶发、难复现」的 bug。',
+              },
+              {
+                kind: 'handwrite',
+                title: '手写一个值对象的 equals / hashCode / compareTo',
+                lang: 'java',
+                prompt:
+                  '给一个表示「订单号 + 金额」的值对象，写出 equals、hashCode、compareTo，要求它既能安全放进 HashSet，也能放进 TreeSet。写完后回答：equals 里为什么常用 getClass 而不是 instanceof？',
+                signature: `final class OrderKey implements Comparable<OrderKey> {
+    private final String id;
+    private final long amount;
+    // 构造器省略
+}`,
+                plan: [
+                  {
+                    title: 'equals 按「代价从低到高」做四个短路判断',
+                    detail:
+                      '`this == o` 直接 true（同引用不必比字段）；`o == null` 直接 false；`getClass() != o.getClass()` 直接 false；类型确认后强转，再逐字段比。顺序很重要，把最便宜的比较放前面。',
+                  },
+                  {
+                    title: '为什么用 getClass 而不是 instanceof',
+                    detail:
+                      '用 instanceof 会让父类与子类互相 equals 成立，破坏**对称性**：父类实例 equals 子类可能为 true，而子类 equals 父类可能为 false。值对象本就不该被继承扩展语义，所以用 getClass 锁死类型。反过来，如果类是明确设计成可继承体系的（如集合框架内部），才用 instanceof。',
+                  },
+                  {
+                    title: 'hashCode 用与 equals 完全相同的字段',
+                    detail:
+                      '少一个字段不行（相等对象哈希会不同），多一个字段也不行（改那个字段哈希就变）。基数用 31：奇质数、散列均匀，且 `31*i == (i<<5)-i` 可被 JVM 优化成移位减。',
+                  },
+                  {
+                    title: 'compareTo 的「返回 0」必须与 equals 同口径',
+                    detail:
+                      '如果 compareTo 只比 id 而 equals 比 id + amount，那么两个 amount 不同的对象在 TreeSet 里会被判为重复，**悄悄吞掉一个**。这是最隐蔽的一类 bug，也是这题真正的分水岭。',
+                  },
+                  {
+                    title: '最后点明前提：字段必须不可变',
+                    detail:
+                      '两个字段都 `final`。字段可变的话，对象进桶后再改字段，哈希值随之外变，之后就再也 contains 不到——「值对象 + 不可变 + 重写三件套」是一组绑定关系，不能拆开用。',
+                  },
+                ],
+                skeleton: `final class OrderKey implements Comparable<OrderKey> {
+    private final String id;
+    private final long amount;
+
+    @Override public boolean equals(Object o) {
+        if (TODO) return true;                  // 同一个引用
+        if (TODO) return false;                 // null 或类型不符
+        OrderKey other = (OrderKey) o;          // 类型已确认
+        return TODO;                             // 逐字段比较
+    }
+
+    @Override public int hashCode() {
+        return TODO;                             // 31 基数,字段与 equals 一致
+    }
+
+    @Override public int compareTo(OrderKey o) {
+        int c = TODO;                            // 先比 id
+        return c != 0 ? c : TODO;                // 相等再比 amount
+    }
+}`,
+                solution: `final class OrderKey implements Comparable<OrderKey> {
+    private final String id;
+    private final long amount;
+
+    OrderKey(String id, long amount) { this.id = id; this.amount = amount; }
+
+    @Override public boolean equals(Object o) {
+        if (this == o) return true;                                // 短路 1
+        if (o == null || getClass() != o.getClass()) return false;  // 短路 2、3
+        OrderKey other = (OrderKey) o;                              // 安全强转
+        return amount == other.amount
+                && Objects.equals(id, other.id);                     // id 可能为 null
+    }
+
+    @Override public int hashCode() {
+        int h = Objects.hashCode(id);          // null 安全,不是 Objects.hash
+        return 31 * h + Long.hashCode(amount);  // 字段与 equals 完全一致
+    }
+
+    @Override public int compareTo(OrderKey o) {
+        int c = Objects.compare(id, o.id,
+                Comparator.nullsFirst(Comparator.naturalOrder()));
+        return c != 0 ? c : Long.compare(amount, o.amount);
+    }
+}`,
+                complexity:
+                  '三个方法都是 O(k)，k 为参与比较的字段数（这里是 2），与集合规模无关。hashCode 无额外空间；equals 无对象分配；compareTo 若走 Comparator 链会有装箱，热路径上可退化为手写字段比较。',
+                traps: [
+                  '把参数写成 `equals(OrderKey o)` —— 这不是重写而是重载，集合里永远调用不到你的版本',
+                  'hashCode 用了 equals 没比的字段 → 相等对象哈希不同，桶定位错位',
+                  'compareTo 与 equals 口径不一致 → TreeSet / TreeMap 把不同对象当重复丢掉',
+                  '字段非 final，进 HashSet 后再改 → contains 返回 false，数据「消失」',
+                  '`Objects.hash(a, b)` 内部是可变参数数组 + 自动装箱，热路径上比手写 31 基数慢',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '浅拷贝与深拷贝：复制到哪一层为止',
+                body: [
+                  '浅拷贝只复制对象本身和其中的**引用值**，被引用的对象仍然共享；深拷贝会把引用指向的对象也复制一份，形成完全独立的两份数据。判断标准很简单：**改副本里的引用对象，原对象会不会跟着变。**',
+                  '`Object.clone()` 实现的是浅拷贝。所以一个含 `List` 字段的对象 clone 之后，两个对象持有同一个 List，往副本里 add 会同时影响原对象。这是 clone 最经典的坑。',
+                ],
+                points: [
+                  '浅拷贝：基本类型字段独立，引用类型字段共享',
+                  '深拷贝：递归复制所有引用对象，完全独立（注意循环引用）',
+                  '深拷贝实现方式：重写 clone 逐层复制、序列化反序列化、手写拷贝构造器、JSON 序列化',
+                  '推荐拷贝构造器或静态工厂，比 clone 更可控（不依赖 Cloneable 这种标记接口）',
+                ],
+              },
+              {
+                kind: 'code',
+                title: 'clone 的三个坑，一个都躲不掉',
+                lang: 'java',
+                code: `class Order implements Cloneable {
+    private List<Item> items;      // 引用类型字段
+    private int amount;
+
+    @Override
+    public Order clone() {
+        try {
+            Order copy = (Order) super.clone();   // 坑 1:只做浅拷贝
+            // 坑 2:想深拷贝必须手动处理每个引用字段
+            copy.items = new ArrayList<>(this.items);
+            return copy;
+        } catch (CloneNotSupportedException e) {
+            throw new AssertionError();          // 坑 3:不实现 Cloneable 就抛这个
+        }
+    }
+}`,
+                caption: 'super.clone() 走的是 native 的按位复制,不会调用你的构造器',
+                notes: [
+                  { line: 'Cloneable', text: '一个没有任何方法的标记接口,不实现就抛 CloneNotSupportedException' },
+                  { line: 'super.clone()', text: '按位复制,连 final 字段也一起复制,但引用字段仍指向同一对象' },
+                  { line: '不执行构造器', text: '这是 clone 最反直觉的地方:对象被创建了,但构造器里的初始化逻辑一次都没跑' },
+                ],
+              },
+              {
+                kind: 'question',
+                title: '深拷贝与浅拷贝',
+                questionId: 'java-01-Q49',
+                intent:
+                  '看你能不能给出「判断标准」和「实现方式」两截答案。只答定义、答不出怎么实现，是典型的一轮游。',
+                points: [
+                  '浅拷贝：复制对象本身与引用值，引用指向的对象共享；改副本的引用对象会影响原对象',
+                  '深拷贝：递归复制所有层级，两份数据完全独立',
+                  '实现方式一：重写 `clone()`，对每个引用字段再次 clone 或新建',
+                  '实现方式二：序列化后再反序列化（注意 Serializable 与性能开销）',
+                  '实现方式三：手写拷贝构造器 `new Order(other)`，最可控，推荐',
+                ],
+                depth:
+                  '加分点：深拷贝要处理**循环引用**（A 引用 B，B 又引用 A），简单递归会栈溢出；序列化方案天然能处理，但要保证整条引用链都可序列化。',
+              },
+              {
+                kind: 'question',
+                title: '== 与 equals 的区别',
+                questionId: 'java-01-Q46',
+                intent:
+                  '入门必考，但答得好不好，看你有没有说清「谁决定相等语义」这一层。',
+                points: [
+                  '`==` 是运算符：基本类型比值，引用类型比地址，**不可重写**',
+                  '`equals` 是 Object 的方法：默认实现是 `this == obj`，**可重写**以表达逻辑相等',
+                  'String、包装类等重写了 equals，所以内容相同即相等；自定义类不重写时两者完全等价',
+                  '最佳实践：常量与变量比较时把常量放前面（`"abc".equals(s)`）避免 NPE，或用 `Objects.equals`',
+                ],
+                depth:
+                  '补一句就够深：`Integer a = 128; Integer b = 128;` 时 `a == b` 为 false，但 `a.equals(b)` 为 true——这不是 equals 更「正确」，而是两者在回答不同的问题：一个是「是不是同一个对象」，一个是「值是否相等」。',
+              },
+            ],
+            outline: [
+              'equals 需满足自反、对称、传递、一致，且与 null 比较恒为 false',
+              'equals 相等则 hashCode 必须相等；反之不要求，但会退化成链表',
+              'compareTo 返回 0 应与 equals 保持一致，否则 TreeMap 会「吞掉」元素',
+              '重写 equals 必须同时重写 hashCode，否则哈希容器彻底失效',
+            ],
+            pitfalls: [
+              '只重写 equals 不重写 hashCode，HashSet 里能存进两个「相等」对象',
+              '用可变字段参与 hashCode 计算，对象入桶后字段一改就再也找不回来',
+            ],
+          },
+        },
+        {
+          id: 'exceptions',
+          title: '异常体系与 try-with-resources',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['异常'] }],
+          content: {
+            intro:
+              '异常这一章的题都在考「边界」：什么该捕获、什么该往外抛、finally 与 return 谁先谁后、资源关闭时抛异常会发生什么。这类题看着琐碎，实际考察的是你有没有写过真正需要保证资源释放的代码。本节不背结论，而是从 JVM 的**异常表**和 javac 对 finally 的**改写**讲起——把这两个机制看懂，`try { return "a" } finally { return "b" }` 为什么返回 b、为什么 try 块没有运行时开销、为什么 try-with-resources 的 suppressed 比手写 finally 更安全，全都变成必然。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '异常不是报错信息，是「控制流的第二个出口」',
+                body: [
+                  '把异常理解成「错误提示」，会一直答不到点上。它的本质是**一种非局部的跳转机制**：方法正常的出口是 return，异常出口是 throw——后者可以一次性跨过好几层调用，把「出错」和「处理出错」这两个位置彻底分开。所以异常的价值不在「报告错误」，而在于**让中间层不必关心错误**：`a()` 调 `b()` 调 `c()`，c 抛异常，b 完全可以不写任何 try，异常会直接越过它到达 a。',
+                  '代价也来自这一点：跳转路径不经由返回值，**调用方很难从签名上看出来会抛什么**——这正是受检异常存在的原因（用 throws 把出口写进类型系统）。而每抛一次都要构造对象、填充栈轨迹，成本远高于一次 if 判断，这也是「不要用异常做流程控制」的技术依据，而不是风格洁癖。',
+                ],
+                term: {
+                  name: 'Throwable',
+                  def: '所有可抛出对象的根类。只有它的子类实例才能出现在 throw 语句与 catch 子句中。两个直接子类是 Error（JVM 层面的严重故障，程序不应处理）与 Exception（程序层面可处理）。它内部保存 message、cause（异常链）与 stackTrace（栈轨迹）。',
+                },
+                points: [
+                  '只有 `Throwable` 及其子类能被 `throw` / `catch`，泛型擦除后也不能 catch 类型变量',
+                  '三个构造信息的用途不同：`message` 给人看，`cause` 给排查链路用，`stackTrace` 给定位用',
+                  '受检与否不是「严重程度」之分，而是「编译器是否强制处理」之分',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'Throwable 家族：三条分支，三种处理态度',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: 'Throwable',
+                    note: '唯一可抛出的根',
+                    children: [
+                      {
+                        label: 'Error',
+                        note: '不要捕获',
+                        tone: 'bad',
+                        children: [
+                          { label: 'OutOfMemoryError', note: '内存耗尽' },
+                          { label: 'StackOverflowError', note: '栈深超限' },
+                          { label: 'NoClassDefFoundError', note: '类定义加载失败' },
+                        ],
+                      },
+                      {
+                        label: 'Exception',
+                        note: '可以捕获',
+                        tone: 'primary',
+                        children: [
+                          {
+                            label: '受检 Checked',
+                            note: '编译器强制处理',
+                            tone: 'primary',
+                            children: [
+                              { label: 'IOException' },
+                              { label: 'SQLException' },
+                              { label: 'ClassNotFoundException' },
+                            ],
+                          },
+                          {
+                            label: '非受检 Unchecked',
+                            note: 'RuntimeException 系',
+                            tone: 'warn',
+                            children: [
+                              { label: 'NullPointerException' },
+                              { label: 'ClassCastException' },
+                              { label: 'ArrayIndexOutOfBounds' },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  caption:
+                    '记忆抓手：**Error 是「环境坏了」，Checked 是「外部世界可能出问题」，Unchecked 是「代码写错了」。** 三种态度分别是：不处理、必须处理、让它暴露出来修掉。',
+                },
+              },
+              {
+                kind: 'why',
+                title: '为什么 Java 要发明「受检异常」',
+                body: [
+                  '受检异常的设计动机非常具体：**让调用方无法假装故障不存在**。文件可能不存在、网络可能断、数据库可能连不上——这些都不是 bug，而是必然会遇到的外部状态。如果语言不强制，绝大多数人会一路忽略，直到线上炸掉。所以 Java 把「我可能抛这些」写进方法签名（throws），编译器检查你有没有 catch 或继续 throws。',
+                  '但这套设计在实践中被证明**用力过猛**：它让签名随实现细节扩散（底层换个实现，上层一串方法都要改签名），也让 lambda、Stream 这类函数式 API 变得难用（`Function` 不能抛受检异常，于是到处是 try-catch 包装）。所以现代 Java 项目的共识是：**默认用非受检异常，只有「调用方必须处理、且确实能处理」的业务契约才用受检异常。** 这句话在面试里是加分项。',
+                ],
+                without:
+                  '反证：如果没有受检异常，`new FileInputStream("a.txt")` 就不会提醒你文件可能不存在，代码会在第一次运行到那行时抛 FileNotFoundException 并中断——而这个错误本可以在编码阶段就被迫处理。反过来说，如果所有异常都受检，`list.get(0)` 也要声明 IndexOutOfBounds，代码会被签名淹没。',
+              },
+              {
+                kind: 'compare',
+                title: '受检与非受检：差别不在严重程度，在编译器的态度',
+                head: ['维度', '受检 Checked', '非受检 Unchecked'],
+                rows: [
+                  ['继承位置', 'Exception 的子类（不含 RuntimeException 分支）', 'RuntimeException 及其子类；Error 也算非受检'],
+                  ['编译期检查', '**强制** catch 或 throws，否则编译不过', '完全不检查'],
+                  ['典型代表', 'IOException、SQLException、ClassNotFoundException', 'NPE、ClassCastException、IllegalArgumentException'],
+                  ['语义', '可预期的外部故障，调用方「有办法应对」', '程序缺陷或前置条件被违反'],
+                  ['正确处理方式', '捕获后恢复（重试、降级、提示用户）或包装上抛', '修代码，不要 catch；顶多在最外层统一兜底'],
+                  ['设计取舍', '契约明确，但传染签名、妨碍 lambda', '轻量灵活，但容易漏处理'],
+                ],
+                note: '一个反直觉的点：**Error 也属于非受检**，因为编译器同样不强制处理它。所以「非受检 = RuntimeException」这个说法并不严格，只能说 RuntimeException 是最常用的非受检异常。',
+              },
+              {
+                kind: 'question',
+                title: 'Checked Exception 和 Unchecked Exception 的区别',
+                questionId: 'java-01-Q52',
+                intent:
+                  '标准题，但答完区别之后几乎一定会追问「那你项目里用哪个」。前半段考记忆，后半段考判断力。',
+                points: [
+                  '受检：编译器强制 catch 或 throws，代表 IOException / SQLException / ClassNotFoundException',
+                  '非受检：RuntimeException 及其子类，编译器不检查；**Error 在 JLS 意义上也属非受检**',
+                  '语义差异：受检是「可预期的外部故障」，非受检是「程序缺陷或前置条件被违反」',
+                  '给出倾向：默认非受检，让 bug 暴露；只有业务契约要求调用方必须处理时才用受检',
+                ],
+                depth:
+                  '能说清「为什么现代框架普遍改用非受检」就拉开档次了：受检异常会沿着调用链传染签名，与 lambda / Stream 天然冲突（`Function.apply` 不允许抛受检异常，只能包一层 try-catch），Spring 因此把大量受检异常统一转成了 `DataAccessException` 这类运行时异常。',
+              },
+              {
+                kind: 'principle',
+                title: 'try-catch 为什么「没有运行时开销」：异常表机制',
+                body: [
+                  '很多人以为 try 块会带来性能损失，其实**只要不抛异常，进入 try 块的成本是零**——连一条指令都没有。原因在于 javac 不生成任何「进入 / 离开 try」的指令，而是把 try 的范围信息写进方法的一个附属结构：**异常表（exception_table）**。',
+                  '每个方法在 class 文件里都带一张异常表，每行四个字段：`start_pc`、`end_pc`（字节码范围）、`handler_pc`（跳转目标）、`catch_type`（捕获的异常类，0 表示 any/finally）。抛异常时 JVM 才去遍历这张表，找第一个「范围命中且类型匹配」的行，跳到 handler；找不到就弹出当前栈帧，交给调用方的异常表继续找。',
+                ],
+                steps: [
+                  {
+                    title: '正常路径：异常表完全不参与',
+                    detail:
+                      '方法正常执行时，JVM 从不读异常表。所以 try 包住一万行代码，与不包的性能差异是 0。这条事实直接推翻了「try 影响性能」的传言——真正贵的是 throw，不是 try。',
+                  },
+                  {
+                    title: '抛出时：在当前栈帧的异常表里找 handler',
+                    detail:
+                      '`athrow` 指令触发后，JVM 拿异常对象的类型，逐行比对当前帧异常表：范围是否覆盖抛出点的 pc、catch_type 是否是异常类型的父类。命中就清空操作数栈、跳到 handler_pc。',
+                  },
+                  {
+                    title: '没找到：弹出栈帧，继续向上找',
+                    detail:
+                      '当前方法没有匹配的 handler，就弹出这个栈帧，把异常交给调用者的异常表。一路弹到 main 也没人接，线程终止并打印栈轨迹。**这就是「异常能跨层跳转」的实现方式**——它并不神秘，只是逐个栈帧查表。',
+                  },
+                  {
+                    title: '匹配是「按类型」而不是「按名字」，且子类优先',
+                    detail:
+                      '异常表按书写顺序（也就是源码里 catch 的顺序）逐行匹配。所以 `catch (Exception e)` 写在 `catch (IOException e)` 前面会让后者永远不可达——javac 直接报错。这也是「先具体后宽泛」这条规矩的物理原因。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**try 的成本是编译期的（写一张表），throw 的成本才是运行期的（构造对象 + 填栈 + 查表）。** 所以优化方向永远是「少抛」，不是「少 try」。',
+              },
+              {
+                kind: 'analogy',
+                title: '异常表就像大楼的消防分区图',
+                text: '把方法想成一层楼，异常表就是贴在这层楼的**消防分区图**：图上写着「A 区起火走 3 号楼梯，B 区起火走 5 号楼梯」。平时这张图挂在墙上，不影响任何人走动（零开销）；只有真的起火（throw）时，人们才抬头看图，找到离自己最近的出口（handler_pc）。如果这层楼没有对应区域，就往下一层跑（弹栈），直到有人接应。\n\n这个类比还能解释两件事。第一，**为什么 catch 顺序重要**：图上写着「所有区域起火都走 1 号门」时，后面「A 区走 3 号门」就永远轮不到——所以宽泛的 catch 必须放在最后。第二，**为什么 finally 能被保证执行**：它不是图上的一个出口，而是每个出口前面都必须经过的一道门（下一节会看到 javac 怎么把手写代码复制到每个出口）。',
+                mapping: [
+                  { real: '消防分区图', tech: '异常表（start_pc / end_pc / handler_pc）' },
+                  { real: '某一区的出口', tech: 'catch 块（按 pc 范围 + 异常类型匹配）' },
+                  { real: '这层楼没出口，往下跑', tech: '弹栈，交给调用方的异常表' },
+                  { real: '每个出口必经的门', tech: 'finally（javac 复制到所有出口路径）' },
+                ],
+                limit:
+                  '消防图是「出事才看」的被动信息，而异常表还承担类型匹配（catch_type 是异常类的父类即命中），这是消防图没有的语义；另外 finally 并非由异常表实现，而是靠代码复制，这一点类比只能提示「必经」，说不出机制。',
+              },
+              {
+                kind: 'principle',
+                title: 'finally 的真实实现：javac 把代码复制到每条出口',
+                body: [
+                  '「finally 一定执行」听起来像运行时的保证，其实是**编译期的代码复制**。javac 会把 finally 块的内容复制到：try 正常结束之后、每个 catch 块正常结束之后，再加一个 `catch_type = 0`（catch any）的处理器——它先执行 finally 内容，然后 `athrow` 把原异常重新抛出。这就是异常路径也一定会经过 finally 的原因。',
+                ],
+                steps: [
+                  {
+                    title: '正常路径：finally 追加在 try 末尾',
+                    detail:
+                      'try 块正常执行完，紧接着就是 finally 的字节码。这是最常见的一条路径。',
+                  },
+                  {
+                    title: 'catch 路径：每个 catch 末尾也复制一份',
+                    detail:
+                      '有几个 catch 就复制几份。所以 finally 代码体积会随 catch 数量增长——写很多个 catch 时，class 文件会明显变大。',
+                  },
+                  {
+                    title: '异常未捕获路径：额外生成一个 catch-any 处理器',
+                    detail:
+                      '这个处理器捕获所有异常（catch_type = 0），执行 finally 内容，再用 `athrow` 把**原异常**抛出去——异常对象先被存进一个局部变量槽，所以重抛时还是同一个实例，栈轨迹不变。',
+                  },
+                  {
+                    title: 'return 出现在 try 里：返回值先被「暂存」',
+                    detail:
+                      '`try { return "a"; }` 编译成：求值 "a" → 存进返回值槽（一个隐藏的局部变量）→ 跳去执行 finally → 最后 `areturn` 读那个槽。**关键就在「先暂存、后返回」**：这解释了为什么 finally 里改基本类型局部变量无效（改的是另一个变量），却能让 finally 里的 return 覆盖结果（它直接改写返回值槽）。',
+                  },
+                ],
+                takeaway:
+                  '由实现直接推出三条结论：① finally 里写 return 会覆盖 try 的返回值；② finally 里改基本类型局部变量无效，改引用对象的属性有效；③ finally 抛异常会覆盖原异常——所以 finally 里只做不会失败的清理动作。',
+              },
+              {
+                kind: 'diagram',
+                title: '`try { return "a" } finally { return "b" }` 的执行时序',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['try 块', '返回值槽', 'finally 块', '调用方'],
+                  messages: [
+                    { from: 'try 块', to: '返回值槽', text: '求值 "a"，写入暂存槽（此时结果是 a）' },
+                    { from: 'try 块', to: 'finally 块', text: '跳转执行 finally，不做 return' },
+                    { from: 'finally 块', to: '返回值槽', text: '遇到 return "b"，**覆盖**暂存槽为 b', tone: 'warn' },
+                    { from: 'finally 块', to: '调用方', text: 'areturn 读暂存槽，返回 "b"', reply: true },
+                  ],
+                  caption:
+                    '两个 return 都会执行，但只有一个能生效——后写的那个。若 finally 里没有 return，则第 3 步不发生，返回的仍是 a。同一机制下，finally 里抛异常会覆盖原异常，finally 里改 `x = 99` 则无效（x 不在返回值槽里）。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '为什么「改基本类型无效、改对象内容有效」',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '基本类型：改的是另一个变量',
+                    tone: 'neutral',
+                    items: [
+                      '`int x = 1; try { return x; }` —— x 的值已被复制进返回值槽',
+                      'finally 里 `x = 99` 改的是局部变量 x',
+                      '返回值槽仍是 1，方法返回 1',
+                    ],
+                  },
+                  right: {
+                    title: '引用类型：改的是同一个对象',
+                    tone: 'warn',
+                    items: [
+                      '`StringBuilder sb = new StringBuilder("a"); try { return sb; }`',
+                      '返回值槽存的是 sb 的**引用副本**，指向同一个对象',
+                      'finally 里 `sb.append("b")` 改的是对象内容',
+                      '返回的引用没变，但读出来已是 "ab"',
+                    ],
+                  },
+                  caption:
+                    '一句话：**返回值槽冻结的是「值」，不是「对象」。** 值是一个数字时就冻结了数字；值是一个地址时只冻结了地址，地址指向的东西照样能改。这和上一节「Java 只有值传递」是同一个原理的第二次出现。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'try 中有 return，finally 会执行吗？返回什么？',
+                questionId: 'java-01-Q54',
+                intent:
+                  '高频且区分度极高的题。答案本身只有一句话，但面试官会顺着它连问三层：返回值覆盖、异常吞掉、基本类型与引用类型的差异。',
+                points: [
+                  '会执行：先对 return 表达式求值并**暂存**，再执行 finally，最后才真正返回',
+                  '`try{return "a"} finally{return "b"}` 返回 **"b"**，finally 的 return 覆盖了暂存值',
+                  'finally 里的 return 还会**吞掉 try 中的异常**，这是绝对要避免的写法',
+                  '`try{return x} finally{x=99}`（基本类型）返回 1，因为改的是另一个变量',
+                  '`return sb` 后 finally 里 `sb.append("b")` 会影响结果，因为改的是同一个对象',
+                ],
+                depth:
+                  '能补「这是 javac 复制 finally 代码的结果」就到原理层了：正常路径把 finally 追加在 try 之后，异常路径用 catch-any 处理器执行 finally 再重抛；return 之所以能被覆盖，是因为返回值先写进一个隐藏槽位，而 finally 里的 return 又写了一次。',
+              },
+              {
+                kind: 'diagram',
+                title: '抛一次异常，比一次 if 判断贵几个数量级',
+                diagram: {
+                  type: 'scale',
+                  items: [
+                    { label: 'if 判断', value: 1, display: '≈1 ns', note: '一次比较与跳转' },
+                    { label: '空对象 new', value: 8, display: '≈10 ns', note: 'TLAB 分配，几乎无感' },
+                    { label: '填充栈轨迹', value: 3000, display: '≈3 μs', note: 'fillInStackTrace 遍历整个调用栈' },
+                    { label: '完整 throw+catch', value: 5000, display: '≈5 μs', note: '构造 + 填栈 + 查异常表' },
+                  ],
+                  caption:
+                    '数量级参考（同机测量会浮动，但比例稳定）。**开销的 90% 以上来自 fillInStackTrace**——它要遍历并记录每一层栈帧。这也是 `-XX:-StackTraceInThrowable` 与重写 `fillInStackTrace()` 能提速的原因。结论：异常是「异常路径」的工具，不要拿它做循环里的正常分支。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: 'try-with-resources 编译后长什么样',
+                body: [
+                  'try-with-resources 是纯语法糖，javac 会把它改写成一段相当笨拙的代码：一个主异常变量、一个嵌套 try、以及在 finally 里对 `close()` 的调用与 `addSuppressed` 处理。看懂这段改写，就知道它为什么比手写 finally 更安全。',
+                ],
+                steps: [
+                  {
+                    title: '资源声明：按逆序关闭',
+                    detail:
+                      '`try (A a = ...; B b = ...)` 编译后等价于嵌套两层，关闭顺序是 **b 先、a 后**（与声明相反）。因为 b 通常在 a 之上建立，先关上层才符合依赖关系。',
+                  },
+                  {
+                    title: '正常结束：依次 close',
+                    detail:
+                      'try 块正常执行完，先 close b 再 close a。若某个 close 抛异常，后面的 close 仍会被执行（每个 close 都包在自己的保护里）。',
+                  },
+                  {
+                    title: '业务异常 + close 异常：后者被「压制」',
+                    detail:
+                      '如果 try 块已经抛了业务异常，随后 close 也抛异常，TWR 会把 close 异常挂到业务异常上：`primary.addSuppressed(closeEx)`。**主异常仍是业务异常**，可通过 `getSuppressed()` 拿到被压制的那些。这就是它优于手写 finally 的核心原因——手写时 close 的异常会直接覆盖业务异常。',
+                  },
+                  {
+                    title: '被抑制的异常也参与栈打印',
+                    detail:
+                      '`printStackTrace` 会输出 `Suppressed: ...` 段落。所以「异常没丢，只是降级为副线」，比手写 finally 里吞掉或覆盖要完整得多。',
+                  },
+                  {
+                    title: 'JDK 9 起可引用已有变量',
+                    detail:
+                      '只要变量是 final 或 effectively final，可以写 `try (in) { ... }`，不必重新声明。这让「资源在外部创建、由 TWR 负责关闭」成为可能。',
+                  },
+                ],
+                takeaway:
+                  '回答模板：**语法糖 → 编译后仍是 try-finally → 但多了 suppressed 机制 → 所以业务异常不会被 close 异常覆盖。** 顺序是「逆序关闭」，条件是「实现 AutoCloseable」。',
+              },
+              {
+                kind: 'diagram',
+                title: 'close 也抛异常时：手写 finally 与 TWR 的差别',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '手写 finally：业务异常被覆盖',
+                    tone: 'bad',
+                    items: [
+                      'try 块抛 ServiceException（真正的根因）',
+                      'finally 里 close() 又抛 IOException',
+                      'IOException 覆盖前者，日志里只剩 close 失败',
+                      '根因彻底丢失，排查从零开始',
+                    ],
+                  },
+                  right: {
+                    title: 'TWR：业务异常为主，close 异常被压制',
+                    tone: 'good',
+                    items: [
+                      '主异常仍是 ServiceException',
+                      'IOException 通过 addSuppressed 挂在它身上',
+                      '打印时出现 `Suppressed: ...` 段落',
+                      '`getSuppressed()` 可编程读取',
+                    ],
+                  },
+                  caption:
+                    '这不是风格偏好，而是**信息完整性**的差别：手写 finally 会丢失根因，而丢根因是最难查的一类线上问题。所以只要资源实现了 AutoCloseable，就用 TWR——它是唯一能保证两个异常都留存的写法。',
+                },
+              },
+              {
+                kind: 'handwrite',
+                title: '手写一个资源类 + 自定义异常链：验证 suppressed 与 cause',
+                lang: 'java',
+                prompt:
+                  '面试官：「实现一个必须被关闭的资源类，用 try-with-resources 使用它；同时定义业务异常，演示异常链（cause）与压制异常（suppressed）分别长什么样。」考的是你有没有真的用过 `getSuppressed()`，而不是只会背「TWR 更好」。',
+                signature:
+                  'class Conn implements AutoCloseable {\n    public void query() throws SQLException;\n    @Override public void close() throws SQLException;\n}\nclass RepoException extends RuntimeException {\n    RepoException(String msg, Throwable cause);\n}',
+                plan: [
+                  {
+                    title: '资源类实现 AutoCloseable，close 里真的会抛',
+                    detail:
+                      '`close()` 声明 `throws Exception`，这里故意抛一个 SQLException——目的是制造「业务异常 + 关闭异常」同时发生的场景，否则永远看不到 suppressed。',
+                  },
+                  {
+                    title: '在 TWR 里抛业务异常，观察主异常是谁',
+                    detail:
+                      '`query()` 抛 SQLException 后，close 也会被调用并抛异常。打印栈会看到主异常是 query 的那个，close 的那个出现在 `Suppressed:` 下面。',
+                  },
+                  {
+                    title: '包装成业务异常上抛，把原异常作为 cause',
+                    detail:
+                      '`throw new RepoException("查询用户失败", e)` —— cause 保留完整因果链，栈里会输出 `Caused by: java.sql.SQLException: ...`。**不传 cause 是最常见的低级错误**，等于把根因删了。',
+                  },
+                  {
+                    title: '验证两个机制的读取方式',
+                    detail:
+                      'cause 用 `getCause()` 读（通常只看栈就够）；suppressed 用 `getSuppressed()` 读，它是数组，可能有多个。两者地位不同：cause 是「因为我坏了所以上层坏」，suppressed 是「我在收尾时也坏了」。',
+                  },
+                ],
+                skeleton:
+                  'class Conn implements AutoCloseable {\n    public void query() throws SQLException {\n        throw new SQLException("查询超时");      // TODO 1:制造业务异常\n    }\n\n    @Override\n    public void close() throws SQLException {\n        // TODO 2:这里也抛一个异常,用来观察它是否被压制\n    }\n}\n\nclass RepoException extends RuntimeException {\n    // TODO 3:构造器必须接收 cause,并调用 super(msg, cause)\n}\n\n// 使用处\ntry (Conn c = new Conn()) {\n    c.query();\n} catch (Exception e) {\n    // TODO 4:包装成 RepoException 上抛,原异常作为 cause\n}',
+                solution:
+                  'class Conn implements AutoCloseable {\n\n    public void query() throws SQLException {\n        throw new SQLException("查询超时");\n    }\n\n    @Override\n    public void close() throws SQLException {\n        throw new SQLException("关闭连接失败");   // 收尾时也坏了\n    }\n}\n\nclass RepoException extends RuntimeException {\n    public RepoException(String msg, Throwable cause) {\n        super(msg, cause);          // 关键:cause 不能丢\n    }\n}\n\nclass UserRepo {\n    public User find(long id) {\n        try (Conn c = new Conn()) {          // 关闭交给编译器\n            c.query();\n            return null;\n        } catch (SQLException e) {\n            throw new RepoException("查询用户失败,id=" + id, e);\n        }\n    }\n}\n\n// 实际输出(节选):\n// RepoException: 查询用户失败,id=1\n//   Caused by: java.sql.SQLException: 查询超时\n//     Suppressed: java.sql.SQLException: 关闭连接失败\n//   [Suppressed] 由 TWR 自动挂上,手写 finally 时会被它覆盖',
+                complexity:
+                  '没有算法复杂度问题；关注的是**异常信息完整度**。构造异常的主要成本是 fillInStackTrace 遍历栈，所以不要在热路径上靠异常做分支。',
+                traps: [
+                  '`super(msg)` 而不是 `super(msg, cause)` —— 根因直接丢失，栈里看不到 Caused by',
+                  '`close()` 里吞掉异常（空 catch）—— 关闭失败同样该暴露，否则连接泄漏无从发现',
+                  '在 finally 里手写 close() —— 一旦 close 抛异常就覆盖业务异常，这正是 TWR 要解决的问题',
+                  '把异常对象存成 static 复用 —— 栈轨迹是构造时抓的，复用会让所有抛出点的栈都一样',
+                  '`catch (Exception e) { throw new RuntimeException(e.getMessage()); }` —— 丢 cause 的另一种写法',
+                ],
+              },
+              {
+                kind: 'compare',
+                title: '三对最容易搞混的异常概念',
+                head: ['对比项', '左边是什么', '右边是什么'],
+                rows: [
+                  ['Exception vs Error', '程序层面可处理：业务失败、IO 故障', 'JVM 层面严重故障：内存耗尽、栈溢出，**不应捕获**'],
+                  ['ClassNotFoundException vs NoClassDefFoundError', '**受检异常**：显式动态加载（Class.forName）时找不到类，可 catch', '**Error**：JVM 链接一个编译期已知的类时失败，常见于 jar 缺失或 static 块抛过异常'],
+                  ['throw vs throws', '语句，抛出一个异常实例，写在方法体里', '声明，列出本方法可能抛出的受检异常，写在签名上'],
+                ],
+                note: '第二对值得展开：`NoClassDefFoundError` 有个隐蔽成因——**该类的 static 块曾经抛过异常**，第一次初始化失败后，再次使用这个类就会得到这个 Error，而真正的根因藏在第一次的 `ExceptionInInitializerError` 里。查这种问题要往前翻日志，不能只看最后那次。',
+              },
+              {
+                kind: 'question',
+                title: 'ClassNotFoundException 与 NoClassDefFoundError 的区别',
+                questionId: 'java-01-Q56',
+                intent:
+                  '难题，考的是「类加载时机」的细节。答「一个是异常一个是错误」只是最表层，能说清**什么时候触发**才算过关。',
+                points: [
+                  'ClassNotFoundException 是**受检异常**，发生在运行期**显式**动态加载时：Class.forName、ClassLoader.loadClass',
+                  'NoClassDefFoundError 是 **Error**，发生在 JVM 尝试**链接**一个编译期已知的类时失败',
+                  '常见成因：依赖 jar 缺失 / 版本冲突；或该类的静态初始化曾经抛异常',
+                  '一句话对照：前者是「你主动找类没找到」，后者是「JVM 加载类定义失败」',
+                ],
+                depth:
+                  '加分点：`NoClassDefFoundError` 往往只是**表象**，真正的根因是更早的一条 `ExceptionInInitializerError`（static 块抛了异常）。排查时要找「第一次」出现的日志，而不是最后一次。这一点能立刻区分出有没有真实排查经验。',
+              },
+              {
+                kind: 'concept',
+                title: '异常处理的最佳实践与「异常链」',
+                body: [
+                  '所有实践都围绕一个目标：**让异常在向上传递的过程中不丢信息、不误导人**。具体到五条：抛出具体类型而非 Exception/Throwable（调用方才能分类处理）；异常消息带业务上下文（哪个 id、哪个文件）；捕获后要么处理要么包装上抛，**绝不空 catch**；包装时把原异常作为 cause 传入；不要用异常做流程控制。',
+                  '**异常链**就是把「下层为什么坏」串起来：`throw new RepoException("查询用户失败, id=1", e)`。这样栈里会出现 `Caused by: java.sql.SQLException: 查询超时`，排查时能一路看到底。反例是 `new RepoException(e.getMessage())`——消息还在，但类型、栈、cause 全丢了，等于把证据销毁。',
+                  '还有两个工程细节：不要在多层重复记日志（每层都 log 会让同一异常刷屏，正确做法是**要么记日志要么上抛**，只在能处理的层记）；自定义异常别定义成静态常量复用，因为栈轨迹在构造时抓取，复用会让所有抛出点共享一份错误的栈。',
+                ],
+                points: [
+                  '`catch` 顺序必须具体到宽泛，否则宽泛分支后面不可达（javac 直接报错）',
+                  '空 catch 是最高危写法：错误被静默吞掉，等于把 bug 变成「偶发、不可复现」',
+                  '`finally` 里只放不会失败的清理；有 return / throw 的 finally 一律视为 bug',
+                  '日志与抛出二选一：本层能处理就记日志并处理，不能处理就包装上抛、不要记',
+                  '非受检异常也要写 message：NPE 之外，`IllegalArgumentException("age 不能为负, 实际 " + age)` 能省掉一次调试',
+                ],
+              },
+            ],
+            outline: [
+              'Throwable 分 Error 与 Exception，Exception 再分受检与非受检',
+              'try 本身零运行时开销，异常表只在抛出时被遍历；贵的是 fillInStackTrace',
+              'finally 由 javac 复制到每条出口路径，返回值先暂存，所以 finally 里的 return 会覆盖结果',
+              'try-with-resources 按声明逆序关闭，close 异常以 suppressed 形式挂到主异常上',
+            ],
+            pitfalls: [
+              '在 finally 里写 return 或抛异常，会覆盖 try 的返回值、甚至吞掉原始异常',
+              '包装异常时只传 message 不传 cause，导致 Caused by 链路断裂、根因永久丢失',
+              '在循环或热路径里用异常做正常分支判断，开销比 if 高 3 个数量级',
+            ],
+          },
+        },
+        {
+          id: 'lang-misc',
+          title: '语言细节：修饰符、位运算与不可变设计',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['其他语言细节'] }],
+          content: {
+            intro:
+              '这一节收拢六个「不常考、但一考就露怯」的小问：`&` 与 `&&`、switch 支持哪些类型、移位为什么能替代乘法、怎么设计不可变类、四种访问修饰符、变长参数。它们看起来毫不相干，其实都在回答同一个问题——**这段代码会被编译成什么**。想通「短路与非短路的字节码差异」「switch 的跳转表」「变长参数编译成数组」这几处翻译过程，这些结论就不用背，也不会记混。',
+            sections: [
+              {
+                kind: 'why',
+                title: '为什么这些「小问」值得单独学',
+                body: [
+                  '因为这些题目的正确答案都不在语法书的第一层：`&&` 的价值不在「短路」这两个字，而在「`obj != null && obj.f()` 能避免 NPE」这个具体后果；`2 << 3` 的价值不在「等于 16」，而在「位运算没有乘法指令、且移位数会对 32 取模」这些边界。面试官问这些，是在确认你写过会因为一个符号写错就崩的代码。',
+                  '更重要的是它们共享同一种思维方式：**先问「编译器把它翻译成什么」，答案自然浮现。** switch 之所以不支持 long，是因为它被编译成基于 int 的跳转表；变长参数之所以必须放最后，是因为它被编译成一个数组参数；不可变类之所以要做防御性拷贝，是因为 `final` 只锁住引用、锁不住对象。这条思路能一路推下去。',
+                ],
+                without:
+                  '反证：把 `if (obj != null && obj.isValid())` 写成 `&`，短路消失，`obj` 为 null 时照样进方法体，NPE 立刻抛——一个符号之差，从「安全判断」变成「必崩代码」。这类错误编译器不会提醒，只能靠理解语义避免。',
+              },
+              {
+                kind: 'diagram',
+                title: '四种访问修饰符：一张表决定「谁能看见」',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['同类', '同包', '子类（不同包）', '任意位置'],
+                  rows: [
+                    ['private', '可见', '—', '—', '—'],
+                    ['默认（包级）', '可见', '可见', '—', '—'],
+                    ['protected', '可见', '可见', '可见', '—'],
+                    ['public', '可见', '可见', '可见', '可见'],
+                  ],
+                  caption:
+                    '记忆方式是「四级台阶」：private 只到类内，默认多跨一步到包，protected 再多跨一步到子类，public 全开。两个易错点：**protected 对不同包的非子类不可见**（它是「包 + 子类」而不是「包 + 所有继承者可见」）；**外部类只能用 public 或默认**，private / protected 只适用于成员。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'public / private / protected / 默认的区别',
+                questionId: 'java-01-Q80',
+                intent:
+                  '基础题，但答完表格后常被追问「protected 到底对谁可见」「接口里的方法是什么修饰符」，这两问才是分档点。',
+                points: [
+                  '四级可见范围：private（同类）→ 默认（同包）→ protected（同包 + 子类）→ public（全部）',
+                  'protected 的关键细节：**不同包的非子类不可见**，且子类只能通过自身实例访问，不能通过父类引用访问',
+                  '外部类只能 public 或默认；成员（字段/方法/内部类）才可用四种',
+                  '接口方法隐式 `public abstract`（JDK 9 起可有 private 方法），接口字段隐式 `public static final`',
+                ],
+                depth:
+                  '能补「封装原则」就到位了：修饰符的选择标准是**尽可能小的暴露面**——能 private 就不包级，能包级就不 protected。因为可见范围一旦放大就收不回来（外部代码会依赖它），而缩小范围只是重构。',
+              },
+              {
+                kind: 'concept',
+                title: '`&` 有三个身份，`&&` 只有一个',
+                body: [
+                  '`&` 是重载过的符号：操作数是整数时是**按位与**（`6 & 3 = 2`）；操作数是 boolean 时是**非短路逻辑与**（两边都求值）。`&&` 只能用于 boolean，且是**短路**的——左边为 false 时右边根本不执行。',
+                  '短路不只是性能优化，它是**正确性保障**：`if (obj != null && obj.isValid())` 依赖「左边为假就不算右边」来避免 NPE。换成 `&` 或 `|`，判空就形同虚设。同理 `||` 能避免「数组为空还去取 length」这类错误。所以工程规矩很简单：**布尔逻辑一律用 `&&` / `||`，`&` / `|` 只留给位运算。**',
+                ],
+                term: {
+                  name: '短路求值（short-circuit evaluation）',
+                  def: '逻辑运算符在结果已确定时跳过剩余操作数的求值。`&&` 左边为 false 即返回 false、`||` 左边为 true 即返回 true。它由 JVM 的条件跳转指令实现（ifeq / ifne），不是库函数行为，因此没有调用开销。',
+                },
+                points: [
+                  '`&` 用于 int / long / boolean；`&&` 只用于 boolean',
+                  '`&` 两边都求值；`&&` 左边能定结果时右边不求值',
+                  '位运算场景（掩码、权限位、哈希扰动）必须用 `&` / `|` / `^` / `~`',
+                  '副作用要小心：`f() && g()` 里 g 可能不执行，把赋值写在右侧是 bug 温床',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '同一个判空，一个符号的差别',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '`&`：两边都算，判空失效',
+                    tone: 'bad',
+                    items: [
+                      '`if (obj != null & obj.isValid())`',
+                      '左边算出 false 后继续求右边',
+                      'obj 为 null → 调 isValid() → NPE',
+                      '编译器不报警，只在运行时炸',
+                    ],
+                  },
+                  right: {
+                    title: '`&&`：左边为假就停',
+                    tone: 'good',
+                    items: [
+                      '`if (obj != null && obj.isValid())`',
+                      '左边 false → 直接跳走，右侧不执行',
+                      'obj 为 null 时安全返回 false',
+                      '这是「卫语句」能成立的语言基础',
+                    ],
+                  },
+                  caption:
+                    '短路是「判空 + 调用」这种惯用法能写出来的前提。反过来也要小心：`list != null && list.add(x)` 在 list 为 null 时 add 不执行——把有副作用的操作放在 `&&` 右侧，等于给它加了条件。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '& 和 && 的区别',
+                questionId: 'java-01-Q76',
+                intent:
+                  '送分题，但要说全三层：位运算身份、短路差异、以及短路带来的正确性价值。只答「短路」两个字太薄。',
+                points: [
+                  '`&` 是按位与（整数）或非短路逻辑与（boolean），两边都会求值',
+                  '`&&` 只能用于 boolean，且短路：左边为 false 时右边不执行',
+                  '典型价值：`obj != null && obj.isValid()` 靠短路避免 NPE',
+                  '工程约定：布尔逻辑用 `&&` / `||`，位运算才用 `&` / `|`',
+                ],
+                depth:
+                  '加分说法：短路是由字节码的条件跳转（ifeq/ifne）实现的，所以「右边不执行」是语言语义保证，不是优化器的自由裁量——即使右侧表达式有副作用，也一定不执行。',
+              },
+              {
+                kind: 'principle',
+                title: 'switch 的底层：跳转表，而不是一串 if',
+                body: [
+                  'switch 不支持 long / float / double / boolean，答案就在它的实现方式里：javac 会把 switch 编译成两种指令之一——`tableswitch`（case 值连续密集时，生成一张**跳转表**，按值直接算出偏移，O(1)）或 `lookupswitch`（case 值稀疏时，生成有序表 + 二分查找，O(log n)）。两者的索引都是 **int**，这就解释了为什么 long 不在支持列表里。',
+                  'float / double 不支持是因为浮点相等不可靠（`0.1 + 0.2 != 0.3`），拿它做分支键会得到反直觉结果；boolean 只有两个值，用 if 更清楚。而 String 与枚举的支持是编译期「翻译」出来的，JVM 层面并没有为它们新增指令。',
+                ],
+                steps: [
+                  {
+                    title: '密集 case：tableswitch，一次数组寻址',
+                    detail:
+                      'case 值为 0、1、2、3 这种连续区间时，javac 生成跳转表：`tableswitch` 直接以「值 − 最小值」为下标取目标地址。与 case 数量无关，O(1)。这就是「switch 比一串 if-else 快」的由来。',
+                  },
+                  {
+                    title: '稀疏 case：lookupswitch，二分查找',
+                    detail:
+                      'case 值跨度很大（比如 1、100、10000）时，跳转表会浪费大量空间，改生成「值 + 目标」的有序表，运行时二分查找。此时是 O(log n)，并不比 if-else 链快多少——所以「switch 一定更快」是有前提的。',
+                  },
+                  {
+                    title: 'String switch：先 hashCode 再 equals',
+                    detail:
+                      'javac 会把 `switch (s)` 改写成**两层 switch**：外层对 `s.hashCode()` 做 tableswitch/lookupswitch，命中的分支里再用 `equals` 校验（防止哈希碰撞误判）。所以 String 的 switch 实际是「一次 hashCode + 一次 equals」，而不是逐个比较。',
+                  },
+                  {
+                    title: '枚举 switch：用 ordinal 的跳转表',
+                    detail:
+                      '编译器为枚举生成一个 `$SwitchMap` 数组（按 ordinal 映射到 case 下标），switch 实际是对 ordinal 查表。这也是为什么「不要在枚举里依赖 ordinal」——重排常量会改变它的值。',
+                  },
+                  {
+                    title: 'JDK 14 之后：switch 表达式与模式匹配',
+                    detail:
+                      'JDK 14 起 switch 可作为表达式（箭头语法、`yield`、**不会穿透**）；JDK 21 起支持模式匹配（`case Integer i`、record 解构），还能 `case null`。此时实现从跳转表退化为「类型判断 + 条件跳转」，因为匹配条件不再是常量。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**switch 的骨架是「int 索引 + 跳转表」，String 与枚举都是编译期翻译上去的，long 因为索引类型装不下而被排除。**',
+              },
+              {
+                kind: 'diagram',
+                title: 'switch 支持类型的边界与原因',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['是否支持', '为什么'],
+                  rows: [
+                    ['byte / short / char / int', '支持', '都能无损提升为 int，正好做跳转表索引'],
+                    ['对应包装类', '支持（JDK 5+）', '编译期自动拆箱成基本类型；为 null 会 NPE'],
+                    ['String', '支持（JDK 7+）', '翻译成 hashCode 的 switch + equals 校验'],
+                    ['枚举', '支持（JDK 5+）', '翻译成 ordinal 的 $SwitchMap 查表'],
+                    ['long', '不支持', '索引是 int，long 装不下会截断歧义'],
+                    ['float / double', '不支持', '浮点相等不可靠，NaN 与 -0.0 有反直觉行为'],
+                    ['boolean', '不支持', '只有两个值，if 更直观'],
+                  ],
+                  caption:
+                    '答题时把「支持什么」和「为什么这些不支持」都讲出来才算完整。最容易被追问的是 long：不是性能问题，而是「跳转表索引必须是 int」这个实现约束。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'switch 支持哪些类型？',
+                questionId: 'java-01-Q77',
+                intent:
+                  '记忆题，但只背清单会被追问「为什么 long 不行」。答出实现层面的原因，这一题就从「背过」变成「懂了」。',
+                points: [
+                  '基本类型：byte / short / char / int；包装类自 JDK 5 起（自动拆箱）',
+                  'String 自 JDK 7 起；枚举自 JDK 5 起',
+                  '不支持：long（索引是 int）、float / double（相等不可靠）、boolean（用 if 即可）',
+                  '原理：编译成 tableswitch（密集，O(1)）或 lookupswitch（稀疏，二分）',
+                  '新版本：JDK 14 switch 表达式（箭头、yield、无穿透），JDK 21 模式匹配',
+                ],
+                depth:
+                  '能说清 String switch 的翻译过程（先 hashCode 的 switch，再 equals 校验）非常加分，因为这说明你知道「JVM 只认 int，其他类型都是编译器翻译出来的」这一层。',
+              },
+              {
+                kind: 'code',
+                title: '移位：乘法之外的另一种写法，以及它的两条边界',
+                lang: 'java',
+                code:
+                  'int a = 2 * 8;      // 16\nint b = 2 << 3;     // 16 —— 左移 3 位 = 乘 2^3\nint c = 16 >> 2;    // 4  —— 带符号右移 = 除以 2^2（向负无穷取整）\nint d = -16 >>> 2;  // 1073741820 —— 无符号右移，高位补 0，负数会变大\n\n// 边界一：移位数会对 32 取模（long 对 64 取模）\nint e = 1 << 32;    // 等于 1 << 0 = 1，不是 0\nint f = 1 << 42;    // 等于 1 << 10 = 1024\n\n// 边界二：byte / short / char 会先提升为 int\nbyte g = (byte) (1 << 7);   // -128，因为 1<<7 已是 int 的 128，强转溢出\n\n// 右移取整方向不同\nint h = -7 >> 1;    // -4（向下取整）\nint i = -7 / 2;     // -3（向零取整）',
+                caption:
+                  '三个实用结论：① `x << n` 等价于乘 2^n，`x >> n` 是向下取整而非向零取整（负数结果与 `/` 不同）；② 移位数取模 32，`x << 32` 什么都不做；③ 无符号右移 `>>>` 是唯一能正确处理负数的「逻辑移位」，HashMap 的 `hash >>> 16` 就靠它做高位参与运算。',
+                notes: [
+                  { line: '2 << 3', text: '面试标准答案，但要说「移位没有乘法指令开销」而不是「更快」——JIT 对常量乘法本来就会优化成移位' },
+                  { line: '1 << 32', text: '最常被考的反直觉点：移位数对 32 取模，所以等于没移' },
+                  { line: '-7 >> 1', text: '负数右移是向下取整，与除法的向零取整差一，做分页/二分时容易错一位' },
+                  { line: '-16 >>> 2', text: '无符号右移把符号位当数值，负数会变成很大的正数；HashMap 用它让高 16 位参与散列' },
+                ],
+              },
+              {
+                kind: 'question',
+                title: '用效率最高的方法算 2×8，移位运算符有哪些',
+                questionId: 'java-01-Q78',
+                intent:
+                  '老题，但陷阱在细节：答 `2 << 3` 只是及格，能补「移位数取模 32」和「负数右移的取整方向」才是真的用过位运算。',
+                points: [
+                  '答案是 `2 << 3`：左移 n 位等于乘 2^n',
+                  '三种移位：`<<` 左移补 0；`>>` 带符号右移补符号位；`>>>` 无符号右移补 0',
+                  '移位只支持 int 与 long；byte / short / char 会先提升为 int',
+                  '移位数对 32（long 为 64）取模，所以 `x << 32` 等于 `x`',
+                ],
+                depth:
+                  '加分的诚实说法：在现代 JVM 上「移位一定比乘法快」并不成立——JIT 会把常量乘法直接优化成移位，两者最终生成同一条指令。位运算真正的价值在掩码、权限位、哈希扰动这类「本来就需要按位操作」的场景，而不是手写微优化。',
+              },
+              {
+                kind: 'concept',
+                title: '不可变类的五条铁律，以及 record 也救不了的那一处',
+                body: [
+                  '以 String 为范本，不可变类要同时满足五条：类声明为 `final`（禁继承，防止子类加可变状态）；所有字段 `private final`；不提供任何修改状态的方法；**若字段是可变对象（数组、集合、Date），构造器与 getter 都要做防御性拷贝**；构造期间不泄漏 `this`（不注册监听器、不启动线程），否则外部能在对象「半成品」时拿到引用。',
+                  '最容易漏的是第四条：`final` 只锁住「引用不能改指向」，锁不住「对象内容不能变」。`private final Date birth;` 这个字段依然可以被 `getBirth().setTime(0)` 改掉，因为 getter 把内部可变对象直接交了出去。所以 getter 必须 `return new Date(birth.getTime())`，构造器也要拷入。',
+                  '`record` 能省掉前三条（字段天然 private final、无 setter、类天然 final），但**第四条它不管**：`record Period(Date start)` 的 `start()` 访问器返回的仍是同一个 Date。所以 record 只是「少写样板代码」，不是「自动不可变」。这个区分能立刻显出你读过文档而不是只看了标题。',
+                ],
+                points: [
+                  '五个要素：final 类、private final 字段、无 setter、可变字段防御性拷贝、构造期不泄漏 this',
+                  '`List.copyOf` / `Map.copyOf` / `Collections.unmodifiableXxx` 用来做集合的防御性拷贝',
+                  '`unmodifiableList` 是**视图**，原集合改了它也跟着变；`List.copyOf` 才是真拷贝',
+                  'record 只是语法糖：它省掉样板，但不做可变字段的防御性拷贝',
+                  '不可变的收益：天然线程安全、可安全共享、可缓存 hashCode、可作 Map 的 key',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '同一个 Date 字段，两种 getter 的后果',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '直接返回内部引用',
+                    tone: 'bad',
+                    items: [
+                      '`public Date getBirth() { return birth; }`',
+                      '调用方拿到的是内部对象本身',
+                      '`p.getBirth().setTime(0)` 直接改了对象状态',
+                      'final 字段形同虚设，对象「偷偷可变」',
+                    ],
+                  },
+                  right: {
+                    title: '返回拷贝',
+                    tone: 'good',
+                    items: [
+                      '`return new Date(birth.getTime());`',
+                      '调用方改的是副本，内部状态不受影响',
+                      '构造器同样要拷入，防止外部持有同一引用',
+                      '这才是「不可变」真正成立的条件',
+                    ],
+                  },
+                  caption:
+                    '一句话：**final 保证的是「引用不变」，不是「对象不变」。** 所以判断一个类是否真的不可变，不要看字段有没有 final，要看它有没有把可变对象漏出去。',
+                },
+              },
+              {
+                kind: 'handwrite',
+                title: '手写一个真正不可变的类：防御性拷贝 + 不可变集合',
+                lang: 'java',
+                prompt:
+                  '面试官：「设计一个不可变的订单快照类，包含订单号、创建时间、商品列表。要求外部拿到实例后无法修改它的任何状态。」这道题的评分点全在细节：Date 要拷、List 要拷、getter 也要拷。',
+                signature:
+                  'public final class OrderSnapshot {\n    private final String id;\n    private final Date createdAt;\n    private final List<String> items;\n    // 构造器拷入，getter 拷出\n}',
+                plan: [
+                  {
+                    title: '类 final + 字段 private final',
+                    detail:
+                      '`final class` 禁止继承（否则子类可以加 setter 破坏契约）；字段全部 `private final`，保证只能赋值一次且不对外暴露。',
+                  },
+                  {
+                    title: '构造器里做「拷入」',
+                    detail:
+                      '`this.createdAt = new Date(createdAt.getTime())`、`this.items = List.copyOf(items)`。不拷入的话，调用方持有的那个 Date / List 与对象内部是同一个，他改一处等于改对象。',
+                  },
+                  {
+                    title: 'getter 里做「拷出」',
+                    detail:
+                      '`return new Date(createdAt.getTime())`。这是最常被漏的一步——构造器拷了，但 getter 把内部引用直接交出去，一样能被改。集合直接返回 `List.copyOf` 的结果（它本身不可变，可以直接返回副本）。',
+                  },
+                  {
+                    title: '集合选择：copyOf 而不是 unmodifiableList',
+                    detail:
+                      '`Collections.unmodifiableList(items)` 只是**视图**，原列表变了它也变；`List.copyOf` 会真的复制一份并拒绝 null 元素。要真不可变就用后者（JDK 10+）。',
+                  },
+                  {
+                    title: '别在构造期泄漏 this',
+                    detail:
+                      '构造器里不要 `registerListener(this)` 或 `new Thread(this).start()`：那时对象字段还没赋值完，外部拿到的是一个半成品。需要回调就提供一个 `start()` 方法让调用方显式触发。',
+                  },
+                ],
+                skeleton:
+                  'public ??? class OrderSnapshot {          // TODO 1:禁止继承\n\n    private ??? String id;\n    private ??? Date createdAt;\n    private ??? List<String> items;\n\n    public OrderSnapshot(String id, Date createdAt, List<String> items) {\n        this.id = id;\n        this.createdAt = ???;            // TODO 2:拷入,不要直接赋值\n        this.items = ???;                // TODO 3:不可变集合\n    }\n\n    public Date createdAt() {\n        return ???;                      // TODO 4:拷出\n    }\n\n    public List<String> items() {\n        return items;                    // copyOf 之后可直接返回\n    }\n}',
+                solution:
+                  'public final class OrderSnapshot {\n\n    private final String id;\n    private final Date createdAt;\n    private final List<String> items;\n\n    public OrderSnapshot(String id, Date createdAt, List<String> items) {\n        this.id = Objects.requireNonNull(id, "id");\n        // 拷入:别让调用方继续持有同一个 Date\n        this.createdAt = new Date(Objects.requireNonNull(createdAt).getTime());\n        // copyOf:真拷贝 + 不可变 + 拒绝 null 元素\n        this.items = List.copyOf(items);\n    }\n\n    public String id() { return id; }\n\n    public Date createdAt() {\n        // 拷出:每次给一个新 Date,调用方改了也不影响内部\n        return new Date(createdAt.getTime());\n    }\n\n    public List<String> items() {\n        // List.copyOf 产生的对象本身不可变,可以直接返回\n        return items;\n    }\n}\n\n// 用 record 的写法(注意:仍然要自己处理可变字段)\npublic record OrderRecord(String id, Date createdAt, List<String> items) {\n    public OrderRecord {\n        createdAt = new Date(createdAt.getTime());   // 紧凑构造器里拷入\n        items = List.copyOf(items);\n    }\n    @Override\n    public Date createdAt() {                       // 访问器也要覆盖\n        return new Date(createdAt.getTime());\n    }\n}',
+                complexity:
+                  '每次 getter 拷贝 Date 是 O(1)；`List.copyOf` 是 O(n) 一次。若集合很大且调用频繁，可以改成在构造时持有不可变副本、getter 直接返回——因为 `List.copyOf` 的结果本身不可变，不需要每次再拷。',
+                traps: [
+                  '只加 final 不做防御性拷贝 —— getter 一返回，可变性就回来了',
+                  '构造器拷了、getter 忘了拷 —— 最常见的一半正确',
+                  '用 `Collections.unmodifiableList` 当不可变集合 —— 它是视图，源列表能改它',
+                  '用 record 就以为万事大吉 —— record 不处理可变字段的拷贝',
+                  '在构造器里把 this 注册到监听器 —— 泄漏未初始化完成的对象',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '如何设计一个不可变类',
+                questionId: 'java-01-Q79',
+                intent:
+                  '设计题，评分点几乎全在「防御性拷贝」这一条上。能主动说出 record 也救不了可变字段，是明显的加分项。',
+                points: [
+                  '五条：final 类 + private final 字段 + 无 setter + 可变字段防御性拷贝 + 构造期不泄漏 this',
+                  '防御性拷贝要**双向**：构造器拷入、getter 拷出',
+                  '集合用 `List.copyOf`（真拷贝），不是 `unmodifiableList`（视图）',
+                  '不可变收益：线程安全、可共享、可缓存 hashCode、适合做 Map 的 key',
+                  'JDK 17+ 可用 record，但它不解决可变字段问题',
+                ],
+                depth:
+                  '追问「不可变对象一定线程安全吗」：对象本身安全，但如果它持有的是可变对象且没拷，就不是。追问「性能代价」：每次修改都要新建对象，所以高频修改场景要用可变版本（如 StringBuilder）或持久化数据结构。',
+              },
+              {
+                kind: 'concept',
+                title: '可变长参数：一个「编译成数组」的语法糖',
+                body: [
+                  '`void f(String... args)` 编译后就是 `void f(String[] args)`——两者字节码签名完全相同，所以**不能同时存在**（会被当成重复方法）。由此推出三条规则：必须是参数列表的最后一个（否则编译器无法确定数组边界）；调用时可以传 0 个（空数组）或直接传数组；方法体内拿到的是数组，可以 `args.length`。',
+                  '重载时有个容易忽略的优先级：**固定参数方法优先于可变参数方法**。`f("a")` 在 `f(String)` 与 `f(String...)` 同时存在时会选前者（JDK 5 为了保证兼容性定的规则）。另一个坑是泛型 + 变长参数会触发「堆污染」警告（`@SafeVarargs` 可消除，但只允许标注在 static / final / private 方法上——因为它们不可被重写，才能保证类型安全）。',
+                ],
+                points: [
+                  '本质是数组：`String...` 与 `String[]` 是同一个方法签名，不能重载共存',
+                  '必须放最后；调用时可传 0 个参数（得到空数组，不是 null）',
+                  '每个调用都会新建一个数组——热路径上频繁调用会有分配开销',
+                  '重载优先级：固定参数 > 装箱 > 变长参数',
+                  '泛型变长参数需 `@SafeVarargs`，且只能用于 static / final / private 方法',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '什么是可变长参数',
+                questionId: 'java-01-Q81',
+                intent:
+                  '简单题，但「本质是数组」「必须放最后」「重载优先级」三个点能区分出是否真的用过 API 设计。',
+                points: [
+                  'JDK 5 引入，语法 `void f(String... args)`，编译后等价于 `String[] args`',
+                  '只能作为最后一个参数；调用时可传 0 个、若干个，或直接传数组',
+                  '与 `String[]` 版本不能共存（签名相同），重载时固定参数版本优先',
+                  '典型应用：`String.format`、`List.of`、日志的 `log.info("id={}", id)`',
+                ],
+                depth:
+                  '补一句代价：「每次调用都会新建数组」意味着在超高频路径上（比如序列化框架的 each-call）用它会产生额外分配；日志框架因此常用「参数个数固定」的重载来避开这一步。',
+              },
+            ],
+            outline: [
+              '访问修饰符四级可见范围：private → 默认 → protected → public，外部类只能用 public 或默认',
+              '& 有按位与与非短路逻辑与两种身份，&& 只有短路逻辑与',
+              'switch 编译成 tableswitch / lookupswitch，索引是 int，所以 long 被排除',
+              '不可变类必须对可变字段双向防御性拷贝：构造器拷入、getter 拷出',
+            ],
+            pitfalls: [
+              '把 `obj != null && obj.f()` 写成 `&`，判空完全失效',
+              '以为 `x << 32` 会清零，实际移位数对 32 取模，等于没移',
+              '不可变类只加 final 不做防御性拷贝，getter 一返回内部可变对象就破功',
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: 'language-advanced',
+      title: 'C · 泛型、反射、IO 与现代 Java',
+      goal: '打通类型系统、运行时内省、IO 模型与新版本特性四条进阶线',
+      summary:
+        '到了这一阶段，问题从「会不会用」变成「编译器和运行期到底做了什么」。泛型擦除决定了你不能 new T()，反射决定了框架如何绕过访问控制，IO 模型决定了吞吐上限，新特性决定了你写的代码是否还停留在 Java 8。这四块合起来，正是框架源码的阅读门槛。',
+      lessons: [
+        {
+          id: 'generics',
+          title: '泛型擦除与类型系统',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['泛型'] }],
+          content: {
+            intro:
+              '泛型是 Java 里妥协痕迹最重的设计：为了兼容 JDK 5 之前的代码，它选择**编译期检查、运行期擦除**。这一条决定后面所有怪现象——为什么不能 `new T[]`、为什么 `list instanceof List<String>` 编译不过、为什么 `getClass()` 对 `List<String>` 和 `List<Integer>` 返回同一个东西、为什么继承泛型接口会凭空多出一个「桥接方法」。本节以擦除为主线，把 PECS 通配符一路推到「为什么 `? extends` 只能读」，最后给出需要保留泛型信息时的唯一正解。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '泛型的真实身份：一台「编译期类型检查器」',
+                body: [
+                  '先纠正一个直觉：泛型参数**不是运行时的容器属性**。`List<String>` 在运行期就是 `List`，它并不知道自己装的是 String。泛型唯一的作用是让编译器在**编译期**替你做类型检查，并在必要处自动插入强转。所以它的收益全在「写代码和编译」阶段：把 `ClassCastException` 从运行时提前到编译期。',
+                  '据此可以推出三个结论，面试里几乎必问其一：`list.getClass()` 与类型参数无关；`list instanceof List<String>` 非法（运行期无从判断）；`List<int>` 不合法（泛型参数必须是引用类型，基本类型要先装箱）。理解「泛型是编译期概念」，这三条都不需要单独记忆。',
+                ],
+                term: {
+                  name: '类型擦除（Type Erasure）',
+                  def: 'javac 在生成字节码时丢弃类型参数：无界参数 `T` 替换为 `Object`，有界参数 `T extends Number` 替换为 `Number`；在取值处插入 `checkcast` 强转；当子类特化父类的泛型参数时，额外生成**桥接方法**维持多态。整个过程对 JVM 完全透明——字节码层面没有泛型。',
+                },
+                points: [
+                  '泛型只在编译期有效，运行期一律是原始类型（raw type）',
+                  '作用有三：编译期类型安全、免除强转、支撑通用 API',
+                  '三种形式：泛型类、泛型接口、泛型方法（静态泛型方法必须自带 `<T>`）',
+                  '泛型参数只能是引用类型，`List<int>` 不合法，只能用 `List<Integer>`',
+                ],
+              },
+              {
+                kind: 'why',
+                title: '没有泛型的世界长什么样',
+                body: [
+                  'JDK 5 之前，所有集合装的都是 `Object`。取出来必须先强转：`String s = (String) list.get(0);`。问题不在于多写一次强转，而在于**类型错误被推迟到了运行时**——往 `List` 里混进一个 Integer，编译器毫无反应，直到某处强转才抛 `ClassCastException`，而那时离出错点可能隔了几百行。',
+                  '泛型解决的正是这个「错误发现得太晚」的问题：它让容器记住「装什么」这件事——虽然只在编译期记住。代价是引入了擦除带来的一整套限制，以及为了兼容老代码而保留的 raw type 通道（`List list = new ArrayList()` 依然能编过，只是丢了检查）。',
+                ],
+                without:
+                  '反证：`List list = new ArrayList(); list.add("a"); list.add(1);` 编译完全通过。这个 list 传到别处，别人 `for (String s : list)` 时会在第二个元素上炸，而栈里根本看不出是谁塞进去的。加了泛型后，`list.add(1)` 当场编译失败，问题在写下的那一刻就被拦住。',
+              },
+              {
+                kind: 'diagram',
+                title: '同一个错误：编译期拦住 vs 运行期才炸',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '无泛型：错误延后到运行时',
+                    tone: 'bad',
+                    items: [
+                      '`List list` 什么都能装，编译零警告',
+                      '混入 Integer 时没人拦',
+                      '取值强转 `(String)` 时抛 ClassCastException',
+                      '栈里只能看到「谁取的」，看不到「谁塞的」',
+                    ],
+                  },
+                  right: {
+                    title: '有泛型：错误停在编译期',
+                    tone: 'good',
+                    items: [
+                      '`List<String>` 只接受 String',
+                      '`list.add(1)` 直接编译失败',
+                      '取值不需要强转，类型一目了然',
+                      '出错位置就是写错的那一行',
+                    ],
+                  },
+                  caption:
+                    '注意右边也不是「运行时更安全」——运行期两者完全一样（都擦除成 List）。泛型的全部价值就是**把检查提前**。这也是面试里区分「理解泛型」和「背过泛型」的关键一句。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '什么是泛型？有什么作用？',
+                questionId: 'java-01-Q58',
+                intent:
+                  '入门题，但「编译期类型安全」这五个字必须说出来。只说「可以传不同类型」会被认为没抓住重点。',
+                points: [
+                  'JDK 5 引入，把类型参数化：`List<String>`、`Map<K,V>`、`<T> T identity(T t)`',
+                  '核心作用是**编译期类型安全**：把 ClassCastException 提前到编译期暴露',
+                  '次要收益：免除强制类型转换、提升可读性、配合通配符写出复用性强的 API',
+                  '三种形式：泛型类、泛型接口、泛型方法；**静态泛型方法不能引用类的类型参数**，必须自带 `<T>`',
+                ],
+                depth:
+                  '能提一句「泛型是编译期的，运行期擦除」就为下一题埋好伏笔，面试官通常会顺势追问擦除——主动铺垫比被动应答更容易拿到高分。',
+              },
+              {
+                kind: 'principle',
+                title: '擦除的三个动作：替换、插入强转、生成桥接方法',
+                body: [
+                  '「擦除」听起来像把东西删掉，其实是三个具体动作。看懂这三个动作，泛型相关的所有限制都能自己推出来，不需要背清单。',
+                ],
+                steps: [
+                  {
+                    title: '动作一：类型参数替换为上界',
+                    detail:
+                      '无界 `T` → `Object`；`T extends Number` → `Number`；`T extends Comparable<T>` → `Comparable`。所以泛型字段在字节码里就是 `Object` 或上界类型的字段——这就是为什么能塞进任何东西，「类型安全」全靠编译器的检查撑着。',
+                  },
+                  {
+                    title: '动作二：使用处插入 checkcast',
+                    detail:
+                      '`String s = list.get(0)` 编译后是 `checkcast java/lang/String`。取出时强制转换一次，类型不对就在这里抛 ClassCastException。**泛型的强转并没有消失，只是编译器替你写了。**',
+                  },
+                  {
+                    title: '动作三：子类特化父类泛型时生成桥接方法',
+                    detail:
+                      '`class Box implements Comparable<Box> { public int compareTo(Box o) }` 编译后会有**两个** compareTo：真正的 `compareTo(Box)`，以及编译器生成的 `compareTo(Object)`（标记为 bridge/synthetic），后者把参数强转成 Box 再调用前者。因为接口擦除后要求的是 `compareTo(Object)`，没有这座桥就无法多态调用。',
+                  },
+                  {
+                    title: '推论：为什么 `f(List<String>)` 与 `f(List<Integer>)` 不能共存',
+                    detail:
+                      '两者擦除后签名都是 `f(List)`，在 JVM 看来是同一个方法 → 编译报「name clash」。同理，泛型类的静态成员不能使用类的类型参数，因为静态成员属于类本身、早于任何实例的类型参数确定。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**泛型在字节码里只剩「上界类型 + 若干 checkcast + 若干桥接方法」。** 记住这三个产物，擦除相关的题基本都能现场推。',
+              },
+              {
+                kind: 'diagram',
+                title: '`List<String>` 从源码到运行期：泛型信息在哪一层消失',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '源码层',
+                      note: '只有这里存在泛型',
+                      tone: 'primary',
+                      slots: [
+                        { label: 'List<String>', value: 'E = String', tone: 'primary' },
+                        { label: 'list.get(0)', value: '返回 String' },
+                      ],
+                    },
+                    {
+                      name: '字节码层',
+                      note: '擦除后',
+                      slots: [
+                        { label: '字段', value: 'Object[] elementData' },
+                        { label: '方法', value: 'Object get(int)' },
+                        { label: '取值处', value: 'checkcast String', tone: 'warn' },
+                      ],
+                    },
+                    {
+                      name: '运行期',
+                      note: '同一个类',
+                      slots: [
+                        { label: 'ArrayList.class', value: '只有一份', tone: 'primary' },
+                        { label: 'List<String>.class', value: '不存在' },
+                        { label: 'getClass()', value: 'ArrayList（无类型参数）' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '所以 `new ArrayList<String>().getClass() == new ArrayList<Integer>().getClass()` 为 true——不是「相等」，是**同一个 Class 对象**。要在运行期拿到 String 这个信息，只能从「声明处」的元数据里读（字段/方法签名的 Signature 属性）。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '桥接方法：为什么 `Comparable<Box>` 会凭空多出一个方法',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['调用方', '桥接 compareTo(Object)', '真实 compareTo(Box)'],
+                  messages: [
+                    { from: '调用方', to: '桥接 compareTo(Object)', text: '接口擦除后只认 compareTo(Object)' },
+                    { from: '桥接 compareTo(Object)', to: '桥接 compareTo(Object)', text: 'checkcast Box（把 Object 转成 Box）' },
+                    { from: '桥接 compareTo(Object)', to: '真实 compareTo(Box)', text: '委托给真正实现' },
+                    { from: '真实 compareTo(Box)', to: '调用方', text: '返回比较结果', reply: true },
+                  ],
+                  caption:
+                    '桥接方法由编译器生成，带 `ACC_BRIDGE` + `ACC_SYNTHETIC` 标记。副作用很具体：**反射时 `getMethods()` 会看到两个 compareTo**，如果按名字+参数个数做匹配（很多老框架这么干）就会踩到桥接方法。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '什么是类型擦除？为什么 Java 用擦除实现泛型',
+                questionId: 'java-01-Q59',
+                intent:
+                  '这是泛型章节最重要的一题。要答出三层：擦除后变成什么、擦除带来什么产物、**为什么要这么设计**（兼容性）。只答第一层是背书。',
+                points: [
+                  '定义：泛型只在编译期有效，运行期被擦除为上界（无界为 Object）',
+                  '产物：使用处插入 `checkcast`；子类特化父类泛型时生成**桥接方法**',
+                  '后果：`List<String>` 与 `List<Integer>` 运行期是同一个类，`instanceof List<String>` 非法',
+                  '原因：JDK 5 需要与已有的非泛型代码、旧字节码**共存**，擦除是唯一不改 JVM 的方案',
+                  '加分：靠 `getGenericSuperclass()` / 字段的 Signature 属性可「部分」恢复泛型信息，这也是 Jackson `TypeReference`、Gson `TypeToken` 的实现基础',
+                ],
+                depth:
+                  '如果被追问「擦除有什么代价」，答三条最实在：不能 `new T[]`、不能对泛型做 instanceof、无法为重载提供不同的泛型签名。再补一句「C# 的泛型是运行期具体化的，没有这些限制，但 Java 当年不能改 JVM 指令集」，能把话题引到自己熟悉的领域。',
+              },
+              {
+                kind: 'principle',
+                title: 'PECS 不是口诀，是「编译器能证明什么」的结论',
+                body: [
+                  '`? extends T`（上界通配符）表示「T 或 T 的某个子类，但不知道具体是哪个」。正因为不知道，编译器只有两条路：读出来的东西**至少是 T**（所以能安全赋给 T 变量）；写进去的东西**无法确认是那个未知子类**（所以任何写入都拒绝，null 除外——null 是所有引用类型的值）。',
+                  '`? super T`（下界通配符）正好反过来：它表示「T 或 T 的某个父类」，所以往里写 T 及其子类**一定安全**（向上转型永远成立）；但读出来只能当 Object，因为不知道下界之上的具体类型。于是有了 PECS：**Producer Extends，Consumer Super**——这个结构向你产出数据就用 extends，向你消费数据就用 super。',
+                ],
+                steps: [
+                  {
+                    title: '没有通配符：`List<Number>` 只能装 Number',
+                    detail:
+                      '它既不能接受 `List<Integer>`（泛型不协变：`List<Integer>` **不是** `List<Number>`），读写都是 Number 类型。这是最直觉也最受限的形态。',
+                  },
+                  {
+                    title: '`List<? extends Number>`：能读不能写',
+                    detail:
+                      '`Number n = list.get(0)` 合法（元素至少是 Number）；`list.add(1)` 编译失败——编译器无法确认这个 list 的真实类型是 `List<Integer>` 还是 `List<Double>`，写进去可能破坏它的约束。注意 `add(null)` 是允许的。',
+                  },
+                  {
+                    title: '`List<? super Integer>`：能写不好读',
+                    detail:
+                      '`list.add(1)` 合法（无论实际是 `List<Integer>` 还是 `List<Number>` 还是 `List<Object>`，Integer 都能放进去）；但 `Integer i = list.get(0)` 编译失败，只能赋给 Object。',
+                  },
+                  {
+                    title: '标准库怎么用：`Collections.copy` 的签名',
+                    detail:
+                      '`copy(List<? super T> dest, List<? extends T> src)`——dest 是消费者（要写入）用 super，src 是生产者（要读出）用 extends。这个签名能同时接受 `copy(List<Number>, List<Integer>)`，是 PECS 最经典的范例。',
+                  },
+                  {
+                    title: '为什么泛型不协变：数组的教训',
+                    detail:
+                      '数组是协变的（`Integer[]` 是 `Number[]`），代价是运行期必须做存储检查，`Number[] a = new Integer[1]; a[0] = 1.0;` 会在运行期抛 ArrayStoreException。泛型选择**不协变**，把这个错误挪到编译期——通配符则是「显式声明我接受协变」的语法。',
+                  },
+                ],
+                takeaway:
+                  '面试答法：先说「extends 只读、super 只写」，再说「因为编译器只能证明读出的类型安全 / 写入的类型安全」，最后给 `Collections.copy` 这个例子。三段齐了就是满分。',
+              },
+              {
+                kind: 'diagram',
+                title: '四种写法的读写能力，一眼看清',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['能读出什么', '能写进什么'],
+                  rows: [
+                    ['List<Number>', 'Number', 'Number 及其子类'],
+                    ['List<?>', 'Object', '只能 add(null)'],
+                    ['List<? extends Number>', 'Number（至少是它）', '只能 add(null)'],
+                    ['List<? super Integer>', 'Object', 'Integer 及其子类'],
+                  ],
+                  caption:
+                    '规律很整齐：**通配符越「往下」越能读，越「往上」越能写。** `? extends` 卡住写入，`? super` 卡住读取的类型精度，`?` 两头都卡。所谓 PECS 只是把这张表压缩成一句口诀。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '`? extends T` 和 `? super T` 的区别？PECS 是什么',
+                questionId: 'java-01-Q60',
+                intent:
+                  '难点题，考察是否能从「编译器知道什么」推出读写限制，而不是背口诀。答得出口诀是及格，解释得了原因才是通过。',
+                points: [
+                  '`? extends T`：T 或其子类，**只能读**（读出来是 T），不能写入（null 除外）',
+                  '`? super T`：T 或其父类，**能写** T 及其子类，读出来只能当 Object',
+                  'PECS：Producer Extends、Consumer Super——产出用 extends，消费用 super',
+                  '标准范例：`Collections.copy(List<? super T> dest, List<? extends T> src)`',
+                  '根因：泛型不协变（`List<Integer>` 不是 `List<Number>`），通配符是显式放开协变/逆变的语法',
+                ],
+                depth:
+                  '能补「数组协变的教训」非常加分：数组允许 `Number[] a = new Integer[1]`，代价是运行期 ArrayStoreException；泛型选择不协变，把这类错误移到编译期。这说明 PECS 不是语法糖，而是类型系统的一致选择。',
+              },
+              {
+                kind: 'compare',
+                title: '`T` 与 `?`：一个能改名，一个只能看',
+                head: ['维度', '类型参数 `T`', '通配符 `?`'],
+                rows: [
+                  ['出现位置', '类/接口/方法的**声明**处', '只在**使用**处的类型引用里'],
+                  ['能否当作类型用', '能：可声明变量、参数、返回值，可 `.class` 之外的一切', '不能：无法声明 `? x` 这样的变量'],
+                  ['能否加边界', '能：`<T extends Comparable<T>>`', '能：`? extends Number` / `? super Integer`'],
+                  ['方法间能否传递', '能：`<T> T id(T t)` 里 T 贯穿参数与返回值', '不能：每个 `?` 都是独立的未知类型'],
+                  ['典型用途', '方法内部需要**引用**这个类型时', '只想**放宽**参数的可接受范围时'],
+                ],
+                note: '一个实用判断：**如果方法体里需要写出这个类型（作为返回类型、局部变量、再次传参），就必须用 `T`；如果只是「接受得更宽」，用 `?`。** 另外 `<T> void f(List<T>)` 与 `void f(List<?>)` 在只读场景下等价，但前者会让调用方误以为类型有关系，后者更诚实。',
+              },
+              {
+                kind: 'question',
+                title: '类型参数 T 和通配符 ? 的区别',
+                questionId: 'java-01-Q61',
+                intent:
+                  '偏概念题，考的是「什么时候必须用 T」。答「T 是确定的类型、? 是未知类型」只是开头，得说清使用场景的分界。',
+                points: [
+                  '`T` 是**声明的**类型参数，可在方法体内当作类型使用（声明变量、作返回值）',
+                  '`?` 是**使用处**的通配符，代表未知类型，不能用来声明变量或作为返回类型',
+                  '需要「方法内部引用这个类型」或「多个参数之间建立类型关联」时必须用 `T`',
+                  '只想放宽参数接受范围时用 `?`，`<?>` 等价于 `<? extends Object>`',
+                ],
+                depth:
+                  '举例最清楚：`<T> void swap(List<T> l, int i, int j)` 需要 T 来保证两个元素同类型；`void print(List<?> l)` 只读不写，用 `?` 就够。前者换成 `?` 就写不出「取出再放回」的代码。',
+              },
+              {
+                kind: 'concept',
+                title: '擦除带来的五条限制，以及各自的绕法',
+                body: [
+                  '擦除的所有限制都源于同一件事：**运行期不知道 T 是什么**。于是不能 `new T()`、不能 `new T[]`、不能 `T.class`、不能 `instanceof List<String>`、不能捕获泛型异常；再加上签名冲突（`f(List<String>)` 与 `f(List<Integer>)` 擦除后相同）和静态成员不能引用类类型参数，一共七条。前五条属于「运行时需要类型信息」，后两条属于「编译期签名冲突」。',
+                  '绕法也有统一套路：**把类型信息显式传进来**。需要创建实例就传 `Class<T>`（`clazz.getDeclaredConstructor().newInstance()`），需要创建数组就 `Array.newInstance(clazz, n)`，需要判断类型就用 `clazz.isInstance(obj)` 而不是 instanceof。至于「保留泛型信息」，标准做法是用匿名子类把类型参数「写进父类的签名」：`new TypeReference<List<User>>() {}`——匿名子类的 `getGenericSuperclass()` 会返回带 `List<User>` 的 ParameterizedType，这就是 Jackson 能反序列化泛型的原因。',
+                  '还有一条工程上的绕法值得记：泛型 + 可变参数会产生「堆污染」（heap pollution）警告，因为可变参数被编译成数组、而泛型数组不安全。加了 `@SafeVarargs` 就表示「我保证只读不写」，但它只能标注在 static / final / private 方法上——因为只有不可被重写的方法，这个保证才不会被破坏。',
+                ],
+                points: [
+                  '不能 `new T()` / `new T[]` / `T.class` → 传 `Class<T>` 参数',
+                  '不能 `instanceof List<String>` → 只能判原始类型，或用 `clazz.isInstance()`',
+                  '不能捕获泛型异常（`catch (T e)`）→ 泛型类不能继承 Throwable',
+                  '不能仅靠泛型参数重载 → 擦除后签名相同，编译报 name clash',
+                  '泛型类的 static 成员不能引用类的类型参数 → 静态泛型方法必须自带 `<T>`',
+                ],
+              },
+              {
+                kind: 'code',
+                title: '用 `Class<T>` 把「运行期不知道 T」这件事补回来',
+                lang: 'java',
+                code:
+                  '// ✗ 编译不过：擦除后 T 不存在，无法 new\n// T t = new T();\n// T[] arr = new T[10];\n\n// ✓ 绕法一：传 Class<T>，由反射创建\npublic static <T> T create(Class<T> clazz) throws Exception {\n    return clazz.getDeclaredConstructor().newInstance();\n}\n\n// ✓ 绕法二：创建泛型数组（Array.newInstance 会记录真实组件类型）\n@SuppressWarnings("unchecked")\npublic static <T> T[] newArray(Class<T> clazz, int n) {\n    return (T[]) Array.newInstance(clazz, n);   // 组件类型是 clazz，安全\n}\n\n// ✓ 绕法三：类型判断用 isInstance，而不是 instanceof\npublic static <T> boolean isType(Object o, Class<T> clazz) {\n    return clazz.isInstance(o);\n}\n\n// ✓ 绕法四：用匿名子类把泛型写进父类签名，运行期可读\nType type = new TypeReference<List<User>>() {}.getType();\n// type 是 ParameterizedType，能取到 rawType=List、actualTypeArguments=[User]\n\n// ✗ 无效写法：直接强转数组，编译期只有 unchecked 警告，运行期可能炸\n// T[] arr = (T[]) new Object[10];   // 组件类型是 Object，赋给 String[] 会 ClassCastException',
+                caption:
+                  '核心思想：**运行期拿不到的类型信息，就在调用处显式传进来。** `Class<T>` 是「类型令牌」，`TypeReference` 是「把类型信息编码进类签名」，两条路分别解决「创建」和「读取」两类需求。',
+                notes: [
+                  { line: 'Array.newInstance', text: '它创建的数组组件类型是 clazz，所以能安全转成 T[]；而 new Object[10] 的组件类型是 Object，强转会在赋值处炸' },
+                  { line: 'getDeclaredConstructor().newInstance()', text: '替代已废弃的 Class.newInstance()，能把构造器抛出的异常正确包装成 InvocationTargetException' },
+                  { line: 'TypeReference', text: '匿名子类编译后签名里带 List<User>，getGenericSuperclass 就能读回来——Jackson 反序列化泛型的全部秘密' },
+                ],
+              },
+              {
+                kind: 'handwrite',
+                title: '手写一个泛型方法：`max` 与「为什么参数要用 `? extends T`」',
+                lang: 'java',
+                prompt:
+                  '面试官：「写一个方法求集合最大值，要求能接受 `List<Integer>`、`List<Long>`，也要能被 `List<Number>` 变量接住返回值。顺便说明为什么参数不能写成 `List<T>`。」这题同时考泛型上界、PECS 和空集合处理。',
+                signature:
+                  'public static <T extends Comparable<? super T>>\nT max(Collection<? extends T> items)',
+                plan: [
+                  {
+                    title: '上界写 `T extends Comparable<? super T>`',
+                    detail:
+                      '为什么不写 `T extends Comparable<T>`？因为 `class A implements Comparable<Object>` 这种「和父类比较」的写法也必须能用。`? super T` 放宽为「能和 T 的某个父类比较」，这是 JDK 里 `Collections.max` 的真实签名。',
+                  },
+                  {
+                    title: '参数用 `Collection<? extends T>`',
+                    detail:
+                      '方法只读集合（消费者视角是「生产者」），所以用 extends。若写成 `Collection<T>`，调用方传 `List<Integer>` 而 T 被推断为 Number 时就会失败——这正是 PECS 的实际收益。',
+                  },
+                  {
+                    title: '空集合必须有明确契约',
+                    detail:
+                      '要么抛 `NoSuchElementException`（JDK 的选择），要么返回 `Optional<T>`。**不要返回 null**——调用方一定会忘判空。这一步是面试官看「有没有工程习惯」的地方。',
+                  },
+                  {
+                    title: '单遍遍历 + 保持首个元素为基准',
+                    detail:
+                      '`Iterator` 取第一个作 max，之后逐个 `compareTo` 替换。O(n) 时间、O(1) 空间。用 `compareTo > 0` 而不是 `>=`，保证相等时保留先出现的那个（稳定语义）。',
+                  },
+                ],
+                skeleton:
+                  'public static <T extends ??? > T max(Collection<??? > items) {\n    if (items == null || items.isEmpty()) {\n        throw new ??? ("collection is empty");     // TODO 1:明确契约\n    }\n    Iterator<? extends T> it = items.iterator();\n    T best = it.next();\n    while (it.hasNext()) {\n        T cur = it.next();\n        if (cur.compareTo(best) ??? 0) {          // TODO 2:比较方向\n            best = cur;\n        }\n    }\n    return best;\n}',
+                solution:
+                  'import java.util.*;\n\npublic final class Maxes {\n\n    /**\n     * 取集合最大值。\n     * T 必须可比较,且允许与 T 的父类比较(Comparable<? super T>)。\n     */\n    public static <T extends Comparable<? super T>> T max(Collection<? extends T> items) {\n        if (items == null || items.isEmpty()) {\n            throw new NoSuchElementException("collection is null or empty");\n        }\n        Iterator<? extends T> it = items.iterator();\n        T best = it.next();\n        while (it.hasNext()) {\n            T cur = it.next();\n            if (cur.compareTo(best) > 0) {\n                best = cur;\n            }\n        }\n        return best;\n    }\n\n    public static void main(String[] args) {\n        List<Integer> ints = List.of(3, 9, 2);\n        Integer i = max(ints);              // T 推断为 Integer\n\n        Collection<Integer> asNumbers = ints;\n        Number n = max(asNumbers);          // T 可推断为 Number,返回值兼容\n        System.out.println(i + " " + n);\n    }\n}',
+                complexity:
+                  'O(n) 时间、O(1) 额外空间。比较次数 n-1，无法再少——要确定最大值必须看每一个元素。',
+                traps: [
+                  '参数写成 `Collection<T>` —— 传 `List<Integer>`、T 推断为 Number 时直接编译失败',
+                  '上界写成 `Comparable<T>` —— `implements Comparable<Object>` 的类无法使用',
+                  '空集合返回 null —— 调用方必然忘记判空，正确做法是抛异常或返回 Optional',
+                  '用 `>=` 比较 —— 相等时替换成后出现的元素，破坏稳定性（对含相同键的对象有影响）',
+                  '方法内 `new T[]` —— 擦除导致编译不过，要数组必须传 `Class<T>`',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '类型擦除给泛型带来哪些限制',
+                questionId: 'java-01-Q62',
+                intent:
+                  '难题，考的是「能不能从擦除推出限制」。逐条背也能答，但如果能说出「根因都是运行期不知道 T」，说明真的理解了。',
+                points: [
+                  '不能 `new T()` / `new T[]` / `T.class`——运行期不知道 T 是什么',
+                  '不能 `instanceof List<String>`——同样是因为运行期只剩原始类型',
+                  '不能捕获或抛出泛型类型的异常实例（泛型类不能继承 Throwable）',
+                  '`f(List<String>)` 与 `f(List<Integer>)` 擦除后签名相同，**不能重载**',
+                  '泛型类的静态成员不能使用类的类型参数；泛型 + 可变参数会产生堆污染警告',
+                ],
+                depth:
+                  '解决思路要跟上：「传 `Class<T>` 用反射创建」「`Array.newInstance` 建泛型数组」「匿名子类 + `getGenericSuperclass` 保留类型信息」。能举出 Jackson 的 `TypeReference` 说明你见过真实用法，而不只是背了限制清单。',
+              },
+            ],
+            outline: [
+              '泛型只在编译期有效，运行期擦除为上界（无界为 Object），使用处插入 checkcast',
+              '擦除的三个产物：上界替换、checkcast、子类特化时生成的桥接方法',
+              '? extends T 只读、? super T 只写，即 PECS；根因是泛型不协变',
+              '运行期需要类型信息时，传 Class<T> 或用匿名子类（TypeReference）保留签名',
+            ],
+            pitfalls: [
+              '以为 List<String> 与 List<Integer> 在运行期是不同的类，实际是同一个 Class 对象',
+              '参数写成 `Collection<T>` 而不是 `Collection<? extends T>`，导致多类型实参编译失败',
+              '泛型方法里直接 new T() 或 new T[]，编译期就会报错，必须传入 Class<T>',
+            ],
+          },
+        },
+        {
+          id: 'reflection',
+          title: '反射、注解与动态代理',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['反射'] }],
+          content: {
+            intro:
+              '反射是框架的地基。Spring 扫描注解并注入依赖、MyBatis 把结果集塞进对象、Jackson 读写私有字段、AOP 在方法前后织入事务——全靠运行期内省。这一节要建立三件判断力：**什么时候必须用反射**（编译期不知道类型时）、**它的代价具体在哪**（查方法、装箱、无法内联）、**动态代理与字节码生成分别解决什么问题**。答得出「JDK 代理为什么只能代理接口」「运行期的注解其实是个动态代理对象」，就说明你读过实现而不是只背过八股。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '反射的本质：把「编译期写死」换成「运行期查询」',
+                body: [
+                  '平常写 `user.setName("x")`，方法调用在编译期就绑定好了，字节码里是一条 `invokevirtual`。反射把这件事拆成两步：先用 `Class` 对象**查**到方法（`getMethod("setName", String.class)`），再**调**它（`method.invoke(user, "x")`）。前者是字符串 + 类型数组的查找，后者是参数打包成 `Object[]` 的调用——运行时决定调什么，这就是「动态」的全部含义。',
+                  '所以反射适用的判断标准很清晰：**当你在编译期根本不知道要操作哪个类/哪个方法时，才用它**。框架必须这样，因为它要处理用户写的任意类；业务代码通常不需要，因为类型是已知的。滥用反射的典型症状是「把能编译检查的错误推迟到运行时」，那是拿灵活性换可靠性，只有在确实需要时才值得。',
+                ],
+                term: {
+                  name: 'Class 对象',
+                  def: '每个被加载的类在方法区（元空间）有一份类元数据，堆上有一个 `java.lang.Class` 实例作为它的「门面」。反射的所有入口都从它开始：字段、方法、构造器、注解、父类、泛型签名都能从它读出来。它由 JVM 在类加载时创建，无法手动 new。',
+                },
+                points: [
+                  '三种获取方式：`Class.forName("全限定名")`（触发初始化）、`User.class`（不触发初始化）、`obj.getClass()`',
+                  '`getMethod` 只找 public（含继承），`getDeclaredMethod` 找本类声明的全部（含 private）',
+                  '反射对象 `Field` / `Method` 是「视图」，内部持有 Class 引用与方法槽位，不是数据的拷贝',
+                  '`setAccessible(true)` 关闭的是**访问检查**（access check），不是突破 JVM 内存保护',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '一次反射调用：从字符串到方法执行',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['业务代码', 'Class 对象', 'Method 对象', '目标实例'],
+                  messages: [
+                    { from: '业务代码', to: 'Class 对象', text: 'Class.forName("com.demo.User") → 触发类加载（首次）' },
+                    { from: 'Class 对象', to: '业务代码', text: '返回 Class 实例', reply: true },
+                    { from: '业务代码', to: 'Class 对象', text: 'getDeclaredMethod("setName", String.class) → 遍历方法表匹配签名' },
+                    { from: 'Class 对象', to: 'Method 对象', text: '生成 Method 视图（持有方法槽位 + 访问检查标记）' },
+                    { from: '业务代码', to: 'Method 对象', text: 'invoke(user, "x") → 参数打包成 Object[]' },
+                    { from: 'Method 对象', to: '目标实例', text: '检查访问权限后调用真实方法' },
+                    { from: '目标实例', to: '业务代码', text: '返回结果（基本类型需拆箱）', reply: true },
+                  ],
+                  caption:
+                    '注意第 3 步「按签名遍历匹配」——这是反射慢的第一来源，也是**必须缓存 Method** 的原因。Spring 会把解析结果缓存起来（`ReflectionUtils` + 各类 MethodCache），所以框架的反射并没有想象中那么贵。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '什么是反射？如何获取 Class 对象',
+                questionId: 'java-01-Q63',
+                intent:
+                  '基础题，但要答出「运行时动态获取并操作类结构」这个定义，以及三种获取方式的差别（是否触发类初始化）。',
+                points: [
+                  '定义：运行期动态获取类的构造器、方法、字段、注解，并可创建对象、调用方法、读写属性',
+                  '三种获取：`Class.forName("全限定名")`、`User.class`、`obj.getClass()`',
+                  '差别：`Class.forName` 会**触发类初始化**（执行 static 块），`.class` 不会',
+                  '拿到 Class 后可 `getDeclaredConstructor().newInstance()`、`getMethod().invoke()`、`setAccessible(true)` 访问私有成员',
+                ],
+                depth:
+                  '追问「为什么 Class.forName 触发初始化」：它等价于 `Class.forName(name, true, loader)`，第二个参数 initialize=true。JDBC 老代码用它就是靠这个副作用注册驱动；JDBC 4.0 之后改成 SPI 自动加载，这行已经不需要了。',
+              },
+              {
+                kind: 'principle',
+                title: '反射慢在哪：四个具体环节，而不是一句「性能开销」',
+                body: [
+                  '「反射比直接调用慢」这句话本身没有信息量。真正的原因是四个可以逐条定位的环节，而且**每一个都有对应的缓解手段**——能说出这四层，才算真的调过优。',
+                ],
+                steps: [
+                  {
+                    title: '查方法：按名字与参数类型遍历匹配',
+                    detail:
+                      '`getMethod` 要在方法表里按名称 + 参数类型数组匹配，找不到还要往父类找。**缓解：把 Method 缓存起来**（Map<key, Method>），框架全都这么做。',
+                  },
+                  {
+                    title: '打包参数：Object[] 与装箱',
+                    detail:
+                      '`invoke(obj, a, b)` 的签名是 `invoke(Object, Object...)`，基本类型参数必须装箱、可变参数要新建数组。**缓解：减少参数个数，或用 MethodHandle 的精确签名调用。**',
+                  },
+                  {
+                    title: '访问检查：每次调用都查权限',
+                    detail:
+                      '未 `setAccessible(true)` 时，每次 invoke 都要做访问权限校验（还会被 SecurityManager 参与）。**缓解：对私有成员先 setAccessible，之后调用不再检查。**',
+                  },
+                  {
+                    title: '无法内联：JIT 看不见调用目标',
+                    detail:
+                      '这是最本质的一层：目标是运行期才确定的，JIT 无法把它内联进调用点，也无法做逃逸分析与常量传播。**缓解：JDK 18 起 `Method.invoke` 已改为基于 MethodHandle（JEP 416）实现，性能大幅改善；极致场景直接用 `MethodHandle` + `invokedynamic`（lambda 就是这么实现的）。**',
+                  },
+                ],
+                takeaway:
+                  '答题顺序：**先承认慢，再拆成「查方法 / 装箱 / 访问检查 / 不能内联」四层，最后给「缓存 + setAccessible + MethodHandle」三个缓解手段。** 这样答比一句「反射慢 10 倍」有价值得多。',
+              },
+              {
+                kind: 'diagram',
+                title: '调用方式的性能量级：差距在，但没传说中那么夸张',
+                diagram: {
+                  type: 'scale',
+                  items: [
+                    { label: '直接调用', value: 1, display: '≈1 ns', note: 'JIT 内联后几乎为零成本' },
+                    { label: 'MethodHandle', value: 3, display: '≈3 ns', note: '可内联，接近直接调用' },
+                    { label: '反射 + 缓存 + setAccessible', value: 8, display: '≈8 ns', note: '框架的常态' },
+                    { label: '反射（不缓存 Method）', value: 60, display: '≈60 ns', note: '每次都要查方法表' },
+                  ],
+                  caption:
+                    '量级示意，具体数值随 JDK 与调用形态浮动。关键结论有两条：① **不缓存 Method 才是最贵的部分**，缓存之后开销降到可接受；② JDK 18+ 的 `Method.invoke` 已换成 MethodHandle 实现，老的「反射慢几十倍」说法正在失效。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '反射的优缺点',
+                questionId: 'java-01-Q64',
+                intent:
+                  '这题考的是分寸感：既不能说「反射万能」，也不能说「反射不能用」。要给出「框架用它、业务少用」的判断。',
+                points: [
+                  '优点：运行期动态装配，解耦；可突破访问限制做通用工具；是 Spring / MyBatis / Jackson 的基础',
+                  '缺点：性能开销（查方法、装箱、无法内联）；破坏封装与泛型检查；编译期无法静态校验',
+                  '安全限制：JDK 9+ 模块化后，跨模块反射私有成员会抛 `InaccessibleObjectException`，需 `--add-opens`',
+                  '结论：框架层必须用，业务层优先用接口/多态等静态手段解决',
+                ],
+                depth:
+                  '能补「JDK 17 起默认强封装 JDK 内部 API」这个变化，说明你关注过版本演进——很多老代码依赖 `setAccessible` 反射 JDK 内部类，升级到 17 会直接报错。',
+              },
+              {
+                kind: 'concept',
+                title: '反射的典型战场：五个场景，一个共同点',
+                body: [
+                  '**Spring IoC**：扫描到 `@Component` 后，用反射实例化 Bean、注入依赖、读取 `@Value`；**AOP**：用动态代理包住目标对象，在方法前后织入事务与日志；**ORM**：MyBatis 按列名反射 `setXxx` 或直接写字段，把 ResultSet 变成实体；**序列化**：Jackson / Gson 反射读字段，甚至能读 private 字段；**SPI 与驱动加载**：`ServiceLoader` 反射实例化实现类。',
+                  '这五个场景的共同点是：**代码在编译期不可能知道要处理哪个类**。Spring 不知道你明天会写什么 Service，Jackson 不知道你要序列化什么 DTO。凡「必须处理用户定义的任意类型」的地方，反射就是唯一解——这也解释了为什么业务代码里几乎不需要它。',
+                ],
+                points: [
+                  'IoC / DI：实例化 + 依赖注入 + 生命周期回调',
+                  'AOP：动态代理在方法调用链上插入横切逻辑',
+                  'ORM / 序列化：字段与列名、JSON key 的映射',
+                  'SPI：按约定文件加载实现类，实现「接口在调用方、实现在提供方」',
+                  '通用工具：`BeanUtils.copyProperties`、`@Transactional` 的注解解析',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '反射的应用场景有哪些',
+                questionId: 'java-01-Q65',
+                intent:
+                  '送分题，但答案的排列顺序有讲究：先说框架层（Spring / MyBatis / Jackson），再说语言机制（SPI / 驱动加载），最后才说工具类。',
+                points: [
+                  'Spring IoC / DI：反射实例化 Bean、注入依赖、处理 `@Autowired` / `@Value`',
+                  'AOP：`Method.invoke` 配合动态代理实现事务、日志、权限切面',
+                  'ORM：MyBatis / JPA 把结果集按字段名映射进实体',
+                  '序列化：Jackson / Gson 读写字段（含 private）',
+                  '驱动加载与 SPI：`ServiceLoader` 实例化实现类（JDBC 4.0 起由 SPI 自动完成）',
+                ],
+                depth:
+                  '收尾可以说一句判断：**「反射出现的地方，都是编译期不知道类型的地方」**。这句总结比罗列十个场景更能体现理解深度。',
+              },
+              {
+                kind: 'principle',
+                title: 'JDK 动态代理：运行期生成一个实现接口的类',
+                body: [
+                  '`Proxy.newProxyInstance(loader, interfaces, handler)` 做的事很具体：在运行期**生成一个新类** `$Proxy0`，它 `extends Proxy` 并 `implements` 你传入的所有接口，每个方法体都是一行 `return handler.invoke(this, method, args)`。所以「代理」不是包装，而是**凭空造出一个符合接口的类型**。',
+                ],
+                steps: [
+                  {
+                    title: '生成字节码：$Proxy0 实现全部接口方法',
+                    detail:
+                      'JDK 内部用 `ProxyGenerator` 直接拼字节码（不依赖 ASM）。生成类继承 `java.lang.reflect.Proxy`（这也是它**不能再继承你的类**的原因），并实现你给的接口。',
+                  },
+                  {
+                    title: '方法体转发给 InvocationHandler',
+                    detail:
+                      '每个接口方法的实现都是：把 `Method` 对象（静态缓存）与参数数组交给 `handler.invoke(proxy, method, args)`。所以你在 handler 里能用 `method.getName()` 判断是哪个方法。',
+                  },
+                  {
+                    title: '缓存：按 (类加载器, 接口集合) 复用',
+                    detail:
+                      '生成的代理类会被缓存（`WeakCache`），相同 loader + 相同接口组合只生成一次。所以「每次 newProxyInstance 都生成新类」是误解，类只生成一次，实例才每次新建。',
+                  },
+                  {
+                    title: '限制：只能代理接口',
+                    detail:
+                      '因为生成类必须 `extends Proxy`，Java 又是单继承，所以它没有位置再继承你的目标类。没有接口的类无法用 JDK 代理——这就是 CGLIB 存在的理由。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**JDK 代理 = 造一个实现接口的新类 + 所有方法转发给 handler。** 它代理的是「接口」，不是「对象」——这个措辞能解释后面所有的限制。',
+              },
+              {
+                kind: 'diagram',
+                title: '一次代理调用的链路',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['调用方', '$Proxy0', 'InvocationHandler', '真实目标'],
+                  messages: [
+                    { from: '调用方', to: '$Proxy0', text: 'userService.save(u) —— 调用方以为在调真实对象' },
+                    { from: '$Proxy0', to: 'InvocationHandler', text: 'invoke(proxy, method, args)' },
+                    { from: 'InvocationHandler', to: 'InvocationHandler', text: '前置逻辑：开事务 / 打日志 / 权限校验' },
+                    { from: 'InvocationHandler', to: '真实目标', text: 'method.invoke(target, args)' },
+                    { from: '真实目标', to: 'InvocationHandler', text: '返回结果（或抛异常）', reply: true },
+                    { from: 'InvocationHandler', to: '$Proxy0', text: '后置逻辑：提交事务 / 记录耗时' },
+                    { from: '$Proxy0', to: '调用方', text: '返回结果', reply: true },
+                  ],
+                  caption:
+                    '所有横切逻辑都挤在第 3 步和第 6 步——这就是 AOP 的物理形态。注意第 4 步仍然是反射调用，所以 AOP 的代价 = 代理转发 + 一次反射。',
+                },
+              },
+              {
+                kind: 'compare',
+                title: 'JDK 动态代理 vs CGLIB',
+                head: ['维度', 'JDK 动态代理', 'CGLIB'],
+                rows: [
+                  ['依赖', 'JDK 原生（`Proxy` + `InvocationHandler`）', '第三方库（内部用 ASM 改字节码）'],
+                  ['前提', '目标**必须实现接口**', '基于继承，生成目标类的子类'],
+                  ['不能代理什么', '没有接口的类', 'final 类、final / private / static 方法'],
+                  ['核心 API', '`Proxy.newProxyInstance` + `InvocationHandler`', '`Enhancer` + `MethodInterceptor`'],
+                  ['调用开销', '一次转发 + 一次反射', '一次方法覆盖调用（少一层反射，理论更快）'],
+                  ['Spring AOP 选择', '有接口时默认用', '无接口时用；Spring Boot 默认 `proxyTargetClass=true` 全用 CGLIB'],
+                ],
+                note: '两个常见误解要澄清：① 「CGLIB 一定比 JDK 快」已经不成立，JDK 18 起 `Method.invoke` 改用 MethodHandle 实现，差距很小；② 「Spring Boot 默认用 JDK 代理」是错的，Spring Boot 2.x 起 `spring.aop.proxy-target-class` 默认为 true，**默认走 CGLIB**。',
+              },
+              {
+                kind: 'question',
+                title: 'JDK 动态代理和 CGLIB 的区别',
+                questionId: 'java-01-Q66',
+                intent:
+                  '高频难点，考察是否理解「代理的是接口还是类」这条根本差异。表格背得出来是及格，说得出「为什么 JDK 代理不能代理类」才是通过。',
+                points: [
+                  '根本差异：JDK 代理基于**接口**（生成类必须 extends Proxy），CGLIB 基于**继承**（生成子类）',
+                  '限制：JDK 代理要求目标实现接口；CGLIB 不能代理 final 类与 final / private / static 方法',
+                  'API：`Proxy.newProxyInstance` + `InvocationHandler` vs `Enhancer` + `MethodInterceptor`',
+                  'Spring AOP 规则：有接口用 JDK，无接口用 CGLIB；Spring Boot 默认 `proxyTargetClass=true` 全用 CGLIB',
+                ],
+                depth:
+                  '加分点：说明「JDK 代理生成类必须 `extends Proxy`，Java 单继承所以无法再继承目标类」——这一句把实现细节和限制因果关系讲通了。再补「CGLIB 通过继承实现，所以 final 方法无法被增强（无法重写）」，两个限制就都落地了。',
+              },
+              {
+                kind: 'concept',
+                title: '注解：一个没有逻辑的接口，和两条解析路径',
+                body: [
+                  '`@interface` 编译后就是一个**继承 `java.lang.annotation.Annotation` 的接口**，注解里的「属性」其实是接口方法（`String value() default ""`）。它本身不含任何逻辑——注解不会自己「生效」，必须有人去读它。',
+                  '什么时候能读到，由 `@Retention` 决定：`SOURCE` 只留在源码（`@Override`、Lombok 的注解），编译后就没了；`CLASS` 是默认值，写进 class 文件但**反射读不到**；只有 `RUNTIME` 才会被保留到运行期，Spring 的 `@Component`、`@Transactional` 全是 RUNTIME。另外 `@Target` 限定能标在哪里，`@Inherited` 让子类继承父类的注解。',
+                  '解析有两条路：**编译期**由注解处理器（APT）扫描并生成代码（Lombok 改 AST、MapStruct 生成 Mapper 实现）；**运行期**由反射读取（Spring 启动时扫描 `@Component`）。选哪条取决于「信息要不要活到运行时」——这也是 `@Retention` 是注解设计里最关键的决策的原因。',
+                ],
+                points: [
+                  '本质：`@interface` 编译成接口，属性 = 无参方法，`default` 提供默认值',
+                  '`@Retention`：SOURCE（编译期用）/ CLASS（默认，反射读不到）/ RUNTIME（反射可读）',
+                  '`@Target` 限定位置，`@Repeatable` 允许重复标注，`@Inherited` 对类注解生效于子类',
+                  '两条解析路径：APT（编译期生成代码）与反射（运行期读取）',
+                  '运行期拿到的注解对象其实是 **JDK 动态代理**——这就是注解只能用「方法」定义属性的原因',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '注解的两条解析路径：编译期生成 vs 运行期反射',
+                diagram: {
+                  type: 'flow',
+                  items: [
+                    { label: '@interface 定义', note: '接口 + 元注解' },
+                    { label: '@Retention 决定去向', note: 'SOURCE / CLASS / RUNTIME', tone: 'primary' },
+                    { label: 'SOURCE → APT', note: 'Lombok 改 AST、MapStruct 生成实现类' },
+                    { label: 'RUNTIME → 反射读取', note: 'Spring 扫描 Bean、读取 @Transactional', tone: 'primary' },
+                    { label: '反射拿到的是代理对象', note: '动态代理实现注解接口，属性值从常量池读出', tone: 'warn' },
+                  ],
+                  caption:
+                    '关键分岔在第 3 步：**编译期能解决的用 APT（零运行时开销，但要引入处理器），需要运行时决策的用反射（灵活，但有扫描成本）**。`CLASS` 这一档最尴尬——写进了 class 文件却读不到，只有字节码工具（ASM）能看见。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '注解是什么？原理是什么？如何解析',
+                questionId: 'java-01-Q67',
+                intent:
+                  '中等难度，多数人只能答「元注解 + 反射读取」。能说出「本质是接口」「运行期是动态代理对象」「APT 是另一条路」就明显超出平均线。',
+                points: [
+                  '本质：`@interface` 是继承 `Annotation` 的接口，属性就是无参方法，本身没有逻辑',
+                  '元注解：`@Retention`（SOURCE / CLASS / RUNTIME）、`@Target`、`@Documented`、`@Inherited`',
+                  '解析方式一：编译期由注解处理器（APT）扫描，如 Lombok、MapStruct',
+                  '解析方式二：运行期由反射读取 RUNTIME 注解，如 Spring 扫描 `@Component`',
+                  '关键约束：只有 RUNTIME 保留策略的注解才能被反射读到，默认的 CLASS 读不到',
+                ],
+                depth:
+                  '加分点：运行期 `getAnnotation(X.class)` 返回的对象是 JDK 动态代理实例（`$Proxy` 实现该注解接口），属性值从 class 文件的常量池里读出来填充。这解释了「注解为什么只能用方法定义属性、不能有字段」。',
+              },
+              {
+                kind: 'concept',
+                title: 'SPI：把「接口」放在调用方，把「实现」留给提供方',
+                body: [
+                  '平常说「面向接口编程」，接口通常由**实现方**提供（比如 MySQL 提供 DataSource 接口和实现）。SPI 反过来：**接口定义在调用方（或公共模块），实现由第三方提供**，运行时通过约定文件被发现。这个方向反转带来的是「调用方不依赖任何实现，只依赖接口」。',
+                  '机制很朴素：在 `META-INF/services/接口全限定名` 文件里写实现类的全限定名（一行一个），`ServiceLoader.load(接口.class)` 会读这个文件、反射实例化每个实现。JDBC 4.0 之后驱动就是这样被自动发现的——`DriverManager` 用 SPI 找到 `java.sql.Driver` 的所有实现，所以 `Class.forName("com.mysql.jdbc.Driver")` 那行老代码已经不需要了。',
+                  '它的缺点也很具体：`ServiceLoader` **一次加载全部实现**（无法按需或按名字取）、实例化全部（哪怕你只用其中一个）、不是线程安全的、也没有优先级概念。所以 Dubbo、Spring 都在它之上做了自己的扩展机制（`SpringFactoriesLoader`、Dubbo 的 `ExtensionLoader`），支持按 key 取用与顺序控制。',
+                ],
+                points: [
+                  '约定文件路径：`META-INF/services/<接口全限定名>`，内容是实现类全限定名，一行一个',
+                  '`ServiceLoader.load(X.class)` 遍历文件、反射实例化，返回可迭代的 `Iterable<X>`',
+                  '典型应用：JDBC 驱动（`java.sql.Driver`）、SLF4J 绑定、Spring Boot 自动配置',
+                  '与 API 的差别：**接口在谁手里**——API 是实现方给调用方用，SPI 是调用方定接口让实现方来填',
+                  '缺点：一次性加载全部、非线程安全、无优先级 → 框架常自研扩展机制',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'API 与 SPI：依赖方向正好相反',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: 'API：实现方定义，调用方使用',
+                    tone: 'neutral',
+                    items: [
+                      'MySQL 提供 Driver 接口 + 实现',
+                      '你的代码依赖 MySQL 的 jar',
+                      '换数据库 → 改依赖、改代码',
+                    ],
+                  },
+                  right: {
+                    title: 'SPI：调用方定义，实现方填充',
+                    tone: 'good',
+                    items: [
+                      'JDK 定义 java.sql.Driver',
+                      'MySQL 提供实现 + META-INF/services 文件',
+                      '你的代码只依赖 JDK 的接口',
+                      '换数据库 → 只换 jar，代码零改动',
+                    ],
+                  },
+                  caption:
+                    '一句话：**API 是「你调我」，SPI 是「我调你，但接口由我定」。** 依赖倒置原则（DIP）在 JDK 里的落地形态就是 SPI——高层模块不依赖低层实现，两者都依赖抽象。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '什么是 SPI？和 API 的区别',
+                questionId: 'java-01-Q68',
+                intent:
+                  '低频但很能区分深浅的题。答出「META-INF/services + ServiceLoader」只是机制，答出「接口在谁手里」才是概念。',
+                points: [
+                  'SPI：服务提供者接口，JDK 内置的服务发现机制，实现与调用解耦',
+                  '机制：`META-INF/services/接口全限定名` 文件列出实现类，`ServiceLoader.load()` 反射实例化',
+                  '与 API 的区别：API 由实现方提供接口给调用方用；SPI 由调用方定义接口、实现方来填充',
+                  '典型应用：JDBC 驱动、SLF4J 绑定、Spring Boot 自动配置（`SpringFactoriesLoader`）',
+                  '缺点：一次性加载全部实现、非线程安全、无优先级，所以框架常自研扩展机制',
+                ],
+                depth:
+                  '加分点：指出 JDBC 4.0 之后 `Class.forName` 已无必要——驱动 jar 里有 `META-INF/services/java.sql.Driver`，`DriverManager` 用 SPI 自动发现。这个细节能同时证明你懂 SPI 和历史演进。',
+              },
+            ],
+            outline: [
+              'Class 对象是反射入口，三种获取方式；Class.forName 会触发类初始化',
+              '反射慢在查方法、参数装箱、访问检查、无法内联四层，缓解手段是缓存 + setAccessible + MethodHandle',
+              'JDK 代理生成实现接口的 $Proxy0 并转发给 InvocationHandler，因此只能代理接口',
+              '注解本质是接口，RUNTIME 保留才能被反射读到；解析分 APT 与反射两条路',
+            ],
+            pitfalls: [
+              '认为 JDK 动态代理能代理普通类，实际生成类必须 extends Proxy，所以只能基于接口',
+              '用默认保留策略（CLASS）定义注解，然后困惑为什么反射读不到',
+              '反射调用不缓存 Method，在高频路径上把「查方法表」的开销放大了几十倍',
+            ],
+          },
+        },
+        {
+          id: 'io-serial',
+          title: 'IO 模型与序列化',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['IO 与序列化'] }],
+          content: {
+            intro:
+              'IO 这一章真正的门槛不是记住四十多个 Stream 类，而是分清两件事：**数据在「谁等、谁搬」上的差别**（BIO / NIO / AIO 三种模型的本质），以及**字节与字符之间隔着一次编解码**（为什么必须有字符流）。序列化则是另一条线，它的价值在于反面：Java 原生序列化因为安全与跨语言问题，在现代系统里基本被 JSON、Protobuf 取代。本节还顺手把 NIO 的 `Buffer` 状态机讲清——`flip()` 到底改了什么，是绝大多数人答不上来的地方。',
+            sections: [
+              {
+                kind: 'concept',
+                title: 'IO 的两个坐标系：数据单位，与等待方式',
+                body: [
+                  'Java IO 看着类多，其实只有两个维度。**第一个维度是数据单位**：字节流（`InputStream` / `OutputStream`）以 byte 为单位，什么都能传；字符流（`Reader` / `Writer`）以字符为单位，内部替你做了编码解码。**第二个维度是等待方式**：数据没到的时候，线程是挂起等（阻塞）、还是先干别的回头再看（非阻塞）、还是交给内核准备好再通知你（异步）。',
+                  '面试里 90% 的 IO 题都能挂到这两个轴上：问「为什么有字符流」是第一个维度，问「BIO/NIO/AIO 区别」是第二个维度，问「Netty 为什么快」是第二个维度的工程实现（多路复用 + Reactor 线程模型 + 零拷贝）。先把轴画出来，再往上填知识点，就不会串。',
+                ],
+                points: [
+                  '四个抽象基类：`InputStream` / `OutputStream` / `Reader` / `Writer`，其余四十多个类都是它们的子孙或包装',
+                  '字节流适合二进制（图片、视频、序列化数据），字符流适合文本',
+                  '阻塞与非阻塞看「线程会不会挂起」，同步与异步看「数据从内核搬到用户空间由谁做」',
+                  '「NIO 一定是非阻塞」是误解：`SocketChannel` 可以 `configureBlocking(true)` 配成阻塞模式',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '四个基类，一棵家族树',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: 'java.io',
+                    note: '以「数据单位」分成两支',
+                    children: [
+                      {
+                        label: '字节流（byte）',
+                        note: '什么都能传',
+                        tone: 'primary',
+                        children: [
+                          { label: 'InputStream', note: 'FileInputStream / ByteArrayInputStream / SocketInputStream' },
+                          { label: 'OutputStream', note: 'FileOutputStream / ByteArrayOutputStream' },
+                          { label: '缓冲包装', note: 'BufferedInputStream / BufferedOutputStream', tone: 'warn' },
+                        ],
+                      },
+                      {
+                        label: '字符流（char）',
+                        note: '内部做编解码',
+                        tone: 'primary',
+                        children: [
+                          { label: 'Reader', note: 'FileReader / StringReader / BufferedReader' },
+                          { label: 'Writer', note: 'FileWriter / StringWriter / PrintWriter' },
+                          { label: '桥接', note: 'InputStreamReader / OutputStreamWriter', tone: 'warn' },
+                        ],
+                      },
+                    ],
+                  },
+                  caption:
+                    '黄色那两个是「包装类」，它们的价值不在自己，而在于能给任何流加能力（缓冲、编码转换）——这就是装饰器模式，后面会专门讲。注意 `InputStreamReader` 的特殊身份：它把字节流**适配**成字符流，是两棵树之间唯一的桥。',
+                },
+              },
+              {
+                kind: 'why',
+                title: '既然有字节流，为什么还要字符流',
+                body: [
+                  '因为**字节不等于字符**。一个字符在 UTF-8 里可能是 1 个字节（ASCII）、2 个（拉丁扩展）、3 个（中文）甚至 4 个（emoji）；如果用字节流按「每次读 1024 字节」的方式处理文本，很可能把一个多字节字符从中间截断，拼出来的就是乱码。这不是「可能出错」，而是「一定会出错」——只要文件里有一个中文字符，块边界就可能落在它中间。',
+                  '字符流把这件事封装掉了：它内部持有一个解码器，负责把字节序列还原成字符，遇到不完整的字节序列就保留到下一次再解。所以结论可以写成一行公式：**字符流 = 字节流 + 编码表**。它的代价是多一次解码开销（JVM 要做编码转换），换来的是「不用自己处理边界」。',
+                ],
+                without:
+                  '反证：用 `FileInputStream` 直接读一个含中文的 UTF-8 文件，按 byte 打印出来会是一串负数（因为 byte 是有符号的，中文的三字节序列每字节都大于 127）。你必须自己判断「这个字节是首字节还是续字节」（看高位模式 110xxxxx / 1110xxxx / 10xxxxxx），才能正确拼回字符——而这正是 `InputStreamReader` 替你做的事。',
+              },
+              {
+                kind: 'question',
+                title: '为什么有了字节流还要有字符流',
+                questionId: 'java-01-Q71',
+                intent:
+                  '中等题，考察是否理解「编码」这件事。答「字符流能处理中文」太浅，要说到「字节可能被截断」和「字符流封装了编解码」。',
+                points: [
+                  '四个抽象基类：`InputStream` / `OutputStream`（字节）、`Reader` / `Writer`（字符）',
+                  '字节流按 byte 处理，适合二进制；字符流按 char 处理，专为文本',
+                  '字符流内部封装了「字节 → 字符」的解码与边界处理，避免多字节字符被读断导致乱码',
+                  '一句话公式：**字符流 = 字节流 + 编码表**，代价是多一次解码开销',
+                  '桥接类：`InputStreamReader` / `OutputStreamWriter`，可指定字符集',
+                ],
+                depth:
+                  '追问「乱码的根因」：写的时候用一种编码、读的时候用另一种（GBK 写 UTF-8 读），或者按块切断了多字节序列。前者是「码表不匹配」，后者是「边界处理错误」，字符流只解决后者，前者必须显式指定一致的 charset。',
+              },
+              {
+                kind: 'concept',
+                title: 'BIO / NIO / AIO：谁在等，谁在搬',
+                body: [
+                  '三种模型的分水岭只有两个问题。**问题一：线程发起 IO 后会不会挂起？** 会挂起 = 阻塞；立刻返回、稍后再问 = 非阻塞。**问题二：数据从内核缓冲区搬到用户缓冲区，这一步由谁完成？** 应用自己调 `read` 去搬 = 同步；内核搬完再通知应用 = 异步。',
+                  'BIO 是最直白的模型：一个连接一个线程，`read` 一直挂着直到有数据。它的问题不是慢，而是**线程贵**——一万个连接就要一万个线程，光是线程栈（默认 1MB）就吃掉 10GB。NIO 用「一个线程看住很多连接」解决它：把连接注册到 `Selector`，调用 `select()` 阻塞等事件，事件来了再处理那一个连接——这就是 IO 多路复用。AIO 更进一步，连「搬数据」都不让你做，内核搬完调你注册的回调。',
+                  '但要注意 AIO 在 Linux 上的现实：底层只有 glibc 的 POSIX AIO 与 io_uring，前者实现质量一般（实际常退化为线程池模拟），所以 **Netty 至今以 NIO 为主**，没有主推 AIO。这是「理论上更好」与「工程上更稳」的典型分歧，面试里说清这一点很加分。',
+                ],
+                points: [
+                  'BIO：一连接一线程，`read` / `write` 阻塞，实现简单、连接数上不去',
+                  'NIO：Channel + Buffer + Selector 多路复用，少量线程管大量连接（Netty 的基础）',
+                  'AIO：发起后立即返回，完成后回调；Linux 支持不如 Windows 成熟，Netty 未采用',
+                  '判据：**同步/异步看谁搬数据，阻塞/非阻塞看线程是否挂起**',
+                  'Reactor 模式 = NIO 多路复用 + 事件分发 + 线程池，Netty 的主从 Reactor 就是这个',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '三种模型：线程数、等待方式、典型实现',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['线程模型', '数据就绪时', '典型实现'],
+                  rows: [
+                    ['BIO（同步阻塞）', '一连接一线程', '线程挂起等 read 返回', 'Tomcat 传统模式、JDK 原生 Socket'],
+                    ['NIO（同步非阻塞）', '少数线程 + Selector', 'select() 返回后，由应用自己 read 搬运', 'Netty、Tomcat NIO、Redis 单线程模型'],
+                    ['AIO（异步非阻塞）', '回调线程池', '内核搬完数据后回调应用', 'NIO.2（JDK 7），Linux 下少用'],
+                  ],
+                  caption:
+                    '注意 NIO 那行「由应用自己 read 搬运」——这正是它属于**同步**的原因。很多人以为 NIO 是异步 IO，其实它只是「非阻塞 + 多路复用」，数据搬运仍发生在你的线程里。真正的分界不在「等不等」，而在「搬不搬」。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'BIO、NIO、AIO 的区别',
+                questionId: 'java-01-Q69',
+                intent:
+                  '高频题。多数人只会说「阻塞 / 非阻塞 / 异步」，但面试官真正想听的是「为什么 NIO 能用少量线程管大量连接」，以及你能否分清同步与异步。',
+                points: [
+                  'BIO：同步阻塞，一连接一线程，适合连接数少且固定的场景',
+                  'NIO：同步非阻塞，面向 Buffer，用 Channel + Selector 多路复用，少量线程管大量连接',
+                  'AIO：异步非阻塞，发起后立即返回，由操作系统完成后回调；Linux 下成熟度有限',
+                  '判据说清：**同步/异步看数据搬运由谁完成，阻塞/非阻塞看线程是否挂起**',
+                  '工程结论：Netty 基于 NIO 而不用 AIO，因为 Linux 的 AIO 生态不成熟',
+                ],
+                depth:
+                  '能补「IO 多路复用的三种系统调用」就上了一个台阶：select（fd 数上限 1024、每次全量拷贝）、poll（去掉了数量限制）、epoll（事件驱动 + 回调，无遍历开销，Linux 用它）。JDK 的 `Selector` 在 Linux 上就是 epoll 的封装。',
+              },
+              {
+                kind: 'principle',
+                title: 'NIO 三件套：Channel、Buffer、Selector 各管什么',
+                body: [
+                  'NIO 把「流」换成了「通道 + 缓冲区」：**Channel 是双向的数据通道**（不像 InputStream 只能读），**Buffer 是数据的落脚点**（所有读写都必须经过它），**Selector 是连接的事件登记处**（一个线程问一次「谁就绪了」，再逐个处理）。三者的分工很像快递：Channel 是运输线路，Buffer 是货车车厢，Selector 是调度中心的一次叫号。',
+                ],
+                steps: [
+                  {
+                    title: 'Channel：可读可写，且能配成非阻塞',
+                    detail:
+                      '`SocketChannel` / `ServerSocketChannel` / `FileChannel`。关键能力是 `configureBlocking(false)` —— 配成非阻塞后，`read` 没数据就立刻返回 0，而不是挂起线程。这也是它能被 Selector 管理的前提。',
+                  },
+                  {
+                    title: 'Buffer：三个游标决定「读到哪、写到哪」',
+                    detail:
+                      '`capacity`（容量，创建后不变）、`position`（下一个读写位置）、`limit`（读写的边界）。所有「为什么读出来是空的」问题，几乎都是忘了 `flip()` —— 下一张图专门讲这件事。',
+                  },
+                  {
+                    title: 'Selector：一次系统调用，问出所有就绪的通道',
+                    detail:
+                      '通道注册时带上感兴趣的事件（`OP_ACCEPT` / `OP_READ` / `OP_WRITE`）。`select()` 阻塞直到至少一个就绪，返回后就绪集合里只有真正可读写的通道——**没有就绪的连接完全不消耗 CPU**，这是「一个线程管上万连接」的核心。',
+                  },
+                  {
+                    title: 'SelectionKey：注册的凭证，反向拿到通道',
+                    detail:
+                      '`channel.register(selector, OP_READ)` 返回一个 `SelectionKey`，它同时持有 channel、selector、感兴趣的事件集合与就绪事件集合。事件循环里通常 `key.attachment()` 挂上业务上下文（Netty 里就是 ChannelHandler 链）。',
+                  },
+                ],
+                takeaway:
+                  '一句话：**Channel 负责「能读写」，Buffer 负责「存数据」，Selector 负责「谁知道现在能读写」。** 三者合起来才有「一个线程管上万连接」。',
+              },
+              {
+                kind: 'diagram',
+                title: 'ByteBuffer 的状态机：`flip()` 到底改了什么',
+                diagram: {
+                  type: 'state',
+                  states: ['写模式（position 前进）', '读模式（limit = 原 position）', '已清空（可重新写）'],
+                  transitions: ['flip(): limit←position, position←0', 'clear(): position←0, limit←capacity'],
+                  back: { from: 3, to: 1, label: 'compact() 保留未读数据后继续写' },
+                  caption:
+                    '写 5 字节后 position=5、limit=capacity=10；`flip()` 把 limit 设成 5、position 归零，于是「读」只能读到 5。忘了 flip 就会读到 0 字节（position 已在末尾），这是 NIO 最常见的 bug。`clear()` 不擦数据，只是把两个游标复位。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '一次 `select()` 里发生了什么',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['IO 线程', 'Selector', '内核（epoll）', 'Channel'],
+                  messages: [
+                    { from: 'IO 线程', to: 'Selector', text: 'select() —— 我等着，直到有事件' },
+                    { from: 'Selector', to: '内核（epoll）', text: 'epoll_wait：把已就绪的 fd 交回来' },
+                    { from: '内核（epoll）', to: 'Selector', text: '返回就绪集合（可能多个）', reply: true },
+                    { from: 'IO 线程', to: 'Channel', text: '逐个处理：read(buffer) 把数据搬进用户空间' },
+                    { from: 'Channel', to: 'IO 线程', text: '返回读到的字节数（-1 表示对端关闭）', reply: true },
+                    { from: 'IO 线程', to: 'Selector', text: '处理完清除就绪位，进入下一轮' },
+                  ],
+                  caption:
+                    '关键在第 3 步：**一次系统调用能返回多个就绪连接**，所以线程数不随连接数增长。第 4 步的「搬数据」仍发生在 IO 线程里——这就是 NIO 属于「同步」的原因，也是为什么业务逻辑必须丢给业务线程池，否则会阻塞事件循环。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'NIO 的三大核心组件',
+                questionId: 'java-01-Q70',
+                intent:
+                  '这题能问出「你有没有真的写过 NIO」。如果只会背三个名字，答不出 `flip()` 的作用与 Selector 的价值，就会被判为背书。',
+                points: [
+                  'Channel：双向通道（SocketChannel / ServerSocketChannel / FileChannel），可配非阻塞',
+                  'Buffer：数据容器，核心属性 capacity / position / limit，读写切换靠 `flip()`',
+                  'Selector：一个线程注册多个 Channel，`select()` 轮询就绪事件（ACCEPT / READ / WRITE）',
+                  '价值：多路复用让线程数不随连接数增长，是 Netty Reactor 模型的基础',
+                  '易错点：忘 `flip()` 导致读不到数据；`clear()` 不擦数据只复位游标',
+                ],
+                depth:
+                  '加分点：说明「NIO 的 read 仍需应用线程搬运数据，所以它是同步非阻塞；真正的异步是 AIO 由内核回调」。这一句能同时纠正「NIO 等于异步」的常见误解。',
+              },
+              {
+                kind: 'concept',
+                title: '序列化：`Serializable` 只是个标记，干活的是流',
+                body: [
+                  '`Serializable` 是一个**空接口**（标记接口），实现它不带来任何方法，只是告诉 `ObjectOutputStream` 「这个类的对象允许被写出」。真正的序列化逻辑全在流里：写类名、写 `serialVersionUID`、写字段描述符、再按顺序写字段值；读的时候按同样顺序还原。所以序列化不是「对象的二进制快照」，而是**一套有版本约定的编解码协议**。',
+                  '这也是为什么字段顺序、类型、类名都影响兼容性。为了让「类改了还能读旧数据」，需要显式声明 `serialVersionUID`：不声明时由编译器按类结构（字段、方法、修饰符）算一个哈希，**任何结构变化都会让它变**，于是反序列化时 UID 不匹配 → `InvalidClassException`。声明之后，兼容性由你自己负责，规则见下一张表。',
+                  '如果需要自定义格式（比如加密某个字段、跳过不可序列化的成员），有两条路：实现 `Externalizable`（必须有无参构造 + 自己写 `writeExternal` / `readExternal`），或在类里定义私有的 `writeObject` / `readObject` 方法（`ObjectOutputStream` 会通过反射优先调用它们）。',
+                ],
+                points: [
+                  '`Serializable` 是标记接口，不含方法；真正的读写由 `ObjectOutputStream` / `ObjectInputStream` 完成',
+                  '不声明 `serialVersionUID` 时由编译器算哈希，结构一变就变，老数据读不出来',
+                  '自定义逻辑：实现 `Externalizable`，或定义私有 `writeObject` / `readObject`',
+                  '成员对象也必须可序列化，否则抛 `NotSerializableException`（在运行时才暴露）',
+                  '应用场景：RPC 传输、缓存（Redis 存对象）、会话持久化、深拷贝（序列化再反序列化）',
+                ],
+              },
+              {
+                kind: 'compare',
+                title: '类改动后旧数据还能不能读：兼容性规则',
+                head: ['改动类型', '是否兼容', '原因'],
+                rows: [
+                  ['新增字段', '兼容', '旧数据里没有该字段，反序列化后取默认值（0 / null / false）'],
+                  ['删除字段', '兼容', '流里多余的数据被跳过，不影响其余字段'],
+                  ['字段改为 static 或 transient', '兼容（等效删除）', '不再属于对象状态，读出来是默认值'],
+                  ['字段**类型**改变', '**不兼容**', '类型描述符不匹配，反序列化失败'],
+                  ['类名或包名改变', '**不兼容**', '流里记录的是全限定类名，找不到类即失败'],
+                  ['去掉 `implements Serializable`', '**不兼容**', '类不再被视为可序列化'],
+                  ['未声明 `serialVersionUID` 的任何结构变化', '**不兼容**', '编译器重算 UID，与流中的值不一致 → InvalidClassException'],
+                ],
+                note: '工程结论两条：**① 只要打算序列化，第一行就写 `private static final long serialVersionUID = 1L;`**；② 不要用 JDK 序列化做长期存储格式——字段类型改一下就全量读不出来，而 JSON 这类文本协议对结构变化宽容得多。',
+              },
+              {
+                kind: 'question',
+                title: '什么是序列化和反序列化？如何实现',
+                questionId: 'java-01-Q72',
+                intent:
+                  '基础题。要点是「标记接口 + 流」的分工，以及 `serialVersionUID` 的作用——后者是必问的追问点。',
+                points: [
+                  '定义：对象 ↔ 字节序列，用于传输、持久化、缓存、深拷贝',
+                  'Java 原生方式：实现 `Serializable`（标记接口），用 `ObjectOutputStream` / `ObjectInputStream` 读写',
+                  '必须显式声明 `serialVersionUID`，否则类一改就 `InvalidClassException`',
+                  '自定义：实现 `Externalizable`，或定义私有 `writeObject` / `readObject`',
+                  '限制：成员必须也可序列化；`transient` 与 `static` 字段不参与',
+                ],
+                depth:
+                  '追问「serialVersionUID 的作用」时，答「版本号校验」不够，要说清「UID 不一致时直接拒绝反序列化，避免把结构不兼容的数据硬塞进新类，造成字段错乱」。这是它存在的真正理由——宁可报错，也不要静默错乱。',
+              },
+              {
+                kind: 'concept',
+                title: 'transient 与 static：两种「不参与序列化」，理由不同',
+                body: [
+                  '`transient` 是**主动排除**：这个字段属于对象状态，但我不希望它被持久化——密码、连接句柄、缓存、可以从其他字段推导出来的值。反序列化后它取默认值（`int` 是 0、对象是 `null`），所以如果你需要它可用，必须在 `readObject` 里重建（比如把 `transient` 的缓存字段重新算一遍）。',
+                  '`static` 字段不参与序列化，理由完全不同：**它属于类，不属于对象**，而序列化保存的是「对象状态」。哪怕你写了 `static` 字段，反序列化也不会去改它——它跟着类加载走，全 JVM 一份。所以 `static` 和 `transient` 一起用时，`transient` 是冗余的（编译器允许，但没意义）。',
+                  '还有一个细节常被考：`transient` 只对**默认序列化机制**生效。如果你实现了 `Externalizable` 或自己写了 `writeObject`，那写什么完全由你决定，`transient` 就管不到你了。',
+                ],
+                points: [
+                  '`transient` 只修饰实例字段，反序列化后为默认值（0 / null / false）',
+                  '`static` 天然不参与序列化：属于类而非对象',
+                  '`transient` 对 `Externalizable` / 自定义 `writeObject` 无效（由你手写的逻辑决定）',
+                  '慎用 `transient` 于「必须恢复」的字段，要在 `readObject` 里重建，否则 NPE',
+                  '`transient` 与 `final` 组合要小心：反序列化不会执行构造器，final 字段可能停在默认值',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'transient 的作用？static 字段会被序列化吗',
+                questionId: 'java-01-Q73',
+                intent:
+                  '小题，但「为什么 static 不参与」这一点很多人只会说「静态属于类」，说不出「序列化保存的是对象状态」这个对应关系。',
+                points: [
+                  '`transient` 让字段不参与默认序列化，反序列化后为类型默认值',
+                  '典型用途：密码、连接、可推导的缓存值',
+                  '`static` 字段**不参与**序列化：它属于类，序列化保存的是对象实例状态',
+                  '`transient` 只对默认序列化生效，`Externalizable` 与自定义 `writeObject` 不受它约束',
+                ],
+                depth:
+                  '追问「final transient 字段会怎样」：反序列化不走构造器，所以 final 字段会停在默认值（0 或 null）——这是 Java 序列化绕过构造器的直接后果，也是它被认为「设计有缺陷」的原因之一。',
+              },
+              {
+                kind: 'compare',
+                title: '为什么生产环境不用 JDK 原生序列化',
+                head: ['维度', 'JDK 原生序列化', 'JSON / Protobuf 等替代方案'],
+                rows: [
+                  ['跨语言', '不支持，只有 Java 能读', 'JSON 全语言通吃；Protobuf 有多语言生成器'],
+                  ['体积', '大，含类名、字段描述符等元数据', 'JSON 较小；Protobuf 用字段编号 + 变长整数，最小'],
+                  ['性能', '一般，反射 + 元数据开销', 'JSON 中等；Protobuf / Kryo 更快'],
+                  ['安全', '**高风险**：反序列化可触发 gadget 链 RCE', 'JSON 需注意多态反序列化（如 fastjson 历史问题）'],
+                  ['兼容性', '字段类型一改就不兼容', '新增字段普遍兼容（缺失取默认值）'],
+                  ['可读性', '二进制黑盒，无法排查', 'JSON 可直接看；Protobuf 可用 schema 解'],
+                ],
+                note: '安全问题值得单说：JDK 反序列化会**按流里的类名实例化任意类**并调用其 `readObject`，攻击者可以构造一条「gadget 链」（如 CommonsCollections），在反序列化时执行任意代码。JDK 9+ 提供 `ObjectInputFilter` 做类白名单，但更彻底的做法是根本不用它。',
+              },
+              {
+                kind: 'question',
+                title: '为什么不推荐 JDK 自带的序列化',
+                questionId: 'java-01-Q74',
+                intent:
+                  '这题考视野：能不能跳出「课本上说 Serializable 就行」，说出生产环境的真实取舍。安全那一条是重点。',
+                points: [
+                  '不支持跨语言：格式绑定 Java，异构微服务里无法互通',
+                  '体积大、性能一般：带类名与字段描述符等元数据',
+                  '**安全风险**：反序列化按流中类名实例化，可构造 gadget 链执行任意代码（历史 RCE 漏洞极多）',
+                  '兼容性差：字段类型变更、类名变更直接失败',
+                  '替代方案：Protobuf / Hessian / Kryo（二进制），或 JSON（可读性好、跨语言）',
+                ],
+                depth:
+                  '能提「JDK 9+ 的 `ObjectInputFilter` 白名单」与「fastjson 的 autoType 也曾出同类问题」，说明你理解这是**反序列化的通用风险**，不是 JDK 序列化独有的锅——只是 JDK 版本历史漏洞最多、最典型。',
+              },
+              {
+                kind: 'concept',
+                title: 'IO 里的设计模式：装饰器是主角',
+                body: [
+                  '`new BufferedReader(new InputStreamReader(new FileInputStream(f), UTF_8))` 这行嵌套是 Java IO 最经典的写法，它就是**装饰器模式**：每一层都实现同一个父类型（`Reader`），持有内层对象，在它的基础上加能力。缓冲、编码转换、行读取，各管一层，可以自由组合——如果改用继承，四个基类 × 缓冲 × 编码 × 行读，类会爆炸成几十个。',
+                  '另外三个模式也在里面：`InputStreamReader` 是**适配器**（把 `InputStream` 的字节接口适配成 `Reader` 的字符接口，两者接口不兼容，这不是装饰而是转换）；`InputStream.read(byte[], int, int)` 是**模板方法**（默认实现循环调抽象 `read()`，子类只实现单字节读）；`Paths` / `Channels` / `Selectors` 这类工具类是**工厂**。',
+                  '顺带一个零拷贝的点：`FileChannel.transferTo()` 在 Linux 上走 `sendfile`，数据从页缓存直接进网卡，不经过用户空间——省掉两次拷贝与两次上下文切换。这也是 Kafka、Netty 高吞吐的底层手段之一，和 IO 模型是两个独立的优化维度。',
+                ],
+                points: [
+                  '装饰器：`BufferedInputStream` / `BufferedReader`，同类型包装、逐层加能力，避免类爆炸',
+                  '适配器：`InputStreamReader` / `OutputStreamWriter`，把字节流接口转成字符流接口',
+                  '模板方法：`InputStream.read(byte[])` 依赖子类实现的 `read()`',
+                  '工厂：`Paths.get`、`Channels.newChannel`、`Selectors` 工具类',
+                  '零拷贝：`transferTo` 走 sendfile，省掉用户态与内核态之间的两次复制',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'Java IO 用到了哪些设计模式',
+                questionId: 'java-01-Q75',
+                intent:
+                  '偏设计题。答出「装饰器」是基本盘，能说出「为什么用装饰器而不是继承」以及「装饰器与适配器的区别」才是深度。',
+                points: [
+                  '装饰器（核心）：`BufferedInputStream` 包装 `FileInputStream`，接口不变、能力增强',
+                  '适配器：`InputStreamReader` 把字节流适配为字符流，解决接口不兼容',
+                  '模板方法：`InputStream.read(byte[], int, int)` 默认实现依赖抽象 `read()`',
+                  '工厂：`Paths.get`、`Channels`、`Selectors` 等工具类',
+                  '为什么不用继承：4 个基类 × 缓冲 × 编码 × 压缩会组合爆炸，装饰器让能力可自由叠加',
+                ],
+                depth:
+                  '追问「装饰器和代理的区别」：装饰器**增强同一接口的能力**且由调用方决定组合（`new BufferedX(new FileX())`）；代理**控制对目标的访问**（延迟加载、权限、远程调用），目标通常自己创建。两者结构相似，意图不同。',
+              },
+            ],
+            outline: [
+              '四个基类：InputStream / OutputStream / Reader / Writer；字符流 = 字节流 + 编码表',
+              'BIO 一连接一线程；NIO 用 Channel + Buffer + Selector 多路复用；AIO 由内核回调',
+              'ByteBuffer 靠 capacity / position / limit 三个游标工作，flip 切换读写模式',
+              'Java 原生序列化需显式 serialVersionUID，因安全与跨语言问题在生产中基本被替代',
+            ],
+            pitfalls: [
+              '以为 NIO 就是异步 IO，实际它只是非阻塞多路复用，数据搬运仍由应用线程完成',
+              '读完 Buffer 忘了 flip，position 已在末尾，结果读到 0 字节',
+              '不声明 serialVersionUID，类结构一改旧数据全部反序列化失败',
+            ],
+          },
+        },
+        {
+          id: 'java-new-feat',
+          title: 'Java 8 → 21 新特性',
+          kind: 'concept',
+          sources: [{ topic: 'java-01', chapters: ['Java 新特性'] }],
+          content: {
+            intro:
+              '版本特性题看着考记忆，实际考的是**你对语言演进方向的判断**。硬背版本号必然记混，但如果按三条主线归类——「减少样板代码」（lambda、record、文本块、var）、「增强类型表达」（泛型通配符、sealed、模式匹配）、「提升并发吞吐」（Stream 并行、虚拟线程、分代 ZGC）——每个新特性都能找到归属，也就能解释它为什么在那个版本出现。本节按这三条线走一遍 8 → 25，并把 Lambda、Stream、Optional、record、虚拟线程这五个真正会追问的点讲到实现层。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '三层归类法：语言、类库、虚拟机',
+                body: [
+                  '面试官问「Java 8 有什么新特性」，期待的不是流水账，而是**分类**。最实用的一刀切是按层次：**语言层**（改变写法：lambda、方法引用、default 方法、var、record、sealed、模式匹配、文本块）、**类库层**（新增 API：Stream、Optional、java.time、HttpClient）、**虚拟机层**（运行时能力：元空间替代永久代、G1 默认、ZGC、虚拟线程）。同样一个版本，这三层的变化量往往不对等——Java 8 是语言层的大年，Java 21 是虚拟机层的大年。',
+                  'Java 8 值得单独记全，因为它是使用最广的 LTS，也是「现代 Java 写法」的起点：lambda + 函数式接口、Stream API、Optional、接口 default/static 方法、`java.time`（线程安全，替代 `Date`/`Calendar`）、方法引用、重复注解；虚拟机层把永久代换成了元空间，`HashMap` 在链表过长时转红黑树把最坏查找从 O(n) 压到 O(log n)。这一串能顺口说出来，就够回答 80% 的「Java 8 新特性」。',
+                ],
+                points: [
+                  '语言层：lambda、方法引用、default/static 接口方法、var、record、sealed、模式匹配、文本块',
+                  '类库层：Stream、Optional、java.time、HttpClient、集合工厂方法（`List.of`）',
+                  '虚拟机层：元空间、G1 默认（JDK 9）、ZGC（11 实验 / 15 转正）、分代 ZGC（21）、虚拟线程（21）',
+                  'Java 8 的隐藏改动：`HashMap` 引入红黑树，最坏情况从 O(n) 降到 O(log n)',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'LTS 时间线与各版本的代表特性',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['时间', '这一版的代表特性'],
+                  rows: [
+                    ['JDK 8', '2014.03', 'lambda / Stream / Optional / java.time / 元空间'],
+                    ['JDK 11', '2018.09', 'var（10 引入）、HttpClient 标准化、ZGC 实验、单文件源码运行'],
+                    ['JDK 17', '2021.09', 'record、sealed、instanceof 模式匹配、文本块（15）'],
+                    ['JDK 21', '2023.09', '虚拟线程、分代 ZGC、switch 模式匹配、record 解构'],
+                    ['JDK 25', '2025.09', '紧凑对象头等；继续推进结构化并发与作用域值'],
+                  ],
+                  caption:
+                    '节奏规律：**JDK 9 起每半年一个版本，约每两年一个 LTS**（8 → 11 → 17 → 21 → 25）。非 LTS 版本不适合生产，但新特性通常先在它们那里预览一到两版才转正——所以「预览」与「转正」的版本差经常被考（record 是 14 预览 / 16 转正，文本块是 13 / 15，虚拟线程是 19 预览 / 21 转正）。被问到具体版本号而记不准时，坦白说「JEP 编号我要查一下，但方向是降低内存开销与简化并发」比硬编一个错版本更安全。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Java 8 有哪些新特性',
+                questionId: 'java-01-Q82',
+                intent:
+                  '最基础也最高频的一题。建议按「语言 / 类库 / 虚拟机」三层报，比按印象罗列更能体现结构感——面试官听到分类就会认为你系统学过。',
+                points: [
+                  '语言层：lambda + 函数式接口、方法引用、接口 default / static 方法、重复注解、类型注解',
+                  '类库层：Stream API、Optional、新日期时间 API（java.time，线程安全）',
+                  '虚拟机层：永久代 → 元空间；`HashMap` 链表过长转红黑树',
+                  '补充：Java 8 是使用最广的 LTS；JDK 9 起 G1 成为默认 GC',
+                ],
+                depth:
+                  '被追问「java.time 为什么比 Date 好」时答三点：不可变（线程安全）、API 清晰（`LocalDate` 与 `LocalDateTime` 分离，时区用 `ZonedDateTime` 显式表达）、格式化用 `DateTimeFormatter`（`SimpleDateFormat` 是线程不安全的经典坑）。',
+              },
+              {
+                kind: 'concept',
+                title: 'Lambda 的本质：函数式接口的实例，靠 invokedynamic 生成',
+                body: [
+                  'Lambda 不是匿名内部类的语法糖（这点很关键）。匿名内部类在编译期生成一个 `Outer$1.class`；lambda 不生成额外类文件，而是编译成一条 `invokedynamic` 指令，运行期由 `LambdaMetafactory` 链接出一个实现函数式接口的对象——**第一次调用时生成，之后复用**。这也解释了为什么 lambda 的类名怪异（形如 `Outer$$Lambda$1/0x...`），以及为什么它比匿名内部类启动更快、占用更小。',
+                  '它的类型由**目标类型（target type）**决定：`Runnable r = () -> {}` 与 `Callable<V> c = () -> null` 是同一个 lambda 表达式形状，靠赋值目标推断。前提是目标类型必须是**函数式接口**（有且仅有一个抽象方法的接口，SAM）。`@FunctionalInterface` 只是编译期校验，加不加都能用。',
+                  '最后一条限制常被考：lambda 只能捕获 **final 或 effectively final** 的局部变量。原因是 lambda 捕获的是**值的拷贝**（实现上作为参数传进合成方法），若允许修改，内外两份就不同步了。成员变量与静态变量不受限制——它们通过 `this` 或类引用访问，不存在拷贝。',
+                ],
+                points: [
+                  '实现方式：`invokedynamic` + `LambdaMetafactory`，不生成 `$1.class`',
+                  '目标类型必须是函数式接口（SAM），`@FunctionalInterface` 仅作编译期校验',
+                  '只能捕获 final / effectively final 的局部变量，捕获的是值拷贝',
+                  '方法引用四种：静态 `Integer::parseInt`、绑定实例 `System.out::println`、未绑定实例 `String::length`、构造器 `User::new`',
+                  '`this` 在 lambda 里指向**外围实例**；在匿名内部类里指向匿名类自身',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '四大内置函数式接口：记住「进什么、出什么」',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['抽象方法', '语义', '典型用途'],
+                  rows: [
+                    ['Function<T,R>', 'R apply(T)', 'T 进 R 出', '`User::getName`、类型转换'],
+                    ['Consumer<T>', 'void accept(T)', '只进不出', '`forEach`、打印、写库'],
+                    ['Supplier<T>', 'T get()', '不进只出', '`orElseGet`、延迟创建'],
+                    ['Predicate<T>', 'boolean test(T)', '进 T 出布尔', '`filter`、条件判断'],
+                  ],
+                  caption:
+                    '记忆口诀：**Function 有进有出、Consumer 只进不出、Supplier 只出不进、Predicate 出布尔。** 还有三个常用变体：`BiFunction<T,U,R>`（两进一出）、`UnaryOperator<T>`（同进同出）、`BinaryOperator<T>`（两进一出且同类型，`reduce` 用它）。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Lambda 与函数式接口的关系？四大内置接口',
+                questionId: 'java-01-Q83',
+                intent:
+                  '考察点有两层：概念（lambda 是函数式接口的实例）与实现（不是匿名内部类的语法糖）。能说出 invokedynamic 就是明显加分。',
+                points: [
+                  '函数式接口 = 有且仅有一个抽象方法的接口（SAM），可有多个 default / static 方法',
+                  'lambda 是函数式接口的**实例**，目标类型由赋值上下文推断；`@FunctionalInterface` 仅编译期校验',
+                  '实现方式是 `invokedynamic` + LambdaMetafactory，**不生成匿名类文件**',
+                  '只能访问 final / effectively final 的局部变量（捕获的是值拷贝）',
+                  '四大接口：`Function<T,R>` apply、`Consumer<T>` accept、`Supplier<T>` get、`Predicate<T>` test',
+                  '方法引用四种形式：静态、绑定实例、未绑定实例、构造器',
+                ],
+                depth:
+                  '追问「lambda 与匿名内部类的区别」时答三点：字节码（invokedynamic vs 独立 class）、作用域（`this` 指向不同）、捕获（lambda 隐式捕获外围实例但不要求 effectively final 的外部字段）。这三点答全，说明你真读过编译产物。',
+              },
+              {
+                kind: 'principle',
+                title: 'Stream 的惰性求值：中间操作只记账，终端操作才干活',
+                body: [
+                  'Stream 不是集合，也不是「更好的 for 循环」，它是一个**流水线描述**。`stream().filter(...).map(...)` 这两步执行完，**一个元素都没有被处理**——它们只是在组装一条管道。直到调用 `collect()` / `forEach()` / `count()` 这类终端操作，管道才被触发，且是一次性、单遍、按元素推进的。',
+                ],
+                steps: [
+                  {
+                    title: '中间操作：只记录，返回新的 Stream',
+                    detail:
+                      '`filter` / `map` / `sorted` / `distinct` 都返回新的 Stream 对象（或标记为「需要排序」等状态），不遍历数据。所以链式调用再长，也不会有多次循环——这是「声明式」的实际含义。',
+                  },
+                  {
+                    title: '终端操作：触发执行，并关闭流',
+                    detail:
+                      '`collect` / `reduce` / `forEach` / `count` / `anyMatch` 一旦调用，管道开始执行。此后这个 Stream 就「消费过」了，再用会抛 `IllegalStateException: stream has already been operated upon or closed`。要复用只能重新 `stream()`。',
+                  },
+                  {
+                    title: '逐元素融合：一次遍历完成所有步骤',
+                    detail:
+                      '执行时不是「先 filter 全部、再 map 全部」，而是「取一个元素 → filter → map → 交给终端」。所以 `filter().findFirst()` 在第一个匹配处就停（**短路**），不会遍历全表。这是惰性求值最大的实际收益。',
+                  },
+                  {
+                    title: '副作用与顺序：`forEach` 不保证有序',
+                    detail:
+                      '`forEach` 在并行流下顺序不定；需要顺序用 `forEachOrdered`。另外不要在流里修改外部集合（副作用），那既违反无状态约定，也可能在并行下出错。',
+                  },
+                  {
+                    title: '并行流：不是免费的加速',
+                    detail:
+                      '`parallelStream()` 用公共 `ForkJoinPool`，适合「数据量大 + 每元素计算重 + 无共享状态」的场景。小数据量时切分与合并的开销超过收益；有共享可变状态时结果还会错。**默认用串行，测过再并行。**',
+                  },
+                ],
+                takeaway:
+                  '一句话：**中间操作是「记账」，终端操作是「结算」；结算是单遍、逐元素、可短路的。** 记住这三个词，Stream 的性能与坑都能自己推。',
+              },
+              {
+                kind: 'diagram',
+                title: '一条 Stream 管道的执行方式：逐元素融合 + 短路',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['数据源', 'filter(年龄>18)', 'map(取名字)', 'findFirst'],
+                  messages: [
+                    { from: '数据源', to: 'filter(年龄>18)', text: '元素 1：年龄 15 → 淘汰' },
+                    { from: '数据源', to: 'filter(年龄>18)', text: '元素 2：年龄 22 → 通过' },
+                    { from: 'filter(年龄>18)', to: 'map(取名字)', text: '把 22 岁那条交给下一步' },
+                    { from: 'map(取名字)', to: 'findFirst', text: '"张三"' },
+                    { from: 'findFirst', to: 'map(取名字)', text: '拿到第一个就短路，不再要数据', reply: true },
+                    { from: 'map(取名字)', to: '数据源', text: '停止遍历（第 3、4 个元素根本不会读）', reply: true },
+                  ],
+                  caption:
+                    '注意元素 1 在第 1 步就被淘汰，元素 3、4 从未被读取——这就是「逐元素融合 + 短路」。如果按「先整体 filter、再整体 map」实现，元素 3、4 会被 filter 处理一遍，白白浪费。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '介绍一下 Stream API？什么是惰性求值',
+                questionId: 'java-01-Q84',
+                intent:
+                  '高频题。「惰性求值」不能只答「不立即执行」，要说出「中间操作只组装、终端操作触发、逐元素融合、可短路」这四层。',
+                points: [
+                  'Stream 是声明式流水线：中间操作（filter/map/sorted）返回新流，终端操作（collect/forEach/count）触发执行',
+                  '惰性求值：中间操作不遍历数据，只在终端操作时**单遍、逐元素**执行，因此能短路',
+                  '一个 Stream 只能消费一次，复用抛 `IllegalStateException`',
+                  '不修改数据源；`parallelStream` 用 ForkJoinPool，数据量大且无状态才划算',
+                  '常见终端操作：`collect`（收集）、`reduce`（归约）、`count`、`anyMatch`（短路）',
+                ],
+                depth:
+                  '能补「Stream 与集合的区别」就更完整：集合是**数据**（已存在，可反复遍历），Stream 是**计算**（按需产生，一次性）。这也是为什么 Stream 不能 `size()`、不能下标访问——它压根没打算持有数据。',
+              },
+              {
+                kind: 'concept',
+                title: 'Optional：把「可能没有」写进类型里',
+                body: [
+                  'Optional 解决的问题不是「减少 null」，而是**让「可能为空」这件事在签名上可见**。返回 `Optional<User>` 的方法，等于在告诉调用方「我可能没有用户，你必须处理」；而返回 `User` 的方法，理论上承诺非空。它把一类隐藏契约变成了显式契约。',
+                  '但它的 API 里藏着一个高频陷阱：`orElse(x)` 的参数**总会求值**（x 是普通值，方法调用已经执行完了），`orElseGet(supplier)` 才是惰性的（只有为空时才调 supplier）。所以 `orElse(loadFromDb())` 会在有值时也查一次库——这条能答出来，说明你真用过它。',
+                  '另一条设计约束常被忽略：Optional **不建议做字段、方法参数、集合元素**。它是为「返回值」设计的：字段用 Optional 会多一层包装、不可序列化；参数用 Optional 等于把判空责任推给调用方，反而不如重载或直接判空。',
+                ],
+                points: [
+                  '创建：`ofNullable(x)`（允许 null）vs `of(x)`（null 直接 NPE）',
+                  '取值：`orElse`（总是求值）/ `orElseGet`（惰性）/ `orElseThrow`（无值抛异常）；`get()` 不推荐',
+                  '链式：`map` / `flatMap`（避免 `Optional<Optional<T>>`）/ `filter` / `ifPresent`',
+                  '只做返回值，不做字段、参数、集合元素；`Optional` 不可序列化',
+                  '典型写法：`Optional.ofNullable(order).map(Order::getUser).map(User::getName).orElse("unknown")`',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '`orElse` 与 `orElseGet`：一个先算，一个后算',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: 'orElse(value)：参数先求值',
+                    tone: 'bad',
+                    items: [
+                      '`opt.orElse(loadFromDb())`',
+                      '传参时 `loadFromDb()` 已经执行',
+                      'opt 有值时，这次查询完全白费',
+                      '若它是慢查询，等于给热路径加了一次 IO',
+                    ],
+                  },
+                  right: {
+                    title: 'orElseGet(supplier)：只在为空时算',
+                    tone: 'good',
+                    items: [
+                      '`opt.orElseGet(() -> loadFromDb())`',
+                      'supplier 只在 opt 为空时才调用',
+                      '有值时零开销',
+                      '代价：多一个 lambda 对象（通常可忽略）',
+                    ],
+                  },
+                  caption:
+                    '判断方法很简单：**看括号里是「值」还是「函数」。** 值是已经算好的，函数可以推迟算。同样道理，`map` 也是惰性的（只在有值时执行），而 `Optional.of(f())` 会立刻执行 f。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Optional 的正确用法',
+                questionId: 'java-01-Q85',
+                intent:
+                  '考「用没用对」，不是「知不知道」。`orElse` 与 `orElseGet` 的区别是必问点，能不能说出「参数总是被求值」是关键。',
+                points: [
+                  '目的：把「可能为空」显式化，减少层层判空与 NPE',
+                  '`ofNullable` 允许 null、`of` 遇 null 直接抛 NPE（用于断言非空）',
+                  '`orElse` 参数**总是求值**；`orElseGet` 用 Supplier，**惰性**；取值优先 `orElseThrow`',
+                  '`map` / `flatMap` / `filter` 做链式处理，`flatMap` 用于避免嵌套 Optional',
+                  '设计约束：只做返回值，不做字段 / 参数 / 集合元素；不可序列化',
+                ],
+                depth:
+                  '追问「Optional 能完全避免 NPE 吗」：不能。`Optional.of(null)` 自己就抛 NPE，`opt.get()` 也可能抛 `NoSuchElementException`。它只是把「可能没有」变成类型信息，真正的收益是**强制调用方显式处理**，而不是消灭空指针。',
+              },
+              {
+                kind: 'concept',
+                title: 'record：编译器替你写掉六个方法，但只承诺「浅不可变」',
+                body: [
+                  '一行 `public record Point(int x, int y) {}` 展开后是：final 类、两个 private final 字段、全参构造器、`x()` / `y()` 两个访问器（注意**不是** `getX()`）、以及 `equals` / `hashCode` / `toString`。它继承的是 `java.lang.Record`，所以**不能再 extends 别的类**，但可以 implements 接口、可以有泛型、可以有 static 字段与 static 方法。',
+                  '它不能声明额外的实例字段——这是「数据载体」的硬约束，也保证了「组件列表就是全部状态」。需要校验时用**紧凑构造器**（`public Point { if (x < 0) throw ... }`），它会在末尾自动把参数赋给字段，你不用写 `this.x = x`。',
+                  '但要小心一点：record 只保证「字段引用不可变」，**不保证内容不可变**。`record Period(Date start)` 的 `start()` 返回的是同一个 Date，调用方 `p.start().setTime(0)` 照样能改。这和前面「不可变类」那一节是同一个坑——record 省了样板，没省防御性拷贝。',
+                ],
+                points: [
+                  'JDK 14 预览、**JDK 16 转正**（JEP 395）',
+                  '自动生成：全参构造器、`x()` 风格访问器、`equals` / `hashCode` / `toString`',
+                  '限制：不能再继承类、不能声明实例字段、字段隐式 final；可实现接口',
+                  '紧凑构造器用于校验，末尾自动赋值',
+                  '只保证「引用不可变」，可变字段（Date、数组、集合）仍需防御性拷贝',
+                ],
+              },
+              {
+                kind: 'compare',
+                title: 'record vs Lombok @Data vs 手写不可变类',
+                head: ['维度', 'record', 'Lombok @Data', '@Value / 手写'],
+                rows: [
+                  ['来源', '语言特性（JDK 16+）', '编译期注解处理器（改 AST）', '手写或 @Value'],
+                  ['是否可变', '**不可变**（字段 final）', '**可变**（生成 setter）', '@Value 不可变；手写看实现'],
+                  ['访问器命名', '`x()`', '`getX()`', '`getX()`'],
+                  ['依赖', '无', '需要引入 Lombok + IDE 插件', '无'],
+                  ['能否加字段', '不能（组件即全部状态）', '能（普通类）', '能'],
+                  ['典型用途', 'DTO、值对象、模式匹配的解构目标', '实体类、需可变的对象', '需要完全控制时'],
+                ],
+                note: '选型很简单：**只承载数据且要不可变 → record**；需要可变或要兼容 Java 8 → Lombok；需要精细控制 equals 语义或兼容旧代码 → 手写。注意 record 的访问器是 `x()` 而不是 `getX()`，很多序列化框架（老版本 Jackson）需要额外配置才能识别。',
+              },
+              {
+                kind: 'question',
+                title: 'record（记录类）是什么',
+                questionId: 'java-01-Q86',
+                intent:
+                  '考察对语言级不可变的理​​解。能说出「不能再继承类」「访问器不是 getX」「只保证浅不可变」三点，就明显不是只看了新闻稿。',
+                points: [
+                  'JDK 14 预览、JDK 16 转正；不可变数据载体类',
+                  '自动生成全参构造器、`x()` 风格访问器、`equals` / `hashCode` / `toString`',
+                  '限制：不能继承类（已继承 Record）、不能声明实例字段、字段隐式 final；可实现接口、支持泛型',
+                  '紧凑构造器用于参数校验，末尾自动赋值',
+                  '与 Lombok 的区别：语言级特性、语义上承诺不可变；但**只保证引用不可变**',
+                ],
+                depth:
+                  '追问「record 能做 Map 的 key 吗」：可以，而且很合适——`equals` / `hashCode` 由编译器按组件生成，天然满足契约（前提是组件本身也满足）。这正是前面 equals/hashCode 契约那节课的落地场景。',
+              },
+              {
+                kind: 'concept',
+                title: 'sealed、文本块、模式匹配：三个「让代码更直白」的特性',
+                body: [
+                  '**sealed（JDK 17 转正）** 解决的是「继承太开放」的问题：`sealed interface Shape permits Circle, Square` 明确列出允许的实现者，其他类无法实现。配套规则是子类必须三选一：`final`（到此为止）、`sealed`（继续受限）、`non-sealed`（重新开放）。它最大的价值不在限制本身，而在**让编译器知道「所有可能」**——于是 `switch` 对 Shape 做模式匹配时，覆盖全部分支就**不需要 default**，漏一个直接编译报错。',
+                  '**文本块（JDK 13 预览、15 转正）** 用三引号写多行字符串，自动去掉公共缩进，写 JSON / SQL 不再需要拼接与转义。两个细节值得记：行尾加 `\\` 可以抑制换行，`\\s` 可以保留行尾空格（否则会被 IDE 或格式化工具吃掉）。',
+                  '**instanceof 模式匹配（JDK 16 转正）** 让 `if (obj instanceof String s)` 在判断成功的同时绑定变量 `s`，省掉强转。它真正的意义是配合 sealed 形成完整的「代数数据类型」：`switch` 里对 `Circle c`、`Square s` 分支匹配，加上 sealed 的穷尽性检查，Java 才有了接近函数式语言的表达力。',
+                ],
+                points: [
+                  'sealed：`permits` 列出允许的子类；子类必须是 final / sealed / non-sealed',
+                  'sealed 的核心价值：让 switch 模式匹配具备**穷尽性检查**，可省略 default',
+                  '文本块：`"""` 多行字符串，自动去公共缩进；`\\` 抑制换行、`\\s` 保留尾空格',
+                  'instanceof 模式匹配：`if (o instanceof String s)`，绑定变量作用域限于该分支',
+                  'JDK 21 进一步支持 record 解构：`case Point(int x, int y)`，直接拆出组件',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'sealed 让编译器能穷举所有分支',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: 'sealed interface Shape',
+                    note: 'permits 明确列出实现者',
+                    tone: 'primary',
+                    children: [
+                      { label: 'final class Circle', note: '到此为止，不能再被继承', tone: 'primary' },
+                      { label: 'final record Square', note: 'record 天然 final', tone: 'primary' },
+                      { label: 'sealed class Polygon', note: '继续受限，需再写 permits', tone: 'warn' },
+                      { label: 'non-sealed class FreeShape', note: '重新开放，任何类都能继承', tone: 'warn' },
+                    ],
+                  },
+                  caption:
+                    '四个子类必须是 final / sealed / non-sealed 之一，这是编译器强制的。于是对 Shape 做 `switch` 时，只要覆盖 Circle、Square、Polygon、FreeShape 就完备了，**不需要 default**；将来有人新增一个 permits 项，所有 switch 会立刻编译失败——这是「加类型时编译器主动提醒你改所有分支」，比运行时才发现强太多。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'sealed、文本块、instanceof 模式匹配分别是什么',
+                questionId: 'java-01-Q87',
+                intent:
+                  '三个特性打包问，考的是「你知不知道它们为什么总被一起提」——它们共同服务于「让类型表达更精确、代码更直白」。',
+                points: [
+                  'sealed（JDK 17）：`permits` 限定实现者，子类必须是 final / sealed / non-sealed',
+                  'sealed 的价值：配合 switch 模式匹配实现穷尽性检查，漏分支编译报错',
+                  '文本块（JDK 13 预览 / 15 转正）：三引号多行字符串，自动去缩进，写 JSON / SQL 免转义',
+                  'instanceof 模式匹配（JDK 16）：判断即绑定变量，省去强转',
+                  'JDK 21 的 record 解构把三者串起来：sealed + record + switch 模式匹配 = 代数数据类型',
+                ],
+                depth:
+                  '能说出「sealed 的真正收益是编译期穷尽性」而不是「限制继承」，就说明理解了设计意图。限制继承本身只是手段，让编译器能替你检查漏分支才是目的。',
+              },
+              {
+                kind: 'concept',
+                title: '虚拟线程与分代 ZGC：Java 21 的两张底牌',
+                body: [
+                  '**虚拟线程（JDK 21 转正，JEP 444）** 把线程从「操作系统资源」变成「JVM 管理的对象」。平台线程与内核线程 1:1，栈按 MB 预分配，所以你最多开几千个；虚拟线程是 M:N 调度——大量虚拟线程跑在少量载体线程（carrier）上，阻塞时 JVM 把它**卸载**（unmount）到堆里，让出载体线程去跑别的。于是「一个请求一个线程」这种最直观的写法，也能支撑几十万并发。',
+                  '用它的三条要点：**① 不要池化**（创建成本极低，用 `Executors.newVirtualThreadPerTaskExecutor()` 每任务一个）；**② 只对 I/O 密集型有收益**（CPU 密集型受核数限制，换成虚拟线程不会更快）；**③ 小心 pinning**——在 `synchronized` 块里阻塞会让载体线程被「钉住」，无法卸载，吞吐反而下降（JDK 24 的 JEP 491 已修复这一点，在此之前应改用 `ReentrantLock`）。另外大量虚拟线程各自持有 `ThreadLocal` 会造成内存膨胀，官方方向是用 `ScopedValue` 替代。',
+                  '**分代 ZGC（JDK 21，JEP 439）** 是把 ZGC 从「不分代」升级为「分代」：对象分年轻代 / 老年代，更频繁地回收「朝生夕死」的年轻对象。收益是**在保持亚毫秒级停顿的同时补上吞吐短板**，并降低堆开销。JDK 21 需显式 `-XX:+UseZGC -XX:+ZGenerational`，JDK 23 起分代成为默认。一句话总结：**低延迟 GC 的吞吐缺陷被分代补上了。**',
+                ],
+                points: [
+                  '虚拟线程：M:N 调度在载体线程上，阻塞时卸载到堆，可轻松创建百万级',
+                  '不要池化虚拟线程；只对 I/O 密集型有收益；`synchronized` 阻塞会导致 pinning（JDK 24 修复）',
+                  '`ThreadLocal` 在大量虚拟线程下会膨胀，方向是 `ScopedValue`',
+                  '分代 ZGC：年轻代 / 老年代分开回收，亚毫秒停顿 + 更高吞吐；JDK 23 起默认',
+                  '两者解决的是不同问题：虚拟线程提高**并发连接数**，ZGC 降低**停顿**',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '什么是虚拟线程？和平台线程的区别',
+                questionId: 'java-01-Q88',
+                intent:
+                  '中高难度。答「轻量级线程」只是开头，必须说清 M:N 调度、卸载机制、适用场景，以及「不要池化」这个反直觉的结论。',
+                points: [
+                  'JVM 管理的轻量线程，M:N 调度在少量载体线程上，栈按需增长（KB 级）',
+                  '阻塞时 JVM 挂载 / 卸载虚拟线程，把载体线程让给其他任务，所以能开百万级',
+                  '适用 I/O 密集型；**CPU 密集型收益不大**（受核数限制）',
+                  '**不需要池化**：`Executors.newVirtualThreadPerTaskExecutor()`，每任务一个',
+                  '注意 pinning：`synchronized` 中阻塞会钉住载体线程（JDK 24 修复）；`ThreadLocal` 大量使用会膨胀',
+                ],
+                depth:
+                  '追问「虚拟线程会取代线程池吗」：会取代「为 I/O 阻塞而存在的池」，不会取代「限制并发度的信号量」。要防止打爆下游，仍然要用 `Semaphore` 之类的机制限流——虚拟线程解决的是「线程贵」，不是「下游扛得住」。',
+              },
+            ],
+            outline: [
+              '按三层归类：语言（lambda/record/sealed）、类库（Stream/Optional/java.time）、虚拟机（ZGC/虚拟线程）',
+              'LTS 主干 8 → 11 → 17 → 21 → 25；新特性常先预览一两版才转正',
+              'Lambda 靠 invokedynamic 实现，Stream 惰性求值靠「中间操作记账、终端操作结算」',
+              '虚拟线程是 M:N 调度 + 阻塞时卸载，只对 I/O 密集型有收益且不要池化',
+            ],
+            pitfalls: [
+              '把 lambda 说成匿名内部类的语法糖，实际它不生成类文件、走 invokedynamic',
+              '用 `orElse(loadFromDb())` 代替 `orElseGet`，有值时也白查一次库',
+              '在虚拟线程里用 synchronized 包住阻塞调用，导致载体线程被固定，吞吐不升反降',
+            ],
+          },
+        },
+        {
+          id: 'code-traps',
+          title: '经典代码陷阱 20 问',
+          kind: 'drill',
+          sources: [{ topic: 'java-01', chapters: ['经典代码陷阱'] }],
+          content: {
+            intro:
+              '这一节是纯练习：给一段代码，问输出是什么。做这类题不要凭直觉，固定按三步走——**先分类**（编译错误 / 运行异常 / 正常输出），**再查类型**（有没有拆箱、提升、截断），**最后看顺序**（自增、短路、fall-through）。所有这些陷阱都出自三个机制：自动类型转换、求值顺序、以及「编译器替你做的决定」（复合赋值隐式强转、三元运算符类型提升）。把这三条当成检查清单，看起来简单的题就不会放倒你。建议先自己在纸上写答案，再展开看解析。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '陷阱题的三个源头，和一张检查清单',
+                body: [
+                  '第一个源头是**自动类型转换**：拆箱（`Long → long`）、二元数值提升（`int + long` 变 long）、三元运算符的类型统一。它们的共同点是「编译器悄悄插了一段转换代码」，而这段代码遇到 null 就抛 NPE、遇到窄类型就截断。',
+                  '第二个源头是**求值顺序**：`i++` 先取值后自增、`&&` 短路、`switch` 不写 break 会穿透。这些都不是「奇怪行为」，而是语言规范明确规定的顺序，只是与直觉不符。',
+                  '第三个源头是**编译器的隐含决定**：`s1 += 1` 隐含 `(short)` 强转所以能过，`s1 = s1 + 1` 没有所以编不过；`float f = 3.4` 里 3.4 是 double 字面量所以编不过。看到「这行为什么编译不过」，先想「编译器偷偷做了什么」。',
+                ],
+                points: [
+                  '先分类：编译错误（类型不兼容）> 运行异常（NPE / 越界）> 正常输出',
+                  '拆箱三触发点：直接赋值、参与算术、三元运算符类型提升',
+                  '求值顺序三考点：`i++` / `++i`、`&&` / `||` 短路、`switch` 穿透',
+                  '复合赋值（`+=` / `-=`）隐含强转，普通赋值没有',
+                  '浮点不能用 `==`，整数除法向零取整、取模符号随被除数',
+                ],
+              },
+              {
+                kind: 'principle',
+                title: '拆箱 NPE 的三条触发路径',
+                body: [
+                  '包装类型为 null 时，任何「需要基本类型」的上下文都会触发拆箱，而拆箱就是调 `longValue()` 这类方法——对着 null 调方法，自然 NPE。麻烦在于这些上下文往往是隐式的。',
+                ],
+                steps: [
+                  {
+                    title: '路径一：直接赋给基本类型',
+                    detail:
+                      '`Long v = map.get(id); long x = v;` —— 第二行编译成 `v.longValue()`，v 为 null 直接 NPE。这是线上最常见的一种，因为 `Map.get` 返回包装类型，而业务代码往往声明成 `long`。',
+                  },
+                  {
+                    title: '路径二：参与算术或比较',
+                    detail:
+                      '`Integer a = null; int b = a + 1;` —— 算术运算要求基本类型，先拆箱再算。同理 `a > 0`、`a == 1`（与基本类型比较时）都会拆箱。注意 `a == b`（两个 Integer 之间）不拆箱，比的是引用。',
+                  },
+                  {
+                    title: '路径三：三元运算符的类型统一',
+                    detail:
+                      '`Integer x = null; int y = true ? x : 1;` —— 两个分支一个是 Integer、一个是 int，按规范会把结果类型定为 int，于是 x 被拆箱 → NPE。**只要有一边是基本类型，另一边就会被拆。**',
+                  },
+                  {
+                    title: '防御写法',
+                    detail:
+                      '取值时用包装类型接、显式判空，或用 `Optional.ofNullable(...).orElse(0L)`；三元两边都保持包装类型（`true ? x : Integer.valueOf(1)` 就不会拆箱）。原则是：**不要让包装类型和基本类型在同一个表达式里混着用。**',
+                  },
+                ],
+                takeaway:
+                  '一句话：**只要是「需要基本类型」的地方，null 的包装类型就会炸。** 判断一道题会不会 NPE，只需问「这里有没有隐式拆箱」。',
+              },
+              {
+                kind: 'diagram',
+                title: '同一行 `long value = (Long) map.get(id);` 里发生的事',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '你以为的',
+                    tone: 'bad',
+                    items: [
+                      '取出 Long，赋给 long',
+                      '只是类型转换，值传过去',
+                      'key 不存在时得到 0（像 SQL 的 count）',
+                    ],
+                  },
+                  right: {
+                    title: '实际发生的',
+                    tone: 'warn',
+                    items: [
+                      '`map.get(id)` 返回 **null**（不是 0）',
+                      '赋值给 `long` 触发 `Long.longValue()`',
+                      '对着 null 调方法 → **NPE**',
+                      '而且异常栈指向那行赋值，看不出是 key 不存在',
+                    ],
+                  },
+                  caption:
+                    '修复方式有三种，按推荐度排：① 用 `Long` 接收再判空；② `Optional.ofNullable(map.get(id)).orElse(0L)`；③ `getOrDefault(id, 0L)`（注意泛型是 `Map<Long, Long>` 时才好用）。核心是**让「可能没有」显式暴露**，而不是让拆箱替你抛异常。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '包装类三元运算符 / 拆箱导致的 NPE 陷阱',
+                questionId: 'java-01-Q91',
+                intent:
+                  '高难度题，而且是真实的线上事故来源。面试官想听的不是「会 NPE」，而是「哪一步拆的箱」。',
+                points: [
+                  '`Map<Long, Object>.get` 返回 null，赋给 `long` 时自动拆箱 → NPE',
+                  '`Integer a = null; int b = a;` 同样在赋值处拆箱',
+                  '三元运算符：两分支一边是基本类型时会做类型提升，另一边的包装类型被拆箱',
+                  '要点：包装类型参与算术、比较、三元类型提升时都可能隐式拆箱，null 拆箱即 NPE',
+                  '防御：用包装类型接收 + 显式判空，或 `getOrDefault` / `Optional`',
+                ],
+                depth:
+                  '能补「为什么 `map.get` 不返回 0」更加分：`Map` 的语义是「没有这个键」与「键对应的值是 null」不可区分，返回 null 是设计选择；而 `getOrDefault` 把「没有」显式转成默认值，所以是更安全的 API。',
+              },
+              {
+                kind: 'principle',
+                title: '`i = i++` 为什么等于 0：一条自增指令的顺序',
+                body: [
+                  '`i++` 与 `++i` 的差别是「先取值还是先自增」，而 `i = i++` 的结果取决于**赋值发生在自增之后**：先把旧值压栈，再自增，最后把栈里的旧值写回——写回的动作覆盖了自增结果。',
+                ],
+                steps: [
+                  {
+                    title: '`iload`：把 i 的当前值压入操作数栈',
+                    detail:
+                      '此时 i = 0，栈顶是 0。**这一步就是「取值」**，取到的是自增前的旧值。',
+                  },
+                  {
+                    title: '`iinc`：局部变量表里的 i 自增',
+                    detail:
+                      'i 变成 1。注意这一步改的是**局部变量表**，栈里那个 0 不受影响——所以「自增生效了，但结果被丢弃」。',
+                  },
+                  {
+                    title: '`istore`：把栈顶的旧值写回 i',
+                    detail:
+                      '把 0 存回 i，于是 i 又变回 0。**最终结果是自增被覆盖**，这就是 `i = i++` 等于 0 的全部原因。',
+                  },
+                  {
+                    title: '对比 `i = ++i`',
+                    detail:
+                      '`++i` 是先 `iinc` 再 `iload`，栈里压的是自增后的值，写回后仍是自增结果。所以 `i = ++i` 得到 1。',
+                  },
+                  {
+                    title: '变体：`b = a++ + ++a`',
+                    detail:
+                      '设 a = 10。`a++` 取 10（a 变 11）；`++a` 先自增到 12 再取值 12。相加得 22，a 最终 12。**规则是同一条：后缀取值在前、自增在后；前缀自增在前、取值在后。**',
+                  },
+                ],
+                takeaway:
+                  '不要记结论，记这条：**后缀表达式的值是「自增前的旧值」，而自增本身无条件发生。** 一旦你把旧值写回变量，自增就被覆盖了。',
+              },
+              {
+                kind: 'diagram',
+                title: '`int i = 0; i = i++;` 的三步',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['局部变量 i', '操作数栈', '赋值动作'],
+                  messages: [
+                    { from: '局部变量 i', to: '操作数栈', text: 'iload：把 0 压栈（这是 i++ 的「取值」）' },
+                    { from: '局部变量 i', to: '局部变量 i', text: 'iinc：i 从 0 变成 1' },
+                    { from: '操作数栈', to: '赋值动作', text: 'istore：把栈里的 0 写回 i' },
+                    { from: '赋值动作', to: '局部变量 i', text: 'i 又变回 0 —— 自增被覆盖', reply: true },
+                  ],
+                  caption:
+                    '关键在第 2 步与第 3 步之间：**自增改了局部变量表，但栈里存的是旧值，最后旧值又把自增结果盖掉了。** 这也是为什么 `i++` 单独成句没问题（没人写回），一旦参与赋值就会出这种结果。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '`int i = 0; i = i++;` 之后 i 是多少',
+                questionId: 'java-01-Q92',
+                intent:
+                  '经典笔试题。答 0 是及格，能说清「旧值压栈 → 自增 → 旧值写回」才是通过。',
+                points: [
+                  '答案是 **0**：i++ 取胜旧值压栈，随后 i 自增为 1，最后把栈里的 0 写回 i',
+                  '`i = ++i` 结果才是自增后的值（先自增再取值）',
+                  '变体 `b = a++ + ++a`（a 从 10 开始）：b = 10 + 12 = 22，a 最终 12',
+                  '本质：后缀表达式的值是旧值，但自增无条件发生；写回动作覆盖了自增结果',
+                ],
+                depth:
+                  '追问「为什么 Java 要这样规定」：Java 规范明确规定表达式的求值顺序（左到右）与后缀自增的语义，这个结果是规范保证的，不依赖编译器实现。C/C++ 里同类代码是「未定义行为」，Java 至少给了确定答案。',
+              },
+              {
+                kind: 'concept',
+                title: '浮点：0.1 + 0.2 为什么不是 0.3',
+                body: [
+                  '因为二进制无法精确表示 0.1 和 0.2——它们是无限循环小数（十进制 0.1 = 二进制 0.0001100110011…），存储时被截断成最近的 double 值。两个「近似值」相加，误差累积成 `0.30000000000000004`。这不是 Java 的 bug，IEEE 754 的所有语言都一样。',
+                  '所以浮点比较必须用「容差」：`Math.abs(a - b) < 1e-9`。容差选多大取决于业务精度，`float` 有效位数约 7 位十进制，`double` 约 15-16 位。要精确计算（金额、利率）就用 `BigDecimal`，且**必须用字符串构造**：`new BigDecimal(0.1)` 会把那个误差原样带进来，`new BigDecimal("0.1")` 才是精确的 0.1。',
+                  '另外两个易错点：`BigDecimal.equals` 会比较 scale（`1.0` 与 `1.00` 不相等），比较数值要用 `compareTo() == 0`；`float f = 3.4;` 编译不过，因为 3.4 是 double 字面量，必须写 `3.4f`——这是「字面量默认类型」造成的编译错误，不是精度问题。',
+                ],
+                points: [
+                  '`0.1 + 0.2 == 0.3` 为 **false**，实际是 0.30000000000000004',
+                  '浮点比较用容差：`Math.abs(a - b) < 1e-9`；或用 `Double.compare`',
+                  '金额用 `BigDecimal`，且必须 `new BigDecimal("0.1")` 字符串构造',
+                  '`BigDecimal` 比较数值用 `compareTo`，`equals` 还比 scale',
+                  '`float f = 3.4;` 编译错误（double 字面量），要写 `3.4f`',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '浮点判等：三种写法，两种是错的',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '错误写法',
+                    tone: 'bad',
+                    items: [
+                      '`if (a == b)` —— 二进制近似值几乎不会相等',
+                      '`if (a - b == 0)` —— 同上，且减法本身还有误差',
+                      '`new BigDecimal(0.1)` —— 把误差原样带进高精度计算',
+                    ],
+                  },
+                  right: {
+                    title: '正确写法',
+                    tone: 'good',
+                    items: [
+                      '`if (Math.abs(a - b) < 1e-9)` —— 容差比较',
+                      '`if (Double.compare(a, b) == 0)` —— 处理 NaN、-0.0 的规范比较',
+                      '金额：`new BigDecimal("0.1")` + `compareTo` 比较',
+                    ],
+                  },
+                  caption:
+                    '一句判断标准：**只要涉及小数，就不要用 `==`。** 例外是「用浮点表示整数」（`1.0 == 1.0` 成立），但依赖这个例外写代码，迟早会被 0.1 这类值教育一次。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '0.1 + 0.2 == 0.3 的结果？如何正确比较浮点数',
+                questionId: 'java-01-Q93',
+                intent:
+                  '经典题。重点是解释「二进制无法精确表示」，以及给出可落地的三种正确做法。',
+                points: [
+                  '结果为 **false**，实际值是 0.30000000000000004',
+                  '原因：0.1 / 0.2 在二进制中是无限循环小数，存储时被截断',
+                  '比较方式一：`Math.abs(a - b) < 1e-9`（容差法）',
+                  '比较方式二：`Double.compare(a, b)`（能处理 NaN 与 -0.0）',
+                  '金额场景：`BigDecimal` + 字符串构造 + `compareTo`',
+                ],
+                depth:
+                  '追问「1e-9 怎么选」：取决于数量级与精度要求。`double` 约有 15-16 位有效十进制数字，若数值量级在 1 附近，1e-9 已经比机器精度宽松得多；若数值本身是 1e9 量级，绝对容差就不合适，应改用相对误差 `Math.abs(a-b) / Math.max(Math.abs(a), Math.abs(b))`。',
+              },
+              {
+                kind: 'concept',
+                title: 'switch 穿透：不是 bug，是「多个 case 共享一段代码」的设计',
+                body: [
+                  '`switch` 的语义是「跳转到匹配的 case，然后**一直往下执行**直到遇到 break 或结束」。所以忘写 break 就会把后面所有分支的代码都跑一遍，这叫 fall-through。它当年是刻意设计的——可以写出 `case 1: case 2: case 3: 同一个处理`，避免重复代码。',
+                  '但这种「共享分支」的写法在今天看是**高风险的省略**：漏一个 break 就是一个静默的逻辑错误，而且编译器不会警告（部分工具会）。所以 JDK 14 的 switch 表达式改用箭头 `case 1 -> ...`，**天然不穿透**，需要多值匹配时写 `case 1, 2, 3 ->`，把「共享」变成显式。',
+                  '还有两个细节常被考：`default` 的位置不影响执行顺序（它只决定「没匹配时从哪开始」，仍会往下穿透）；`switch` 里定义的变量作用域是整个 switch 块，所以在不同 case 里声明同名变量会编译冲突。',
+                ],
+                points: [
+                  '不写 break → fall-through：匹配之后的所有 case 代码依次执行',
+                  '用途：`case 1: case 2: case 3:` 共享同一段逻辑',
+                  'JDK 14 箭头语法：`case 1 -> ...` 不穿透；多值用 `case 1, 2, 3 ->`',
+                  '`default` 写在中间同样会向下穿透，位置不影响语义',
+                  'switch 表达式的所有分支必须有返回值（或用 `yield`），且必须穷尽',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '`case 1: print("a"); case 2: print("b"); break;` 的执行路径',
+                diagram: {
+                  type: 'flow',
+                  items: [
+                    { label: 'x = 1', note: '从 case 1 进入', tone: 'primary' },
+                    { label: '打印 a', note: '没有 break，继续往下' },
+                    { label: '打印 b', note: 'case 2 的代码也被执行', tone: 'warn' },
+                    { label: '遇到 break', note: '这里才跳出 switch', tone: 'primary' },
+                  ],
+                  caption:
+                    '所以输出是 `ab` 而不是 `a`。这是「穿透」的字面含义：**进入点由匹配决定，退出点由 break 决定。** 两个点之间的一切都会执行——包括后面 case 的代码与 default。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'switch 不写 break 会发生什么',
+                questionId: 'java-01-Q94',
+                intent:
+                  '简单题，但要说清「穿透是设计而非 bug」，以及新语法的改进，才能体现你不是只会背「会穿透」。',
+                points: [
+                  '发生 fall-through：匹配到的 case 之后所有代码依次执行，直到 break 或 switch 结束',
+                  '这是经典 bug 来源，也多用于「多个 case 共享一段逻辑」',
+                  'JDK 14 箭头语法 `case 1 ->` 不再穿透，多值用 `case 1, 2, 3 ->`',
+                  '补充：`default` 写在中途也会向下穿透；switch 表达式必须穷尽所有分支',
+                ],
+                depth:
+                  '能补「switch 表达式与语句的区别」更好：表达式必须有值（每个分支返回或用 `yield`），因此编译器会检查穷尽性；语句则允许不覆盖所有情况（没匹配就什么都不做）。',
+              },
+              {
+                kind: 'concept',
+                title: '只重写 equals 不重写 hashCode：为什么会「去重失效」',
+                body: [
+                  '`HashSet` 的 `add` 分两步：先算 `hashCode()` 定位到哪个桶，再在**那个桶内**用 `equals` 逐个比较。只重写 equals 时，两个「逻辑相等」的对象会算出不同的哈希（默认 `hashCode` 基于对象地址），被放进**不同的桶**——既然不在同一个桶，`equals` 根本没机会被调用，于是两个都留下来。',
+                  '同理 `contains`、`remove`、`get` 也会失效：它们都先按哈希找桶，找不到就返回 false/null。这就是「对象明明在集合里，却查不到」的原因。反过来，只重写 hashCode 不重写 equals 同样有问题：哈希相同进了同一个桶，但 equals 用引用比较，于是桶内两个对象都不相等，Set 里出现两个。',
+                  '还有一个隐蔽的坑：**用可变字段参与 hashCode 计算**。对象入桶后改了那个字段，哈希变了，下次查找会去另一个桶找——对象就此「消失」。所以参与哈希的字段应该是不可变的，这也是为什么 String、Integer 这类不可变类型适合做 key。',
+                ],
+                points: [
+                  'HashSet 定位是两段式：`hashCode` 定桶 → `equals` 桶内比较',
+                  '只重写 equals：哈希不同 → 不同桶 → 不去重、查不到',
+                  '只重写 hashCode：同桶但 equals 为 false → 仍能存进两个',
+                  '参与 hashCode 的字段必须不可变，否则对象入桶后「失踪」',
+                  '契约：`equals` 相等则 `hashCode` 必须相等；反之不要求',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '两个「相等」的对象，落在两个桶里',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: 'Set（哈希桶数组）',
+                      note: '按 hashCode 定位',
+                      slots: [
+                        { label: 'bucket[3]', value: 'User("tom") @0x1A', tone: 'warn' },
+                        { label: 'bucket[7]', value: 'User("tom") @0x2B', tone: 'warn' },
+                      ],
+                    },
+                    {
+                      name: 'equals 比较',
+                      note: '只在桶内发生',
+                      slots: [
+                        { label: 'bucket[3] 内', value: '只有 1 个元素，无需比较' },
+                        { label: 'bucket[7] 内', value: '只有 1 个元素，无需比较' },
+                      ],
+                    },
+                    {
+                      name: '结果',
+                      note: 'size = 2',
+                      slots: [{ label: 'set.size()', value: '2（去重失效）', tone: 'bad' }],
+                    },
+                  ],
+                  caption:
+                    '关键点：**`equals` 从来没有被调用过。** 不是它答错了，而是压根没被问到——两个对象都不在同一个桶里。这也解释了为什么「重写 hashCode 就能修好」：哈希一致后它们落到同一桶，`equals` 才有机会判断相等。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '重写 equals 不重写 hashCode，HashSet 去重会怎样',
+                questionId: 'java-01-Q95',
+                intent:
+                  '高频题。能画出「两个桶」的过程，比背结论「会重复」有说服力得多。',
+                points: [
+                  '结果：`set.size()` 为 **2**，去重失效',
+                  '原因：hashCode 不同（默认基于对象地址）→ 落入不同桶 → 不会做 equals 比较',
+                  '同时 `contains` / `get` / `remove` 也会失效，查不到已存在的对象',
+                  '契约：equals 相等则 hashCode 必须相等；只重写一半必然出问题',
+                  '延伸：可变字段参与 hashCode 会让对象入桶后「失踪」',
+                ],
+                depth:
+                  '追问「HashSet 的两段式定位」时说清顺序：先 `hashCode` 再 `equals`，且 equals 只在同桶内比较。这个顺序解释了「为什么效率是 O(1)」——不用和所有元素比，只要算一次哈希。',
+              },
+              {
+                kind: 'concept',
+                title: '短路的副作用，与复合赋值的隐式强转',
+                body: [
+                  '`&&` / `||` 短路意味着**右侧可能不执行**，所以把有副作用的表达式放右边时，它的执行是有条件的：`if (false && ++i > 0)` 里 `++i` 从不执行，`i` 仍是 0；换成 `&` 就一定会执行，`i` 变 1。这个规则既能用来做防御（`s != null && s.length() > 0`），也会在无意中吞掉副作用（把赋值、计数写在右侧）。',
+                  '另一组陷阱来自「字面量默认类型」和「复合赋值」：`3.4` 默认是 `double`，赋给 `float` 必须写 `3.4f`；`short s1 = 1; s1 = s1 + 1;` 编译不过，因为 `s1 + 1` 被提升为 `int`，赋回 `short` 需要强转；而 `s1 += 1` 能过，因为复合赋值运算符**隐含一次强制转换**，等价于 `s1 = (short)(s1 + 1)`。',
+                  '顺带记住窄类型的三个规则：`byte` / `short` / `char` 参与运算前一律提升为 `int`；`+=`、`++` 这类会隐式转换回原类型；整数字面量在范围内可直接赋值（`byte b = 100` 合法，`byte b = 200` 编不过）。',
+                ],
+                points: [
+                  '`&&` / `||` 短路：右侧可能不执行，副作用被跳过',
+                  '`&` / `|` 不短路：两侧都执行，可用于「必须执行完两个判断」的场景',
+                  '`float f = 3.4;` 编译错误 → 写 `3.4f`（3.4 是 double 字面量）',
+                  '`s1 = s1 + 1;` 编译错误（int 提升）→ `s1 += 1;` 合法（隐含强转）',
+                  '`byte b = 100` 合法、`byte b = 200` 不合法（超出范围）',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '短路运算的执行顺序陷阱',
+                questionId: 'java-01-Q96',
+                intent:
+                  '小题，考「会不会被副作用坑」。三个写法对照着答最清楚：`&&`、`||`、`&` 各一次。',
+                points: [
+                  '`if (false && ++i > 0)`：右侧不执行，i 仍为 0',
+                  '`if (true || ++i > 0)`：右侧不执行，i 仍为 0',
+                  '`if (false & ++i > 0)`：`&` 不短路，右侧执行，i 变为 1',
+                  '利用短路做防御：`s != null && s.length() > 0`',
+                  '反例：把有副作用的操作（赋值、计数）放在 `&&` 右侧，它会「有条件地」执行',
+                ],
+                depth:
+                  '面试里可以主动补一句「这也是为什么 `obj != null && obj.isValid()` 不会 NPE」——把陷阱题和工程实践连起来，比单答一个数字更有价值。',
+              },
+              {
+                kind: 'question',
+                title: '`float f = 3.4;` 与 `s1 = s1 + 1;` 正确吗',
+                questionId: 'java-01-Q97',
+                intent:
+                  '考「编译期类型规则」的细节。答「都不正确」容易，说清「为什么 `+=` 能过」才是关键。',
+                points: [
+                  '`float f = 3.4;` **编译错误**：3.4 是 double 字面量，需写 `3.4f`',
+                  '`short s1 = 1; s1 = s1 + 1;` **编译错误**：`s1 + 1` 提升为 int，赋回 short 需强转',
+                  '`s1 += 1;` **正确**：复合赋值隐含强转，等价于 `s1 = (short)(s1 + 1)`',
+                  '同理 `byte b = 100` 合法、`byte b = 200` 不合法（字面量越界）',
+                ],
+                depth:
+                  '补一句「这些都不是运行时问题，编译期就拦住了」：陷阱题先分类的价值就在这里——如果一眼能判定是编译错误，就不必再去推演运行结果了。',
+              },
+            ],
+            outline: [
+              '陷阱题的三个源头：自动类型转换、求值顺序、编译器的隐含决定（复合赋值强转、三元提升）',
+              '拆箱三触发点：直接赋值、参与算术比较、三元运算符类型统一',
+              '浮点不能用 ==，金额用 BigDecimal 字符串构造；switch 不写 break 会穿透',
+              '只重写 equals 不重写 hashCode，去重与查找都会失效',
+            ],
+            pitfalls: [
+              '看到 0.1 + 0.2 就答 0.3，忘了二进制浮点无法精确表示',
+              '以为 `i = i++` 会自增，实际旧值写回覆盖了自增结果',
+              '把 `s1 += 1` 和 `s1 = s1 + 1` 当成等价，前者隐含强转所以能编译',
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: 'collections',
+      title: 'D · 集合框架全解与追问链',
+      goal: '从结构与源码层面掌握 List / Map / Set / Queue，并能做选型判断',
+      summary:
+        '集合是 Java 面试的主战场，几乎每一轮都会问，而且必追问底层。本节按「体系 → List → HashMap → 其他 Map → Set/Queue → 迭代器与选型」推进，重点不是记住结论，而是能画出结构图、说清扩容与哈希冲突的处理过程，并在选型题里给出有依据的取舍。',
+      lessons: [
+        {
+          id: 'collection-overview',
+          title: '集合体系与 List 实现',
+          kind: 'concept',
+          sources: [
+            { topic: 'java-02', chapters: ['集合体系总览'] },
+            { topic: 'java-02', chapters: ['List'] },
+          ],
+          content: {
+            intro:
+              '集合这一章的问题密度极高，但都挂在同一张图上：先分清 **Collection 与 Map 两棵体系**，再理解 List 的两种实现（动态数组与双向链表）各自的代价模型，剩下的题——扩容 1.5 倍、`RandomAccess`、`subList` 是视图、`Arrays.asList` 不能 add——都是这两条的推论。本节先把体系树和选型决策讲定，再下潜到 `ArrayList` 的扩容细节与 `LinkedList` 的真实成本，最后处理四个最容易翻车的工具方法陷阱。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '两棵体系：Collection 管单个元素，Map 管键值对',
+                body: [
+                  '整个集合框架只有两棵独立的树。**Collection** 是「一组单个元素」，下面分三支：**List** 有序可重复、支持下标；**Set** 不重复（是否有序看实现）；**Queue / Deque** 有队列语义（FIFO / 双端）。**Map** 是「键到值的映射」，它不继承 Collection——因为它的元素是「键值对」而不是单个值，`add(e)` 这类方法对它没有意义，它的核心 API 是 `put(k, v)` / `get(k)`。',
+                  '这套设计的分界线可以用一句话概括：**Collection 关心「有哪些元素」，Map 关心「某个键对应什么」**。所以两者的方法名几乎不重叠（`add` vs `put`、`contains` vs `containsKey`），遍历方式也不同（`iterator` vs `entrySet`）。理解这条分界，被问「为什么 Map 不实现 Collection」时就不会答成「历史遗留」——它不是疏忽，是语义不兼容。',
+                ],
+                term: {
+                  name: '集合框架（Collections Framework）',
+                  def: 'JDK 1.2 引入的统一容器体系：一组接口（Collection / List / Set / Queue / Map）、若干抽象骨架实现（AbstractList 等）与具体实现（ArrayList / HashMap 等）三层结构。接口定义契约，抽象类提供默认实现减少重复代码，具体类决定数据结构与性能特征。',
+                },
+                points: [
+                  'Collection 三支：List（有序可重复）、Set（不重复）、Queue / Deque（队列语义）',
+                  'Map 是独立体系：元素是键值对，API 与遍历方式都与 Collection 不同',
+                  '三层结构：接口（契约）→ 抽象骨架（`AbstractList`）→ 具体实现（`ArrayList`）',
+                  '`Collection` 是接口，`Collections` 是工具类（全静态方法），两者无关',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '集合框架的完整体系树',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: 'Iterable',
+                    note: '能被 for-each 遍历的根',
+                    children: [
+                      {
+                        label: 'Collection',
+                        note: '一组单个元素',
+                        tone: 'primary',
+                        children: [
+                          {
+                            label: 'List（有序可重复）',
+                            note: '支持下标',
+                            tone: 'primary',
+                            children: [
+                              { label: 'ArrayList', note: '动态数组，最常用' },
+                              { label: 'LinkedList', note: '双向链表，也实现了 Deque' },
+                              { label: 'CopyOnWriteArrayList', note: '写时复制，读多写少', tone: 'warn' },
+                            ],
+                          },
+                          {
+                            label: 'Set（不重复）',
+                            note: '去重语义',
+                            tone: 'primary',
+                            children: [
+                              { label: 'HashSet', note: '基于 HashMap' },
+                              { label: 'LinkedHashSet', note: '插入顺序' },
+                              { label: 'TreeSet', note: '排序（红黑树）' },
+                            ],
+                          },
+                          {
+                            label: 'Queue / Deque',
+                            note: '队列语义',
+                            tone: 'primary',
+                            children: [
+                              { label: 'ArrayDeque', note: '循环数组，栈/队列首选' },
+                              { label: 'PriorityQueue', note: '二叉堆' },
+                              { label: 'BlockingQueue', note: '阻塞队列（并发包）', tone: 'warn' },
+                            ],
+                          },
+                        ],
+                      },
+                      {
+                        label: 'Map（独立体系）',
+                        note: '键值对，不继承 Collection',
+                        tone: 'warn',
+                        children: [
+                          { label: 'HashMap', note: '数组 + 链表 + 红黑树' },
+                          { label: 'LinkedHashMap', note: '额外维护双向链表保序' },
+                          { label: 'TreeMap', note: '红黑树，按 key 排序' },
+                          { label: 'ConcurrentHashMap', note: '分段/CAS 并发安全' },
+                        ],
+                      },
+                    ],
+                  },
+                  caption:
+                    '注意 `LinkedList` 一个人实现两个接口（List 与 Deque），所以它既能当列表也能当栈/队列；但实践中「当栈用」应该选 `ArrayDeque`——同样的操作更快、内存更省。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '集合框架的整体继承体系？List/Set/Queue/Map 的特点',
+                questionId: 'java-02-Q1',
+                intent:
+                  '开篇必问。答出「两棵体系」比背类名重要得多——面试官听到你说「Map 不继承 Collection，因为元素是键值对」，就知道你理解了设计。',
+                points: [
+                  '两棵体系：`Collection`（单个元素）与 `Map`（键值对），Map **不继承** Collection',
+                  'List：有序、可重复、支持下标（ArrayList / LinkedList）',
+                  'Set：不重复，是否有序看实现（HashSet 无序、LinkedHashSet 插入序、TreeSet 排序）',
+                  'Queue / Deque：队列语义，FIFO 或双端（ArrayDeque / PriorityQueue / BlockingQueue）',
+                  'Map：键值映射，key 不可重复、value 可重复（HashMap / TreeMap / ConcurrentHashMap）',
+                ],
+                depth:
+                  '能补「三层结构」更显系统：接口定契约、抽象骨架（`AbstractList`、`AbstractMap`）提供默认实现、具体类决定数据结构。这也解释了为什么自定义集合通常只继承抽象骨架——它们已经实现了大部分方法。',
+              },
+              {
+                kind: 'why',
+                title: '为什么 Map 不实现 Collection，以及 Collection 与 Collections 的关系',
+                body: [
+                  '`Map` 不实现 `Collection` 不是漏写，而是**语义不兼容**：Collection 的契约是「元素的集合」，方法签名是 `add(E)`、`iterator()`、`contains(Object)`；而 Map 的元素是「键值对」，加一个映射需要两个参数（`put(K,V)`），遍历的单位也是 `Entry<K,V>`。若强行让它实现 Collection，`add` 就只能塞进一个「键值对对象」——那是 `entrySet()` 干的事，不是 Map 本身。',
+                  '顺带把另一个易混点说清：**`Collection` 是接口，`Collections` 是工具类**。前者是「集合」这个抽象（首字母大写、单数），后者是一堆静态工具方法（复数 s）：`sort`、`unmodifiableList`、`synchronizedList`、`emptyList`、`frequency`。名字只差一个字母，作用完全无关——这是 Java 命名史上一个著名的坑。',
+                ],
+                without:
+                  '反证：如果 Map 继承 Collection，就得实现 `add(Object)`，那 `map.add(entry)` 与 `map.put(k, v)` 会形成两套语义重叠的写入 API；`contains` 也会歧义——是「包含这个键」还是「包含这个 Entry」？Map 只好用 `containsKey` 与 `containsValue` 两个方法把语义拆开，这本身就说明它不适合套用 Collection 的契约。',
+              },
+              {
+                kind: 'compare',
+                title: '数组与集合：为什么需要集合',
+                head: ['维度', '数组', 'ArrayList'],
+                rows: [
+                  ['长度', '固定，创建后不可变', '动态扩容（1.5 倍）'],
+                  ['元素类型', '可存基本类型，也可存对象', '只能存对象（基本类型要装箱）'],
+                  ['功能', '只有 `length` 与下标', 'add / remove / contains / 迭代器等一整套'],
+                  ['性能', '无额外开销，内存连续，最快', '有一层封装，扩容时拷贝'],
+                  ['类型安全', '运行期才检查 ArrayStoreException', '泛型在编译期检查'],
+                  ['适用', '长度已知、追求极致性能', '长度不确定、需要丰富操作'],
+                ],
+                note: '一句话：**数组是「语言级的内存块」，集合是「带 API 的容器」。** 集合内部就是用数组实现的（`ArrayList` 的 `elementData`），所以它不可能比数组更快——只是把「扩容 + 越界检查 + 常用操作」替你写好了。',
+              },
+              {
+                kind: 'diagram',
+                title: '选型决策：先问「要不要去重」，再问「要不要排序」',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['首选', '理由'],
+                  rows: [
+                    ['按位置访问、允许重复', 'ArrayList', '随机访问 O(1)，内存连续对 CPU 友好'],
+                    ['频繁头尾增删', 'ArrayDeque', '循环数组，比 LinkedList 更快更省内存'],
+                    ['去重、不关心顺序', 'HashSet', 'O(1) 查找，基于 HashMap'],
+                    ['去重、要保留插入顺序', 'LinkedHashSet', '额外维护双向链表'],
+                    ['去重、要按大小排序', 'TreeSet', '红黑树，O(log n)，或 HashSet + 排序'],
+                    ['键值映射、无序', 'HashMap', '综合性能最好'],
+                    ['键值映射、要顺序', 'TreeMap / LinkedHashMap', '排序用 TreeMap，插入序用 LinkedHashMap'],
+                    ['多线程读多写少', 'CopyOnWriteArrayList / ConcurrentHashMap', '读无锁，写复制或分段'],
+                  ],
+                  caption:
+                    '选型的优先级应该反过来问：**「能不能用最简单、最常用的那个」**——90% 的场景就是 `ArrayList` 与 `HashMap`。只有在能明确说出「这里有十万次头插」「这里要按 key 排序」时，换实现才有意义。上来就说「用 LinkedList 因为插入快」是最典型的过度设计。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: 'ArrayList 的扩容：1.5 倍、copyOf，以及「默认 10 其实没分配」',
+                body: [
+                  '`ArrayList` 就是一个 `Object[] elementData` 加一个 `int size`。所有「动态」都发生在 `add` 时：容量不够就申请一个更大的数组，把旧数据拷过去，再让 `elementData` 指向新数组。关键细节有三个：**默认容量 10 是在第一次 add 时才分配的**、**扩容是 1.5 倍而不是 2 倍**、**拷贝用 `Arrays.copyOf`（底层是 native 的 `System.arraycopy`）**。',
+                ],
+                steps: [
+                  {
+                    title: '`new ArrayList<>()` 时并没有分配数组',
+                    detail:
+                      '它把 `elementData` 指向一个共享的空数组常量 `DEFAULTCAPACITY_EMPTY_ELEMENTDATA`（`new ArrayList<>(0)` 用的是另一个常量 `EMPTY_ELEMENTDATA`）。**两者区别很关键**：前者首次 add 时直接扩到 10，后者首次 add 只扩到 1。这也是「默认容量 10」的准确说法——不是创建时给 10，而是首次添加时按 10 起步。',
+                  },
+                  {
+                    title: '容量够用时不扩容，只 size++',
+                    detail:
+                      '`add` 先 `ensureCapacityInternal(size + 1)`，容量够就直接 `elementData[size++] = e`。所以「追加元素」的均摊复杂度是 O(1)——大部分 add 都是这一条指令。',
+                  },
+                  {
+                    title: '容量不足：新容量 = 旧容量 + 旧容量 / 2',
+                    detail:
+                      '源码是 `int newCapacity = oldCapacity + (oldCapacity >> 1)`，即 **1.5 倍**（右移一位等于除以 2，比除法快）。为什么不是 2 倍？1.5 倍在「空间浪费」与「扩容次数」之间折中：2 倍会浪费更多内存，1.1 倍又太频繁。这个数字是从工程经验里调出来的，不是数学最优。',
+                  },
+                  {
+                    title: '拷贝：`Arrays.copyOf` → `System.arraycopy`',
+                    detail:
+                      '这是 native 方法，按内存块整体移动，比循环赋值快一个数量级。但**它仍然是 O(n)**——所以「一万条数据」的优化点就在这里：`new ArrayList<>(10000)` 预设容量，一次扩容都不发生。',
+                  },
+                  {
+                    title: '边界：超大数组会走到 `MAX_ARRAY_SIZE` 分支',
+                    detail:
+                      '`MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8`（留 8 个位置给对象头等开销）。超过就 `OutOfMemoryError`。这条冷知识在被问「ArrayList 最大能存多少」时很有用。',
+                  },
+                ],
+                takeaway:
+                  '背三个数字就够答题：**默认 10（首次 add 才分配）、扩容 1.5 倍、拷贝用 `System.arraycopy`**。再加一句「预设容量可以完全避免扩容」，就是工程视角。',
+              },
+              {
+                kind: 'diagram',
+                title: '容量 10 满时 add 第 11 个元素：扩容到底发生了什么',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: '扩容前',
+                      note: 'size = 10, capacity = 10',
+                      slots: [
+                        { label: 'elementData', value: 'Object[10]', ref: '已装满', tone: 'warn' },
+                        { label: 'size', value: '10' },
+                      ],
+                    },
+                    {
+                      name: '扩容中',
+                      note: 'new = 10 + (10 >> 1) = 15',
+                      slots: [
+                        { label: '新数组', value: 'Object[15]', tone: 'primary' },
+                        { label: 'System.arraycopy', value: '拷贝 10 个引用（O(n)）' },
+                      ],
+                    },
+                    {
+                      name: '扩容后',
+                      note: '旧数组变成垃圾',
+                      slots: [
+                        { label: 'elementData', value: '指向 Object[15]', tone: 'primary' },
+                        { label: 'size', value: '11' },
+                        { label: 'Object[10]', value: '等待 GC 回收', tone: 'warn' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '每次扩容都要「申请新数组 + 拷贝全部元素 + 丢弃旧数组」。所以从 0 加到 1 万条，会经历 10 → 15 → 22 → 33 → 49 … 约 20 次扩容、累计拷贝十几万个引用。`new ArrayList<>(10000)` 能把这一整串动作省掉——这是最容易被忽略的性能优化。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '说说 ArrayList 的扩容机制',
+                questionId: 'java-02-Q9',
+                intent:
+                  '高频且区分度高。答「1.5 倍」只是及格，能说清「默认 10 是首次 add 才分配」「copyOf 是 native 拷贝」「预设容量可避免」才是完整答案。',
+                points: [
+                  '底层是 `Object[] elementData` + `int size`',
+                  '默认容量 10，但 `new ArrayList<>()` **不分配数组**，首次 add 才按 10 起步',
+                  '扩容公式：`oldCapacity + (oldCapacity >> 1)`，即 **1.5 倍**',
+                  '拷贝用 `Arrays.copyOf` → `System.arraycopy`（native，按内存块移动）',
+                  '优化：`new ArrayList<>(预估容量)` 可完全避免扩容；1.5 倍是空间与次数的折中',
+                ],
+                depth:
+                  '加分点：说明 `new ArrayList<>(0)` 与 `new ArrayList<>()` 的差别——前者首次 add 扩到 1，后者扩到 10，因为二者指向不同的空数组常量（`EMPTY_ELEMENTDATA` vs `DEFAULTCAPACITY_EMPTY_ELEMENTDATA`）。这个细节能证明你读过源码而不是只看过博客。',
+              },
+              {
+                kind: 'diagram',
+                title: 'ArrayList 与 LinkedList 的操作代价对照',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['ArrayList', 'LinkedList'],
+                  rows: [
+                    ['按下标 get(i)', 'O(1) 直接寻址', 'O(n) 必须从头/尾遍历'],
+                    ['尾部 add', 'O(1) 均摊（偶尔扩容 O(n)）', 'O(1) 改尾指针'],
+                    ['头部 add(0, e)', 'O(n) 整体后移', 'O(1) 改头指针'],
+                    ['中间 add(i, e)', 'O(n) 后移 + 可能扩容', 'O(n) 先定位，再 O(1) 插入'],
+                    ['remove(i)', 'O(n) 前移', 'O(n) 先定位，再 O(1) 摘链'],
+                    ['内存占用', '紧凑：一个数组 + 少量对象头', '每节点多两个引用（约 24 字节/元素）'],
+                    ['CPU 缓存', '连续内存，预读友好', '节点分散，缓存命中率低'],
+                  ],
+                  caption:
+                    '最关键的一行是「中间 add」：两边都是 O(n)，因为 **LinkedList 的瓶颈不在插入，而在定位**。所谓「LinkedList 插入快」只有在「已经持有节点引用」时才成立（比如迭代器正在那个位置），日常按 index 操作完全占不到便宜。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'ArrayList 和 LinkedList 的区别？如何选型',
+                questionId: 'java-02-Q8',
+                intent:
+                  '必问题。多数人能背「数组 vs 链表」，但答不出「LinkedList 插入也要 O(n)」就会被追问到卡住。',
+                points: [
+                  '结构：动态数组 vs 双向链表',
+                  '随机访问：ArrayList O(1)；LinkedList O(n)，必须遍历',
+                  '头尾增删：LinkedList O(1)；ArrayList 头部 O(n)（尾部均摊 O(1)）',
+                  '**中间插入两边都是 O(n)**：LinkedList 的耗时在「定位」，不在「插入」',
+                  '内存：ArrayList 紧凑；LinkedList 每节点额外两个引用，缓存不友好',
+                  '选型：默认 ArrayList；需要频繁头尾操作（当栈/队列）用 ArrayDeque，而不是 LinkedList',
+                ],
+                depth:
+                  '能补 `RandomAccess` 标记接口的作用非常加分：`Collections.binarySearch` 与 `shuffle` 会判断这个接口，对 ArrayList 用下标循环、对 LinkedList 用迭代器，避免 O(n²)。这说明「区别」不只是背参数，还影响标准库的实现策略。',
+              },
+              {
+                kind: 'concept',
+                title: '`Arrays.asList` 的四个坑：定长、视图、基本类型、不支持 add',
+                body: [
+                  '`Arrays.asList(1, 2, 3)` 返回的不是 `java.util.ArrayList`，而是 `Arrays` 的一个**私有静态内部类** `Arrays$ArrayList`——名字一样，行为差很多：它内部直接持有你传入的那个数组，**长度固定**，`add` / `remove` 一律抛 `UnsupportedOperationException`，但 `set` 可以（因为那只是改数组元素）。',
+                  '第二个坑是「视图」：`Arrays.asList(arr)` 与 `arr` 共享同一个底层数组，改一边另一边跟着变。第三个坑是基本类型：`Arrays.asList(new int[]{1,2,3})` 得到的不是「三个元素的 List」，而是**一个元素的 List**，那个元素是 `int[]` 本身——因为泛型不接受基本类型，整个数组被当成一个 Object。第四个坑是它不支持 `add`，所以想要可变列表必须包一层：`new ArrayList<>(Arrays.asList(...))`。',
+                  '顺带把 JDK 9 的 `List.of()` 也分清：它返回的是**真正不可变**的列表（任何修改都抛异常，连 `set` 都不行），且**不接受 null 元素**。`Arrays.asList` 允许 null、允许 set；`List.of` 全都不允许。两者都不可 add——这是「不可变集合」与「定长视图」的区别。',
+                ],
+                points: [
+                  '`Arrays.asList` 返回 `Arrays$ArrayList`，**定长**：add / remove 抛 `UnsupportedOperationException`，set 可以',
+                  '它是**视图**：与原数组共享数据，改一边影响另一边',
+                  '`Arrays.asList(new int[]{...})` 得到 size=1 的 List（元素是 int[]）',
+                  '要可变：`new ArrayList<>(Arrays.asList(...))`',
+                  '`List.of()`（JDK 9+）更严格：不可变、不接受 null；`Collections.unmodifiableList` 是**视图**而非拷贝',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '三种「看起来像 List」的东西，行为完全不同',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: 'Arrays.asList：定长视图',
+                    tone: 'warn',
+                    items: [
+                      'add / remove → UnsupportedOperationException',
+                      'set 可以（改的是底层数组）',
+                      '与原数组共享数据',
+                      '允许 null 元素',
+                    ],
+                  },
+                  right: {
+                    title: 'List.of / copyOf：真不可变',
+                    tone: 'good',
+                    items: [
+                      '任何修改都抛异常（连 set 也不行）',
+                      '不接受 null（直接 NPE）',
+                      '不共享外部数据（copyOf 是真拷贝）',
+                      '可作为常量、可安全共享',
+                    ],
+                  },
+                  caption:
+                    '还有一个容易混的第三种：`Collections.unmodifiableList(list)` —— 它是**视图**，你不能通过它修改，但原 list 改了它也跟着变；`List.copyOf` 才是**拷贝**，之后互不影响。判断方法很简单：问「原集合改了，这个会不会变」。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Arrays.asList() 有哪些陷阱',
+                questionId: 'java-02-Q6',
+                intent:
+                  '高难度但极其实用。四个坑能答出三个就算过关，能说清「为什么 add 会抛异常」更加分。',
+                points: [
+                  '返回的是 `Arrays$ArrayList`（私有内部类），**不是** `java.util.ArrayList`',
+                  '定长：`add` / `remove` 抛 `UnsupportedOperationException`，`set` 可以',
+                  '视图：与原数组共享底层数据，互相影响',
+                  '`Arrays.asList(new int[]{1,2,3})` 得到 size=1（元素是 int[]），泛型不吃基本类型',
+                  '解法：`new ArrayList<>(Arrays.asList(...))` 得到真正可变列表',
+                ],
+                depth:
+                  '追问「为什么 add 不支持而 set 支持」：内部类只包了一个固定长度的数组引用，没有 `size` 与扩容逻辑，所以改元素可以、改长度不行。这个解释比「它就是不可变」准确得多——它是**定长**，不是不可变。',
+              },
+              {
+                kind: 'concept',
+                title: '把 ArrayList 变线程安全：三种方案与代价',
+                body: [
+                  '`ArrayList` 的所有方法都没有同步，多线程写会丢数据甚至出现 `size` 与实际元素数不一致。三种补救：**`Collections.synchronizedList(list)`**（给每个方法加 `synchronized`，一把大锁，读写都排队）；**`CopyOnWriteArrayList`**（写时复制，读完全无锁）；**`Vector`**（历史类，全方法 `synchronized`，扩容 2 倍，已不推荐）。',
+                  '`CopyOnWriteArrayList` 的机制值得讲透：写操作先 `synchronized` 加锁，然后**复制出一份新数组**，在新数组上修改，最后把内部引用指向新数组。读操作直接读当前引用，完全不加锁。所以它的读性能接近普通 ArrayList，写性能极差（每次写都 O(n) 复制），且**只能保证最终一致**——迭代器拿到的是创建时的快照，遍历过程中看不到新元素。',
+                  '因此它的适用场景非常明确：**读远多于写、且能接受短暂不一致**。典型例子是监听器列表（注册一次、调用无数次）、配置快照。反过来，如果写很频繁，用它会直接把内存和 CPU 打满。',
+                ],
+                points: [
+                  '`Collections.synchronizedList`：一把大锁包住所有方法，简单但并发度低',
+                  '`CopyOnWriteArrayList`：写时复制新数组 + 原子替换引用，读无锁',
+                  'COW 缺点：写开销 O(n)、内存翻倍、迭代器是快照（看不到新元素）',
+                  '`Vector`：全方法 synchronized、扩容 2 倍，已淘汰',
+                  'COW 适用：读多写少（监听器、配置），不适用：频繁写',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'CopyOnWriteArrayList 的原理与缺点',
+                questionId: 'java-02-Q13',
+                intent:
+                  '高频并发题。能说清「写时复制 + volatile 引用替换」是基本盘，能说出「迭代器是快照、弱一致」才是通过。',
+                points: [
+                  '原理：写时加锁 → 复制新数组 → 在新数组上修改 → 原子替换内部引用',
+                  '读操作不加锁，直接读当前数组引用（`volatile` 保证可见性）',
+                  '优点：读性能接近普通 ArrayList，读多写少场景极佳',
+                  '缺点：每次写都 O(n) 复制、内存瞬时翻倍、只保证最终一致',
+                  '迭代器是快照：遍历中看不到新元素，也不会抛 ConcurrentModificationException',
+                ],
+                depth:
+                  '能对比「COW 与读写锁」更好：读写锁允许并发读、写互斥，但读仍需加锁（有开销）；COW 把读的开销降到零，代价是写的开销放大到 O(n)。选择依据就是读写比例。',
+              },
+              {
+                kind: 'concept',
+                title: '`subList` 是视图不是拷贝，以及它的内存陷阱',
+                body: [
+                  '`list.subList(1, 3)` 返回的不是新列表，而是一个 `SubList` 视图：它内部持有**原列表的引用**（`root`）、偏移量（`offset`）与长度（`size`）。所以通过 subList 改元素会改到原列表，反之亦然。这一点在「截取一段做修改」时很方便，但也很容易误判。',
+                  '更麻烦的是两条限制。**第一，结构性修改会失效**：如果你先取 subList，再对原列表 `add` / `remove`，之后访问 subList 会抛 `ConcurrentModificationException`——因为它靠 `modCount` 校验原列表有没有被改过。**第二，内存泄漏**：subList 强引用着原列表，即使你只留了 3 个元素的小 subList，整个大列表也无法回收。',
+                  '所以工程结论是：**要「一份独立的数据」就 `new ArrayList<>(list.subList(a, b))`**，不要直接把 subList 传出去或长期持有。另外 `subList` 的 `toIndex` 是**开区间**（不含），`subList(0, list.size())` 才是全量。',
+                ],
+                points: [
+                  '`subList` 返回 `SubList` 视图，持有原列表引用 + offset + size',
+                  '修改互相影响；对原列表做结构性修改后访问 subList 会抛 `ConcurrentModificationException`',
+                  '内存陷阱：subList 强引用原列表，小视图会拖住整个大列表',
+                  '需要独立副本：`new ArrayList<>(list.subList(a, b))`',
+                  '区间是左闭右开：`subList(1, 3)` 取下标 1、2',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '遍历中删除元素，与 `remove(int)` / `remove(Object)` 的重载陷阱',
+                body: [
+                  '`for (String s : list) { if (cond) list.remove(s); }` 会抛 `ConcurrentModificationException`。原因是 for-each 底层用 `Iterator`，而 `list.remove` 改的是列表本身：`modCount` 加了 1，但迭代器的 `expectedModCount` 没变，下一次 `next()` 就检测到不一致并抛异常。正确做法是**用迭代器自己的 `remove()`**（它会同步更新 `expectedModCount`），或直接用 `list.removeIf(cond)`（JDK 8+，最简洁）。',
+                  '另一个高频陷阱是重载：`List<Integer>` 上调用 `remove(1)` 删的是**下标 1**，不是元素 1——因为 `remove(int index)` 与 `remove(Object o)` 两个重载中，`int` 是精确匹配，优先于装箱成 `Integer`。要删元素必须写 `remove(Integer.valueOf(1))`。',
+                  '还有一条性能建议：如果要在循环里删很多元素，`Iterator.remove` 是 O(1) 摘链吗？不是——`ArrayList` 的 `remove` 仍然要移动数组，所以「循环删除一半元素」是 O(n²)。更好的做法是**倒序遍历删除**（避免索引错位）或**一次 `removeIf`**（内部用一次批量移动）。',
+                ],
+                points: [
+                  'for-each 中 `list.remove` 必抛 `ConcurrentModificationException`（modCount 校验）',
+                  '正确做法：`Iterator.remove()`（会同步 expectedModCount）或 `removeIf`',
+                  '`List<Integer>.remove(1)` 删的是**下标 1**；删元素要 `remove(Integer.valueOf(1))`',
+                  '大量删除用 `removeIf` 或倒序遍历，避免 O(n²)',
+                  '`removeIf` 内部用 `BitSet` 标记再一次性压缩数组，比逐个删快得多',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'List 如何去重？如何边遍历边删除元素',
+                questionId: 'java-02-Q16',
+                intent:
+                  '实用题。去重能答出「LinkedHashSet 保序」、删除能答出「Iterator.remove 或 removeIf」，基本就够；能补 `remove(int)` 重载陷阱更好。',
+                points: [
+                  '去重且保序：`new ArrayList<>(new LinkedHashSet<>(list))`',
+                  '去重且需自定义相等：`Stream.distinct()`（依赖 equals）或 `TreeSet` + Comparator',
+                  '遍历删除：用 `Iterator.remove()`，或直接用 `removeIf`（推荐）',
+                  '**不能**在 for-each / 普通 for 里直接 `list.remove`（前者抛异常，后者索引错位）',
+                  '`List<Integer>.remove(1)` 删的是下标 1，删元素要 `remove(Integer.valueOf(1))`',
+                ],
+                depth:
+                  '追问「为什么 for-each 会抛异常」：for-each 编译成 `Iterator` 循环，`list.remove` 只更新了列表的 `modCount`，迭代器的 `expectedModCount` 没变，下一次 `next()` 校验失败。所以是「迭代器检测到有人在它背后改了集合」，而不是「不允许删除」。',
+              },
+            ],
+            outline: [
+              '两棵体系：Collection（List/Set/Queue）管单个元素，Map 管键值对且不继承 Collection',
+              'ArrayList 扩容：默认 10（首次 add 才分配）、1.5 倍、System.arraycopy',
+              'LinkedList 按 index 操作是 O(n)，「插入快」只在已持有节点时成立',
+              'Arrays.asList 是定长视图、subList 是视图、COW 是写时复制，三者都容易被误当成普通集合',
+            ],
+            pitfalls: [
+              '认为 LinkedList 插入一定比 ArrayList 快，忽略了定位插入点本身的 O(n) 开销',
+              '用 for 循环按下标遍历 LinkedList，复杂度退化为 O(n²)',
+              '把 `Arrays.asList` 的结果当可变列表，add 时抛 UnsupportedOperationException',
+            ],
+          },
+        },
+        {
+          id: 'hashmap',
+          title: 'HashMap 全链路：put、扩容与红黑树',
+          kind: 'concept',
+          sources: [{ topic: 'java-02', chapters: ['HashMap'] }],
+          content: {
+            intro:
+              'HashMap 是最高频的一道题，也最容易答成流水账。这一节按一条主线推进：**一个 key 进来，先扰动哈希，再定位桶，冲突了挂链表，链表过长转红黑树，元素超阈值就扩容。** 每一步都说清「为什么这么做」——为什么容量必须是 2 的幂（为了用位运算取模）、为什么扩容后元素只需判断一个位（因为容量翻倍只多了一个高位）、为什么树化阈值是 8（泊松分布算出来的）。讲完这条链路，线程不安全、JDK 7 死循环、0.75 负载因子的来历全都变成推论，而不是记忆点。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '一张桶数组，两种溢出结构',
+                body: [
+                  'JDK 1.8 的 HashMap 本体只有三样东西：`Node<K,V>[] table`（桶数组）、`int size`、`int threshold`。每个桶里放的是链表的头节点；当某个桶的链表过长时，它会变成红黑树。所以「数组 + 链表 + 红黑树」这个说法里，**数组是主干，链表是常态，红黑树是极端情况的补丁**。',
+                  '为什么需要红黑树这个补丁？因为链表的查找是 O(n)。如果攻击者或劣质 hashCode 把所有 key 都塞进一个桶，HashMap 就退化成链表，查询从 O(1) 掉到 O(n)——这既是性能问题，也是**哈希碰撞攻击**（构造大量同桶 key 打垮服务）。红黑树把最坏情况拉回 O(log n)，这就是它的全部动机。',
+                ],
+                term: {
+                  name: '负载因子（load factor）',
+                  def: '阈值 = 容量 × 负载因子。默认 0.75，表示「桶数组用了 3/4 就开始扩容」。它衡量的是「空间」与「冲突概率」的折中：因子越大越省内存但冲突越多，越小冲突越少但扩容更频繁、浪费空间。',
+                },
+                points: [
+                  'JDK 1.8：`Node[] table` + 链表 + 红黑树；JDK 1.7：`Entry[] table` + 纯链表',
+                  '默认容量 16、负载因子 0.75、阈值 12；容量不足时优先扩容',
+                  '允许一个 null key（放 `table[0]`）与多个 null value',
+                  '链表转红黑树的目的是防「哈希碰撞攻击」，把最坏查找从 O(n) 拉回 O(log n)',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'HashMap 的内存布局：桶、链表、树',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: 'HashMap 对象',
+                      note: '三个关键字段',
+                      slots: [
+                        { label: 'table', value: 'Node[16] 的引用', tone: 'primary' },
+                        { label: 'size', value: '元素个数' },
+                        { label: 'threshold', value: '容量 × 0.75' },
+                      ],
+                    },
+                    {
+                      name: '桶数组（堆）',
+                      note: '每个格是链表头或树根',
+                      slots: [
+                        { label: 'table[0]', value: 'null key 专用' },
+                        { label: 'table[5]', value: 'Node → Node → null', tone: 'primary' },
+                        { label: 'table[9]', value: 'TreeNode（红黑树根）', tone: 'warn' },
+                        { label: 'table[13]', value: 'null（空桶）' },
+                      ],
+                    },
+                    {
+                      name: '节点',
+                      note: 'Node 只有四个字段',
+                      slots: [
+                        { label: 'hash', value: '扰动后的哈希（缓存）' },
+                        { label: 'key', value: '引用' },
+                        { label: 'value', value: '引用' },
+                        { label: 'next', value: '下一个节点' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '注意「桶数组只存引用」——它本身占 `4 字节 × 容量`（64 位下开启压缩指针），真正的对象都在堆上分散着。所以 HashMap 的内存开销大头是 Node 对象（每个约 32 字节），这也解释了为什么「容量设太大」很费内存：空桶虽然只占一个引用，但 node 数是实打实的。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'HashMap 的底层数据结构？1.7 与 1.8 的不同',
+                questionId: 'java-02-Q18',
+                intent:
+                  '开场必问。要点是「1.8 加了红黑树」与「1.7 用头插、1.8 改尾插」，后者直接关系到并发死循环这个经典问题。',
+                points: [
+                  'JDK 1.8：`Node[] table` + 链表 + **红黑树**；JDK 1.7：`Entry[] table` + 纯链表',
+                  '1.7 插入用**头插法**，1.8 改为**尾插法**（避免并发扩容成环）',
+                  '1.8 的 hash 扰动简化为一次「高 16 位异或」（1.7 是四次移位 + 三次异或）',
+                  '1.8 扩容时用「高低位拆分」代替 1.7 的逐个 rehash 计算',
+                  '共同点：容量都是 2 的幂、都允许 null key/value、都非线程安全',
+                ],
+                depth:
+                  '能说清「为什么 1.8 去掉头插」就到原理层了：头插在并发扩容时会把链表顺序反转，两个线程交叉执行就可能让 A 的 next 指向 B、B 的 next 指向 A，形成环形链表，之后 `get` 死循环把 CPU 打满。尾插不改变相对顺序，因此不会成环——但**仍然会丢数据**，1.8 并没有变线程安全。',
+              },
+              {
+                kind: 'principle',
+                title: 'put 的八步：从 key 到落槽',
+                body: [
+                  '`putVal` 只有四十行左右，但每一步都有明确目的。按顺序记住这八步，面试时就能像念代码一样讲出来，而不是「先算 hash 然后放进去」。',
+                ],
+                steps: [
+                  {
+                    title: '① 表为空 → 先 `resize()` 初始化',
+                    detail:
+                      '`table == null` 时第一次扩容把容量设为 **16**、阈值设为 12。注意是**懒加载**：`new HashMap()` 不分配数组，第一次 `put` 才分配。这和 `ArrayList` 首次 add 才分配是同一个思路。',
+                  },
+                  {
+                    title: '② 计算扰动后的哈希',
+                    detail:
+                      '`return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16)`。null key 的 hash 固定为 0，所以它永远落在 `table[0]`。异或高 16 位的原因下一节专门讲。',
+                  },
+                  {
+                    title: '③ 定位桶：`(n - 1) & hash`',
+                    detail:
+                      'n 是容量（2 的幂），所以 `n-1` 是低位全 1 的掩码（16 时是 `0b1111`），与运算等价于 `hash % 16` 但快得多。**这就是容量必须是 2 的幂的直接原因**——否则位运算不等于取模，桶分布会错。',
+                  },
+                  {
+                    title: '④ 桶为空 → 直接放一个新 Node',
+                    detail:
+                      '`if ((p = tab[i = (n - 1) & hash]) == null) tab[i] = newNode(...)`，然后跳到第 ⑧ 步检查扩容。',
+                  },
+                  {
+                    title: '⑤ 桶首节点就是目标 → 覆盖 value',
+                    detail:
+                      '判断条件是 `p.hash == hash && (p.key == key || (key != null && key.equals(p.key)))`。**注意先比 hash 再比引用再比 equals**：hash 不同直接跳过，引用相同直接命中，只有都不同才调 equals——这是纯粹的短路优化。',
+                  },
+                  {
+                    title: '⑥ 是树节点 → 走 `putTreeVal`',
+                    detail:
+                      '`p instanceof TreeNode` 时按红黑树的方式查找/插入。树里的比较先按 hash 大小，hash 相同再按 `compareTo`（key 实现了 Comparable 时），最后兜底用 `tieBreakOrder`。',
+                  },
+                  {
+                    title: '⑦ 链表 → 尾插，并判断是否树化',
+                    detail:
+                      '遍历到链表尾部插入；若遍历中发现相同 key 则覆盖。插入后 `if (binCount >= TREEIFY_THRESHOLD - 1) treeifyBin(...)`——**注意 `treeifyBin` 内部还会判断容量是否 < 64，是就先扩容而不是树化**。',
+                  },
+                  {
+                    title: '⑧ `++size > threshold` → 扩容',
+                    detail:
+                      '最后统一判断：元素数超过阈值就 `resize()`。注意是「先放进去，再判断是否超」，所以阈值 12 时，第 13 个元素放完后立刻扩容到 32。',
+                  },
+                ],
+                takeaway:
+                  '一句话串完：**算 hash → 定位桶 → 空则放、同则覆盖、树则走树、否则尾插 → 过长树化（容量不够先扩容）→ 超阈值扩容。** 八步里真正会被追问的是 ③（为什么 2 的幂）和 ⑦（为什么还要 ≥64）。',
+              },
+              {
+                kind: 'question',
+                title: '描述 HashMap 的 put 流程（JDK 1.8）',
+                questionId: 'java-02-Q19',
+                intent:
+                  '最核心的一题。能按顺序讲完八步是及格，能解释每一步「为什么」才是高分——尤其是定位用位运算、树化前先查容量这两处。',
+                points: [
+                  '① 表为空先 `resize()` 初始化（容量 16，阈值 12）',
+                  '② 计算 hash：`h ^ (h >>> 16)`；null key 的 hash 为 0',
+                  '③ 定位桶 `(n-1) & hash`（等价于取模，靠容量是 2 的幂）',
+                  '④⑤ 桶空则新建 Node；首节点 key 相同则覆盖 value（先比 hash 再比 ==，最后 equals）',
+                  '⑥⑦ 树节点走 `putTreeVal`；链表尾插，长度达 8 时 `treeifyBin`（容量 < 64 则先扩容）',
+                  '⑧ `++size > threshold` 触发扩容（2 倍）',
+                ],
+                depth:
+                  '加分点：说明「覆盖时不增加 size、也不改 modCount 的结构部分」——只有新增节点才算结构性修改，这关系到迭代器的 fail-fast 判定。',
+              },
+              {
+                kind: 'principle',
+                title: '扰动函数与 2 的幂：两个设计其实是同一件事',
+                body: [
+                  '这两个问题经常被分开问，但它们是**同一个约束的两面**：定位用的是 `(n-1) & hash`，而 `n-1` 的低位掩码只能「看见」hash 的低几位。容量 16 时只看低 4 位——如果一批 key 的 hashCode 只有高 16 位不同、低 4 位相同（很常见，比如某些 ID 生成的 hash），它们会全部撞进同一个桶。',
+                ],
+                steps: [
+                  {
+                    title: '问题：低位掩码只看得到低位',
+                    detail:
+                      '容量 16 → 掩码 `0b1111`，只取 hash 最低 4 位。假设两个 key 的 hash 是 `0x12340001` 与 `0x56780001`，低 4 位都是 0001，就落进同一个桶。高位的信息**完全被丢弃**了。',
+                  },
+                  {
+                    title: '解法：把高 16 位异或到低 16 位',
+                    detail:
+                      '`h ^ (h >>> 16)` 把高 16 位「折叠」下来参与运算。这样低位的每一位都混合了原始高位的信息，桶分布立刻均匀。代价只有一次移位 + 一次异或，几乎免费——这就是它比「直接用 hashCode」好的全部理由。',
+                  },
+                  {
+                    title: '为什么容量必须是 2 的幂',
+                    detail:
+                      '因为 `hash % n` 在 n 是 2 的幂时等价于 `hash & (n-1)`，而位与比取模快得多（取模是除法指令，位与是一条指令）。若容量是 15，`& 14` 不等于 `% 15`，桶会算错。所以 `HashMap` 用 `tableSizeFor()` 把任何传入容量「向上取整到 2 的幂」。',
+                  },
+                  {
+                    title: '附带好处：扩容时只需判断一个位',
+                    detail:
+                      '容量翻倍后掩码多了一位。`hash & oldCap` 为 0 说明新多出来的那位是 0 → 留在原下标；为 1 → 移到「原下标 + oldCap」。**不需要重新计算 hash，也不需要取模**，这是 1.8 扩容优化的原理（下一节详述）。',
+                  },
+                ],
+                takeaway:
+                  '两句话收口：**扰动是为了让高位也参与定位；容量取 2 的幂是为了让定位能用位运算、并让扩容只需判断一个位。** 它们共同服务于「桶分布均匀 + 定位够快」这一个目标。',
+              },
+              {
+                kind: 'diagram',
+                title: '不做扰动 vs 做扰动：同一批 key 的落桶结果',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '直接用 hashCode（掩码只看低 4 位）',
+                    tone: 'bad',
+                    items: [
+                      'hash 的低 4 位都是 1 → 全部落进 table[1]',
+                      '高位差异被完全忽略',
+                      '链表迅速变长，查找退化',
+                      '极端情况可被构造成哈希碰撞攻击',
+                    ],
+                  },
+                  right: {
+                    title: '高 16 位异或后再取低位',
+                    tone: 'good',
+                    items: [
+                      '高位信息折叠进低位',
+                      '同样一批 key 分散到多个桶',
+                      '链表长度回到 1-2',
+                      '成本：一次移位 + 一次异或',
+                    ],
+                  },
+                  caption:
+                    '这就是「扰动函数」三个字的全部内容：**不是为了更随机，而是为了让掩码看不到的高位信息也参与进来。** 所以被追问「能不能不扰动」时，答案是「能，但桶分布会明显变差，且在恶意构造 key 时退化成链表」。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '为什么 hash 值要高低 16 位异或（扰动函数）',
+                questionId: 'java-02-Q20',
+                intent:
+                  '高频难题。多数人能背「让高位参与运算」，但说不清「为什么需要」——因为掩码只看低位。答出这层因果才算懂。',
+                points: [
+                  '定位公式是 `(n-1) & hash`，容量小（如 16）时掩码只有低 4 位有效',
+                  '若低位相同、高位不同，key 会全部撞进同一个桶，链表退化',
+                  '`h ^ (h >>> 16)` 把高 16 位折叠进低位，让高位也参与定位',
+                  '成本极低（一次移位 + 一次异或），收益是桶分布均匀',
+                  '1.7 是四次移位 + 三次异或，1.8 简化为一次（配合 1.8 的扩容优化足够了）',
+                ],
+                depth:
+                  '追问「这样够均匀吗」：不够严格均匀，但它只是「打散」而非「重哈希」，配合负载因子 0.75 与树化兜底已经足够。真要严格均匀得用 MurmurHash 这类，但成本高得多——工程上是折中，不是最优。',
+              },
+              {
+                kind: 'question',
+                title: 'HashMap 的容量为什么是 2 的幂',
+                questionId: 'java-02-Q21',
+                intent:
+                  '与上一题成对出现。两个答案互为因果，能连着讲说明你理解的是机制而不是结论。',
+                points: [
+                  '定位用 `(n-1) & hash`，只有 n 是 2 的幂时它才等价于 `hash % n`',
+                  '位与比取模快（一条指令 vs 除法），这是性能动机',
+                  '`tableSizeFor()` 会把任意传入容量向上取整到 2 的幂（如 20 → 32）',
+                  '扩容时元素只需判断 `hash & oldCap` 是 0 还是 1，决定留在原位或移动 oldCap',
+                  '若容量不是 2 的幂，掩码会出现「空洞」，部分桶永远无法命中',
+                ],
+                depth:
+                  '加分点：举例说明「非 2 的幂会浪费桶」——容量 15 时掩码 `0b1110`，最低位永远是 0，所以 `table[1]`、`table[3]` 这些奇数下标永远用不到，实际只有一半桶可用。这个例子比抽象推理有说服力。',
+              },
+              {
+                kind: 'principle',
+                title: '树化阈值 8、退化 6、容量 64：三个数字的来历',
+                body: [
+                  '这三个数字不是随手定的，尤其是 8。JDK 源码注释里给了完整的泊松分布推导：在理想的随机哈希下，负载因子 0.75 时一个桶里元素个数服从参数约 0.5 的泊松分布，于是「桶里有 8 个元素」的概率约为 **0.00000006**（六千万分之一）。也就是说，正常情况下几乎不可能树化——树化只在「哈希函数被写坏」或「被恶意构造」时才会发生。',
+                ],
+                steps: [
+                  {
+                    title: '为什么是 8：概率已经低到「异常信号」',
+                    detail:
+                      '链表长度到 8 的概率是 6e-8，意味着真出现就说明**哈希分布出了问题**，此时才值得付出红黑树的内存与维护成本（TreeNode 约为 Node 的两倍大小）。选更小的值（如 4）会让正常场景频繁树化，反而变慢。',
+                  },
+                  {
+                    title: '为什么退化是 6：留一格缓冲，避免抖动',
+                    detail:
+                      '如果树化的阈值和退化的阈值都是 8，那么元素在 8 附近反复增删就会「树化 → 退化 → 树化」，每次都要重建结构。留出 7 这一格缓冲（6 才退化），把这种抖动挡掉。**这是典型的「用一点冗余换稳定」的设计。**',
+                  },
+                  {
+                    title: '为什么还要求容量 ≥ 64：小数组优先扩容',
+                    detail:
+                      '容量只有 16 时出现长链表，根因往往不是哈希坏，而是**桶太少**。此时扩容到 32、64 能让元素自然分散，代价远小于树化。所以 `treeifyBin` 里第一件事是 `if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY) resize()`——容量不够 64 就只扩容，不树化。',
+                  },
+                  {
+                    title: '所以完整条件是「且」不是「或」',
+                    detail:
+                      '「链表长度 ≥ 8 **且** 容量 ≥ 64」才真正转红黑树。只答前半句是这道题最常见的失分点，因为它解释了「为什么我塞了 9 个冲突元素却还是链表」。',
+                  },
+                ],
+                takeaway:
+                  '记住三个数字加一句因果：**8 是概率算出来的异常阈值、6 是防抖动的回退线、64 是「先扩容再考虑树」的门槛。** 完整表述必须用「且」。',
+              },
+              {
+                kind: 'diagram',
+                title: '泊松分布：链表长度到 8 的概率有多低',
+                diagram: {
+                  type: 'scale',
+                  items: [
+                    { label: '长度 0', value: 60653066, display: '60.7%', note: '空桶是常态' },
+                    { label: '长度 1', value: 30326533, display: '30.3%' },
+                    { label: '长度 2', value: 7581633, display: '7.58%' },
+                    { label: '长度 3', value: 1263606, display: '0.126%' },
+                    { label: '长度 4', value: 157952, display: '0.0016%' },
+                    { label: '长度 8', value: 6, display: '0.000006%', note: '约六千万分之一' },
+                  ],
+                  caption:
+                    '数值取自 JDK `HashMap` 源码注释（负载因子 0.75 时的泊松分布）。注意概率从长度 3 开始就掉到千分之一以下——**所以链表长度到 8 本身就是一个「不正常」的信号**，这才有了「用红黑树兜住最坏情况」的设计。条形按对数映射，否则后几项根本看不见。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '链表转红黑树阈值为什么是 8？退化为什么是 6？为什么要求容量 ≥ 64',
+                questionId: 'java-02-Q22',
+                intent:
+                  '四个星号的难题，几乎是区分「背过」和「读过源码」的分水岭。三个数字加一个「且」的条件，缺一不可。',
+                points: [
+                  '8：负载因子 0.75 下泊松分布算出概率约 6e-8，出现即为异常，此时树化才划算',
+                  'TreeNode 约为 Node 的两倍大小，树化有内存代价，阈值不能太小',
+                  '6：退化时留一格缓冲（7），避免在 8 附近反复树化/退化造成抖动',
+                  '容量 ≥ 64：小数组时长链表的根因是桶太少，扩容比树化更有效',
+                  '完整条件：**链表长度 ≥ 8 且 容量 ≥ 64**，否则先 `resize()`',
+                ],
+                depth:
+                  '能说出「这也是防哈希碰撞攻击的手段」就更完整：攻击者构造大量同桶 key 时，链表会退化到 O(n)，红黑树把它压到 O(log n)，避免一次请求打满 CPU。',
+              },
+              {
+                kind: 'concept',
+                title: '负载因子 0.75：空间与冲突的折中点',
+                body: [
+                  '阈值 = 容量 × 负载因子，所以这个数字直接决定「什么时候扩容」。取 1.0 会怎样？桶全满才开始扩容，冲突概率急剧上升，链表变长；取 0.5 呢？一半空间空着就扩容，内存浪费一倍、扩容次数翻倍。0.75 是二者之间的经验折中。',
+                  '源码注释给了另一个角度的解释：0.75 时泊松分布的参数约为 0.5，此时桶内元素数的分布最「瘦」（长链表的概率最低）。同时它也满足一个数学上的巧合：`0.75 × 2^n` 永远是整数，阈值不会因取整而漂移。',
+                  '工程上可以调，但很少有理由调：**要极致省内存**可以调大到 0.9（前提是 hash 分布好）；**要极致低延迟**可以调小到 0.5，让链表更短。绝大多数场景就用默认值——这是 JDK 团队用大量真实负载调出来的。',
+                ],
+                points: [
+                  '阈值 = 容量 × 负载因子，默认 0.75（容量 16 → 阈值 12）',
+                  '太大（接近 1）：冲突多、链表长、查询退化；太小：内存浪费、扩容频繁',
+                  '0.75 的额外理由：此时泊松参数约 0.5，长链表概率最低',
+                  '`0.75 × 2^n` 恒为整数，阈值不因取整漂移',
+                  '可调但少调；省内存调到 0.9，低延迟调到 0.5',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'HashMap 的负载因子为什么是 0.75',
+                questionId: 'java-02-Q23',
+                intent:
+                  '四星题。答「空间与时间的折中」是及格，能给出「泊松参数 0.5」「阈值不漂移」这类具体理由才是高分。',
+                points: [
+                  '阈值 = 容量 × 负载因子，默认 0.75，容量 16 时阈值 12',
+                  '取 1.0：冲突概率大增、链表变长；取 0.5：内存浪费、扩容频繁',
+                  '0.75 时泊松分布参数约 0.5，长链表概率最低（源码注释的依据）',
+                  '`0.75 × 2^n` 永远是整数，阈值不会因取整而漂移',
+                  '可调：省内存调到 0.9，低延迟调到 0.5，但默认值已覆盖绝大多数场景',
+                ],
+                depth:
+                  '追问「调大负载因子会怎样」：扩容推迟、内存更省，但平均链表更长、`get` 变慢，且树化概率上升（虽然绝对值仍然很低）。这是一个可以量化的取舍，不是「越大越危险」这种定性说法。',
+              },
+              {
+                kind: 'principle',
+                title: '扩容与 rehash 优化：为什么只需判断一个位',
+                body: [
+                  '扩容就是 `resize()`：容量翻倍、阈值翻倍，然后**把旧数组的每个桶迁移到新数组**。1.7 的做法是对每个节点重新计算 `indexFor(hash, newCap)`（又一次取模），1.8 改了：因为新容量正好是旧容量的 2 倍，掩码只多了一个高位，所以原来的下标要么不变，要么变成「原下标 + oldCap」。',
+                ],
+                steps: [
+                  {
+                    title: '容量翻倍 → 掩码多一位',
+                    detail:
+                      '容量 16 → 32，掩码从 `0b1111` 变成 `0b11111`。多出来的那一位正好对应 `oldCap`（16）这个二进制位。所以判断「新下标要不要加 16」只需看 `hash & 16` 是否为 0。',
+                  },
+                  {
+                    title: '拆成两条链：loHead 与 hiHead',
+                    detail:
+                      '遍历旧桶的链表，用 `(e.hash & oldCap) == 0` 分成两组：为 0 的挂在 `loHead`（留在原下标 j），为 1 的挂在 `hiHead`（放到 j + oldCap）。**一次遍历同时完成拆分与迁移**，不做任何哈希计算。',
+                  },
+                  {
+                    title: '尾插保持相对顺序',
+                    detail:
+                      '1.8 用尾插把节点接到新链的末尾，所以顺序与旧链一致；1.7 用头插，迁移后链表会反转——这正是并发扩容成环的根源。',
+                  },
+                  {
+                    title: '阈值同步翻倍',
+                    detail:
+                      '`newThr = oldThr << 1`（或 `newCap * loadFactor`）。所以 16→32 时阈值 12→24，元素数达到 25 才再扩容。',
+                  },
+                  {
+                    title: '代价：扩容仍是 O(n)',
+                    detail:
+                      '虽然省掉了哈希计算，但每个元素都要被访问一次。所以「预估容量」依然是最有效的优化：`new HashMap<>(expected / 0.75 + 1)` 可以一次扩容都不发生。',
+                  },
+                ],
+                takeaway:
+                  '答题关键句：**因为新容量是旧容量的 2 倍，新下标只可能等于原下标或原下标 + oldCap，所以用 `hash & oldCap` 判断即可，无需重新计算哈希。** 这句话能同时回答「扩容机制」与「1.8 的 rehash 优化是什么」。',
+              },
+              {
+                kind: 'diagram',
+                title: '扩容时一个桶如何拆成两条链',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['旧桶 j', '判断 hash & oldCap', '低位链 loHead', '高位链 hiHead'],
+                  messages: [
+                    { from: '旧桶 j', to: '判断 hash & oldCap', text: '遍历链表，逐节点检查新增的那一位' },
+                    { from: '判断 hash & oldCap', to: '低位链 loHead', text: '该位为 0 → 新下标仍是 j' },
+                    { from: '判断 hash & oldCap', to: '高位链 hiHead', text: '该位为 1 → 新下标是 j + oldCap' },
+                    { from: '低位链 loHead', to: '旧桶 j', text: '整条链挂到新数组的 j 位置', reply: true },
+                    { from: '高位链 hiHead', to: '旧桶 j', text: '整条链挂到新数组的 j + oldCap 位置', reply: true },
+                  ],
+                  caption:
+                    '注意每个元素只被访问一次，而且**没有任何哈希计算或取模**——这就是 1.8 rehash 优化的全部内容。1.7 要对每个节点重算 `indexFor()`，多了一次取模。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'HashMap 的扩容机制？1.8 的 rehash 优化是什么',
+                questionId: 'java-02-Q24',
+                intent:
+                  '四星题，也是最容易答得含糊的一题。核心是那句「新下标只能是原下标或原下标 + oldCap」，以及它成立的原因。',
+                points: [
+                  '触发条件：`++size > threshold`（容量 16 时第 13 个元素触发）',
+                  '容量与阈值都翻倍：16 → 32，阈值 12 → 24',
+                  '1.8 优化：用 `hash & oldCap` 拆成低位链（原位）与高位链（原下标 + oldCap）',
+                  '不需要重新计算哈希、不需要取模，每个节点只访问一次',
+                  '1.7 用头插会反转链表，是并发扩容成环的根源；1.8 改尾插',
+                ],
+                depth:
+                  '追问「为什么要 2 倍而不是 1.5 倍」：因为只有翻倍才能保证「新掩码只多一位」，从而让高低位拆分成立。如果按 1.5 倍扩容，新容量不是 2 的幂，整个位运算定位与拆分优化全部失效——这让「2 的幂」从性能偏好升级为结构性约束。',
+              },
+              {
+                kind: 'concept',
+                title: '线程不安全：1.7 会成环，1.8 会丢数据',
+                body: [
+                  'JDK 1.7 的并发扩容能造出**环形链表**：两个线程同时 `transfer`，头插法反复改变 next 指向，最终可能出现 A.next = B 且 B.next = A。此后任何一次 `get` 落到这个桶，就会在遍历时死循环，CPU 打满且不会抛异常——这是最难排查的一类线上故障。',
+                  'JDK 1.8 改成尾插后不会成环，但**依然不安全**，只是表现换了：两个线程同时往同一个空桶 `put`，后写的会覆盖先写的（`tab[i] = newNode` 不是原子操作）；两个线程同时 `++size` 会丢计数，导致 `size` 与实际元素数不符，进而让扩容时机错乱；并发扩容还可能让某个桶的链被两个线程各拆一半，造成元素凭空消失。',
+                  '所以结论要说得准确：**「1.8 修复了死循环，但没有修复线程安全」**。要并发就用 `ConcurrentHashMap`（CAS + synchronized 只锁桶头），或者 `Collections.synchronizedMap`（一把大锁，仅作兜底）。另外 `HashMap` 的迭代器是 fail-fast 的，并发修改会抛 `ConcurrentModificationException`，但那只是**尽力检测**，不能当同步手段。',
+                ],
+                points: [
+                  '1.7：并发扩容 + 头插 → 环形链表 → `get` 死循环、CPU 100%',
+                  '1.8：尾插消除成环，但仍有数据覆盖、size 丢失、并发扩容丢元素',
+                  '「1.8 修复了死循环」≠「1.8 线程安全」——这是最容易答错的一句',
+                  '并发方案：`ConcurrentHashMap`（CAS + 锁桶头）；`synchronizedMap` 仅兜底',
+                  'fail-fast 只是尽力检测，不能替代同步',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'HashMap 线程不安全有哪些表现',
+                questionId: 'java-02-Q25',
+                intent:
+                  '四星题。要分清 1.7 与 1.8 的不同表现，并明确指出「1.8 只是不死循环，仍然不安全」——很多人就在这里答错。',
+                points: [
+                  '1.7：并发扩容 + 头插导致环形链表，`get` 死循环、CPU 打满',
+                  '1.8：尾插消除成环，但仍有 ① 同桶并发 put 互相覆盖 ② `++size` 丢计数 ③ 并发扩容丢元素',
+                  '`size` 不准会进一步导致扩容时机错乱（该扩容没扩 / 提前扩）',
+                  'fail-fast 迭代器会抛 `ConcurrentModificationException`，但它只是尽力检测',
+                  '正确做法：`ConcurrentHashMap`；`Collections.synchronizedMap` 只适合低并发兜底',
+                ],
+                depth:
+                  '能补「ConcurrentHashMap 为什么安全」更完整：1.8 用 CAS 插入空桶、用 `synchronized` 锁住桶首节点，锁粒度是「一个桶」而不是整表，所以并发度高；扩容时多线程还会协作迁移（`ForwardingNode` 标记）。',
+              },
+              {
+                kind: 'concept',
+                title: '剩下六个高频追问：get、遍历、key 要求、红黑树、Hashtable、扩容次数',
+                body: [
+                  '**get**：算 hash → 定位桶 → 先比首节点（hash 相同且 `==` 或 `equals`）→ 是树就树查、是链就遍历。**注意 `get` 也不安全**：并发扩容时可能读到 `null`，或读到正在迁移的中间态。**遍历**：`keySet` / `values` / `entrySet` **都是视图，不是副本**——改 map 会影响它们；三者中 `entrySet` 最快，因为它一次就拿到 key 与 value，而 `keySet` 还要再 `get(key)` 查一次。**key 要求**：必须正确重写 `equals` / `hashCode`，且最好不可变——`String` / `Integer` 合适，因为它们不可变（hash 稳定）且 `String` 还缓存了 hash 值。',
+                  '**为什么用红黑树而不是 AVL**：AVL 更严格平衡（左右子树高度差 ≤ 1），查询略快；但**插入删除的旋转次数可能是 O(log n)**，而红黑树插入最多 2 次旋转、删除最多 3 次。HashMap 的场景是「读写混合、写也不算少」，所以选综合成本更低的红黑树。这是典型的「不追求单项最优，追求总代价最低」。**哈希冲突的解决方式**：链地址法（HashMap / HashSet）、开放寻址法（`ThreadLocalMap` 的线性探测）、再哈希法、建立公共溢出区。',
+                  '**Hashtable 为什么被淘汰**：所有方法都加 `synchronized`（一把锁锁全表，并发度极低）、不允许 null key/value、初始容量 11 且扩容是 `2n+1`（不是 2 的幂）、迭代用 `Enumeration`（非 fail-fast）。它被 `ConcurrentHashMap` 全面取代。**扩容次数**：`new HashMap()` 存 20 个元素只扩容 **1 次**（16→32，第 13 个触发）；`new HashMap<>(20)` 会 `tableSizeFor(20)` 得到 32，阈值 24，存 20 个**一次都不扩容**。',
+                ],
+                points: [
+                  '`get` 的匹配顺序：hash 相等 → `==` → `equals`；并发下可能读到 null',
+                  '`keySet` / `values` / `entrySet` 都是**视图**；`entrySet` 遍历最快（一次拿两值）',
+                  'key 需正确重写 `equals` / `hashCode`，且推荐不可变（String 还缓存 hash）',
+                  '红黑树 vs AVL：AVL 查询略快但旋转多，红黑树插入最多 2 次、删除最多 3 次旋转',
+                  '冲突解决：链地址法（HashMap）、开放寻址（ThreadLocalMap）、再哈希、公共溢出区',
+                  'Hashtable：全表锁、禁 null、容量 11、扩容 2n+1、Enumeration → 已被 CHM 取代',
+                  '`new HashMap()` 存 20 个 → 扩容 1 次；`new HashMap<>(20)` → 扩容 0 次',
+                ],
+              },
+            ],
+            outline: [
+              '结构：Node[] + 链表 + 红黑树；默认容量 16、负载因子 0.75、阈值 12',
+              'put 八步：初始化 → 扰动 → 定位 → 空放/同覆盖/树查/尾插 → 树化（容量 ≥64）→ 扩容',
+              '两个数字的因果：扰动让高位参与定位，容量取 2 的幂让定位能用位运算、扩容只需判一位',
+              '线程不安全：1.7 成环死循环，1.8 只是不死循环，仍有覆盖与丢元素',
+            ],
+            pitfalls: [
+              '把树化阈值 8 说成绝对条件，漏掉「容量不足 64 时先扩容」这半句',
+              '说「1.8 修复了 HashMap 的线程安全问题」，实际只修复了成环',
+              '把 keySet / values / entrySet 说成副本，实际都是视图',
+            ],
+          },
+        },
+        {
+          id: 'map-other',
+          title: '其他 Map：ConcurrentHashMap、TreeMap、LinkedHashMap',
+          kind: 'concept',
+          sources: [{ topic: 'java-02', chapters: ['其他实现'] }],
+          content: {
+            intro:
+              'HashMap 之后，面试官必问「那并发用什么」「要保序用什么」。这一节把三个替代品讲清，而且它们各自只加了一种能力：**LinkedHashMap 加「顺序」**（顺带能三行实现 LRU）、**TreeMap 加「排序」**（红黑树 + 范围查询）、**ConcurrentHashMap 加「并发」**（CAS + 锁桶，而不是很多人以为的分段锁）。理解「加了什么、代价是什么」，比背三份源码结构有用得多——尤其要注意：`ConcurrentHashMap` 说成分段锁是 **JDK 7 的事**，1.8 已经换了实现。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '三种变体，各加一种能力',
+                body: [
+                  '`LinkedHashMap` **继承 HashMap**，只多做一件事：给每个 Entry 加 `before` / `after` 两个指针，把所有节点串成一条双向链表。所以哈希定位部分完全复用 HashMap，它额外提供的是「顺序」——默认插入顺序，把 `accessOrder` 设为 true 就变成访问顺序（最近访问的移到链尾）。',
+                  '`TreeMap` **不继承 HashMap**，它是独立实现的红黑树：没有桶数组，每个节点左小右大，所以 `get` / `put` 是 O(log n)（HashMap 平均 O(1)）。代价换来的是**有序与范围查询**：`firstKey`、`floorKey`、`headMap`、`subMap` 这些方法 HashMap 给不了。前提是 key 能比较——要么实现 `Comparable`，要么构造时传 `Comparator`。',
+                  '`ConcurrentHashMap` 也是独立实现，结构与 1.8 的 HashMap 类似（Node 数组 + 链表 + 红黑树），差别全在并发控制：**桶为空时用 CAS 插入（无锁），桶非空时用 `synchronized` 锁住桶首节点**。锁的粒度是「一个桶」，而不是整张表，也不是 1.7 的「一个 Segment（默认管 1/16 的表）」。',
+                ],
+                points: [
+                  'LinkedHashMap：HashMap + 双向链表，`accessOrder=false` 插入序 / `true` 访问序',
+                  'TreeMap：红黑树，O(log n)，key 必须可比较，支持范围查询',
+                  'ConcurrentHashMap：1.8 为「CAS 插空桶 + synchronized 锁桶头」，1.7 才是分段锁',
+                  '三者都**不允许 null key**：TreeMap 因比较会 NPE，CHM 因并发语义不允许（下面详述）',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'Map 家族：各自在 HashMap 之上加了什么',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: 'Map 接口',
+                    note: '键值映射契约',
+                    children: [
+                      {
+                        label: 'HashMap',
+                        note: '数组 + 链表 + 红黑树，O(1)',
+                        tone: 'primary',
+                        children: [
+                          { label: 'LinkedHashMap', note: '+ 双向链表保顺序（可做 LRU）', tone: 'primary' },
+                          { label: 'WeakHashMap', note: 'key 弱引用，可被 GC 回收', tone: 'warn' },
+                          { label: 'IdentityHashMap', note: '用 == 比较 key（按对象身份）', tone: 'warn' },
+                        ],
+                      },
+                      {
+                        label: 'TreeMap',
+                        note: '红黑树，O(log n)，有序',
+                        tone: 'primary',
+                        children: [
+                          { label: 'ConcurrentSkipListMap', note: '跳表，并发有序版本', tone: 'warn' },
+                        ],
+                      },
+                      {
+                        label: 'ConcurrentHashMap',
+                        note: 'CAS + 锁桶，线程安全',
+                        tone: 'primary',
+                      },
+                      {
+                        label: 'Hashtable',
+                        note: '全表 synchronized，已淘汰',
+                        tone: 'bad',
+                      },
+                    ],
+                  },
+                  caption:
+                    '注意 `LinkedHashMap` 与 `WeakHashMap` 都是**继承 HashMap** 的，它们只改了一点点行为（链表顺序 / key 的引用强度）；而 `TreeMap` 与 `ConcurrentHashMap` 是**完全独立**的实现，结构与 HashMap 毫无关系。这个继承关系本身就是高频考点。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'LinkedHashMap 的底层原理？如何实现 LRU',
+                questionId: 'java-02-Q32',
+                intent:
+                  '高频三星题。答「继承 HashMap + 双向链表」是及格，能说清 `accessOrder` 与 `removeEldestEntry` 两个钩子，并当场写出 LRU，才是通过。',
+                points: [
+                  '继承 HashMap，Entry 增加 `before` / `after`，把所有节点串成双向链表',
+                  '`accessOrder=false`（默认）：插入顺序；`true`：访问顺序（get 会把节点移到链尾）',
+                  '`afterNodeAccess` 在访问后把节点移到尾部；`afterNodeInsertion` 在插入后调用 `removeEldestEntry`',
+                  '重写 `removeEldestEntry` 返回 `size() > capacity` 即实现 LRU',
+                  '注意：它**不是线程安全**的，并发场景需要外面加锁',
+                ],
+                depth:
+                  '追问「为什么 LRU 用 LinkedHashMap 而不是自己写」：因为它已经维护了一条按访问顺序排列的双向链表，并且把「访问时移动节点」做进了 `get` 的钩子里。自己写要么用 `HashMap + 双向链表`（就是它），要么用 `LinkedHashMap`——没有第三条更省事的路。',
+              },
+              {
+                kind: 'principle',
+                title: 'LinkedHashMap 的两个钩子，就是 LRU 的全部',
+                body: [
+                  '`HashMap` 里留了三个空方法：`afterNodeAccess`、`afterNodeInsertion`、`afterNodeRemoval`——它们在 HashMap 中什么都不做，是专门留给 `LinkedHashMap` 覆写的**钩子**（模板方法模式）。LRU 只需要其中两个。',
+                ],
+                steps: [
+                  {
+                    title: '`accessOrder`：决定链表按什么顺序维护',
+                    detail:
+                      '构造器的第三个参数。为 false 时，新节点一律接到链尾（插入顺序）；为 true 时，`get` / `put` 已有 key 都会把该节点移到链尾，于是链头永远是「最久未使用」的。',
+                  },
+                  {
+                    title: '`afterNodeAccess`：把刚访问的节点移到尾',
+                    detail:
+                      '在 `get` 命中后调用。它把节点从当前位置摘下、插到 `tail` 之前——所以「访问顺序」不需要额外数据结构，就是链表重排。',
+                  },
+                  {
+                    title: '`afterNodeInsertion` → `removeEldestEntry`：淘汰最老的',
+                    detail:
+                      '插入新节点后调用。默认 `removeEldestEntry` 返回 false（不淘汰），你覆写成 `return size() > capacity` 就得到 LRU：每次插入后检查，超容量就删掉链头节点。',
+                  },
+                  {
+                    title: '代价：每个节点多两个引用',
+                    detail:
+                      'Entry 比 HashMap 的 Node 多 `before` / `after`，所以内存占用更高。同时 `get` 在 accessOrder 模式下会改结构（移动节点），并发下更不安全。',
+                  },
+                ],
+                takeaway:
+                  '三句话记住：**继承 HashMap 复用哈希；`accessOrder=true` 让链表按访问排序；覆写 `removeEldestEntry` 控制淘汰。** 三行代码就是 LRU，不需要自己维护双向链表。',
+              },
+              {
+                kind: 'handwrite',
+                title: '手写 LRU 缓存：三行继承，外加两个必须注意的边界',
+                lang: 'java',
+                prompt:
+                  '面试官：「用 LinkedHashMap 实现一个容量固定的 LRU 缓存，要求 get 与 put 都是 O(1)。」看起来三行就够，但真正的评分点在「为什么必须用 accessOrder=true」「并发怎么办」。',
+                signature: 'class LruCache<K, V> extends LinkedHashMap<K, V> {\n    LruCache(int capacity);\n    @Override protected boolean removeEldestEntry(Map.Entry<K, V> eldest);\n}',
+                plan: [
+                  {
+                    title: '构造器必须传 accessOrder = true',
+                    detail:
+                      '`super(capacity, 0.75f, true)`。第三个参数为 true 时，`get` 会把节点移到链尾；若忘了这个 true，得到的是 **FIFO** 而不是 LRU——这是最常见的一处错。',
+                  },
+                  {
+                    title: '容量要换算成 initialCapacity 与 maxSize 两个值',
+                    detail:
+                      '`LinkedHashMap` 的初始容量会被 `tableSizeFor` 向上取整到 2 的幂，不能直接当容量上限用。所以要自己存一个 `maxSize` 字段，`removeEldestEntry` 里用它比较。',
+                  },
+                  {
+                    title: '覆写 `removeEldestEntry` 返回 `size() > maxSize`',
+                    detail:
+                      '它在每次插入后调用，返回 true 就删掉链头（最久未使用的）。注意判断用 `>` 而不是 `>=`，否则容量会少一个。',
+                  },
+                  {
+                    title: '说明它不是线程安全的',
+                    detail:
+                      '`get` 在 accessOrder 模式下会重排链表，并发访问会破坏结构。要么外部加锁，要么用 `Collections.synchronizedMap` 包装——面试里主动提这一点，比被追问强。',
+                  },
+                  {
+                    title: '更完整的方案：`LinkedHashMap + synchronized` 或分段锁',
+                    detail:
+                      '高并发下推荐「多个小 LRU 分片 + 哈希取模」，把锁竞争摊开；这也是 Caffeine 这类本地缓存的基本思路（它更激进，用了环形缓冲记录访问）。',
+                  },
+                ],
+                skeleton:
+                  'class LruCache<K, V> extends LinkedHashMap<K, V> {\n\n    private final int maxSize;\n\n    LruCache(int capacity) {\n        super(capacity, 0.75f, ???);   // TODO 1:让链表按访问顺序维护\n        this.maxSize = capacity;\n    }\n\n    @Override\n    protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {\n        return ???;                    // TODO 2:超容量就淘汰链头\n    }\n\n    // TODO 3:说明并发场景该怎么处理\n}',
+                solution:
+                  'class LruCache<K, V> extends LinkedHashMap<K, V> {\n\n    private final int maxSize;\n\n    LruCache(int capacity) {\n        // 第三个参数 true = 访问顺序:get 会把节点移到链尾\n        super(capacity, 0.75f, true);\n        this.maxSize = capacity;\n    }\n\n    @Override\n    protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {\n        // 每次插入后检查,超了就删链头(最久未使用)\n        return size() > maxSize;\n    }\n}\n\n// 使用\nLruCache<String, Integer> cache = new LruCache<>(2);\ncache.put("a", 1);\ncache.put("b", 2);\ncache.get("a");        // a 变成最近使用\ncache.put("c", 3);     // 淘汰 b,而不是 a\nSystem.out.println(cache.keySet());   // [a, c]\n\n// 并发版本:外部加锁(简单)或分片(高并发)\nMap<String, Integer> sync = Collections.synchronizedMap(new LruCache<>(1000));',
+                complexity:
+                  '`get` / `put` 均摊 O(1)：哈希定位 O(1) + 链表移动 O(1)；淘汰也是 O(1)（删链头）。空间 O(capacity)，每个节点比 HashMap 多两个引用。',
+                traps: [
+                  '构造器第三个参数写成 false —— 得到的是 FIFO，不是 LRU',
+                  '把 `removeEldestEntry` 的返回值写成 `size() >= maxSize` —— 容量少一个',
+                  '用 `capacity` 当初始容量却忘了它会被 `tableSizeFor` 取整，误以为上限就是 capacity',
+                  '忽略线程安全 —— `get` 会改链表结构，并发下可能死循环或丢数据',
+                  '在 `removeEldestEntry` 里做耗时操作 —— 它在每次插入的同步路径上',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'TreeMap 的底层原理？和 HashMap 的区别',
+                questionId: 'java-02-Q33',
+                intent:
+                  '中等题。除了「红黑树 + O(log n)」，还要说清「key 必须可比较」和「能做范围查询」这两条差异，否则等于没说。',
+                points: [
+                  '底层是**红黑树**，`get` / `put` / `remove` 都是 O(log n)',
+                  'key 必须可比较：实现 `Comparable`，或构造时传 `Comparator`',
+                  '不允许 null key（自然排序下 `put(null)` 直接 NPE）；value 可以为 null',
+                  '独有能力：`firstKey` / `lastKey` / `floorKey` / `ceilingKey` / `headMap` / `subMap` / `tailMap`',
+                  '有序遍历（按 key 升序）；HashMap 遍历顺序不可预测',
+                ],
+                depth:
+                  '追问「什么场景用 TreeMap」：需要按 key 排序遍历、需要「找小于等于某值且最接近的 key」（floorKey，典型是时间区间、价格档位）、需要范围查询。若只是要「有序」，也可以 `HashMap + 排序一次`，但频繁插入时 TreeMap 更合适。',
+              },
+              {
+                kind: 'compare',
+                title: 'ConcurrentHashMap：1.7 分段锁 vs 1.8 锁桶',
+                head: ['维度', 'JDK 1.7', 'JDK 1.8'],
+                rows: [
+                  ['数据结构', '`Segment[]` + `HashEntry[]`，Segment 继承 ReentrantLock', '`Node[]` + 链表 + 红黑树（与 HashMap 类似）'],
+                  ['锁粒度', '一个 Segment（默认 16 个，等于并发度 16）', '一个桶的首节点（锁粒度细得多）'],
+                  ['插入空桶', '仍需获取 Segment 锁', '**CAS 无锁插入**'],
+                  ['插入非空桶', 'Segment 锁', '`synchronized` 锁住桶首节点'],
+                  ['size 统计', '两次累加 `modCount`，不一致再加全表锁重试', '`baseCount` + `CounterCell[]`（LongAdder 思路）'],
+                  ['扩容', '单线程对 Segment 扩容', '**多线程协作迁移**（`ForwardingNode` + `sizeCtl`）'],
+                  ['并发度', '受 Segment 数量限制（默认 16）', '等于桶数量，通常远大于 16'],
+                ],
+                note: '一句话记住代际差异：**1.7 是「分段加锁」，1.8 是「CAS + 锁桶头」**。如果面试时张口就说「ConcurrentHashMap 用分段锁」，在 JDK 8 项目里等于暴露知识停留在旧版本。',
+              },
+              {
+                kind: 'question',
+                title: 'ConcurrentHashMap 1.7 和 1.8 的实现有什么不同',
+                questionId: 'java-02-Q34',
+                intent:
+                  '四星题，也是最能区分「真懂」与「背博客」的一题。至少要说清结构、锁粒度、size 统计、扩容这四点差异。',
+                points: [
+                  '1.7：`Segment[]` 分段锁（继承 ReentrantLock），默认 16 段，并发度受限',
+                  '1.8：去掉 Segment，改为 `Node[]` + 链表 + 红黑树，**CAS 插入空桶 + synchronized 锁桶头**',
+                  '1.8 的锁粒度是「一个桶」，并发度等于桶数量，远高于 1.7 的 16',
+                  'size：1.7 靠 `modCount` 累加重试；1.8 用 `baseCount` + `CounterCell[]`（类似 LongAdder）',
+                  '扩容：1.7 单线程按段扩容；1.8 支持多线程协助迁移，用 `ForwardingNode` 标记已迁移桶',
+                ],
+                depth:
+                  '能补「为什么 1.8 要放弃分段锁」更好：Segment 数量在构造时就固定，成了并发度上限；而锁桶头的粒度随容量增长，且空桶 CAS 完全无锁。这是「降低锁粒度 + 减少锁持有时间」的典型演进。',
+              },
+              {
+                kind: 'principle',
+                title: 'CHM 的 put：为什么 CAS 与 synchronized 要并存',
+                body: [
+                  '很多人疑惑：既然用了 `synchronized`，为什么还要 CAS？反过来也一样。答案是**它们服务于两种不同的场景，分工明确**——这正是 1.8 设计的精巧之处。',
+                ],
+                steps: [
+                  {
+                    title: '桶为空：CAS 就够了，不需要锁',
+                    detail:
+                      '`casTabAt(tab, i, null, new Node(...))` —— 用 CAS 把 null 换成新节点。多个线程同时插同一个空桶，只有一个成功，其他重试。**这一步完全无锁**，而「往空桶插入」在低冲突场景下占绝大多数。',
+                  },
+                  {
+                    title: '桶非空：必须加锁，因为要改链表/树',
+                    detail:
+                      '`synchronized (f)` 锁住桶首节点 f。链表尾插、树插入、覆盖 value 都是多步操作，CAS 表达不了。锁住「首节点」而不是整表，所以不同桶互不影响。',
+                  },
+                  {
+                    title: '为什么要判空两次（`f == null` 在锁内再查）',
+                    detail:
+                      '拿到锁之后必须重新检查首节点是否还是原来那个——可能在你抢锁期间别人已经把桶迁移走了（扩容）。这是「双检锁」思路，避免往已迁移的旧桶写数据。',
+                  },
+                  {
+                    title: '写 value 用 volatile，不加锁也能读',
+                    detail:
+                      '`Node.val` 与 `Node.next` 都是 `volatile`，所以 `get` 完全不加锁也能看到最新值。这就是「读无锁、写局部加锁」的读写分离。',
+                  },
+                  {
+                    title: '所以完整的 put 是「CAS → 失败则 synchronized → 再 CAS」',
+                    detail:
+                      '这条路径让「无冲突」的写入走最快的 CAS 分支，「有冲突」的写入才付出锁代价。对比 Hashtable 的「一律加锁」，差距就在无冲突场景。',
+                  },
+                ],
+                takeaway:
+                  '答题要点：**CAS 负责「空桶插入」这种单步原子操作，synchronized 负责「非空桶」的多步结构修改；两者不是替代关系，而是按场景分工。** 这句话能同时回答「为什么还要 CAS」与「为什么还要 synchronized」。',
+              },
+              {
+                kind: 'question',
+                title: 'CHM 1.8 的 put 逻辑？为什么用了 synchronized 还要 CAS',
+                questionId: 'java-02-Q35',
+                intent:
+                  '四星题。核心是「分工」：CAS 处理空桶（单步、无竞争），synchronized 处理非空桶（多步、需互斥）。',
+                points: [
+                  '计算 hash → 定位桶；表未初始化先 `initTable()`',
+                  '桶为空：`casTabAt` 无锁插入，失败就重试（自旋）',
+                  '桶是 `MOVED`（ForwardingNode）：说明正在扩容，当前线程去**协助迁移**',
+                  '桶非空：`synchronized (f)` 锁首节点，再判一次是否为 null（双检），然后尾插或树插入',
+                  '插入后 `addCount` 更新 size，超过阈值触发扩容',
+                ],
+                depth:
+                  '加分点：说明「锁的是桶首节点而不是整个桶数组」，所以不同桶的写可以并行；再补「`Node.val` 是 volatile，所以读不需要锁」。这两句合起来就是 CHM 的读写模型。',
+              },
+              {
+                kind: 'concept',
+                title: 'size 是估算值，扩容是「大家一起搬」',
+                body: [
+                  '`ConcurrentHashMap.size()` 返回的是**估算值**，不是精确值——因为它不该为了一个统计数字去锁全表。1.8 用了类似 `LongAdder` 的方案：基础值 `baseCount`，无竞争时 CAS 累加它；有竞争时把增量分散到 `CounterCell[]` 数组的某个槽里（按线程哈希取模），最后求和。**分散热点**，避免所有线程抢同一个计数器。',
+                  '这也带来一个必须记住的结论：**`size()` 在并发下只能当参考**。如果你写 `if (map.size() < limit) map.put(...)`，这个判断本身就是竞态——两次调用之间 size 可能已经变了。要限流就得用 `Semaphore`，要「有则取、无则建」就得用 `computeIfAbsent`。',
+                  '扩容更值得讲：1.8 的扩容是**多线程协作**的。某个线程触发扩容后，会把旧表的桶逐个迁移到新表，已迁移的桶放一个 `ForwardingNode` 占位（它的 hash 是 `MOVED = -1`）。其他线程 `put` 时撞上 `ForwardingNode`，不是等待，而是**加入迁移队伍**——这就是 `helpTransfer`。迁移进度用 `sizeCtl` 的高 16 位记录「已分配的任务数」、低 16 位记录「还有多少线程在迁移」。',
+                ],
+                points: [
+                  '`size()` 是估算：`baseCount` + 各 `CounterCell` 求和，类似 LongAdder',
+                  '并发下 size 会漂移，不能用来做「先判断再写入」的复合操作',
+                  '扩容多线程协作：`ForwardingNode` 标记已迁移桶，其他线程 `helpTransfer` 一起搬',
+                  '迁移期间**读写都不阻塞**：读旧桶能读到旧值（弱一致），写则协助迁移',
+                  '`sizeCtl` 同时承担「初始化标记 / 扩容阈值 / 迁移进度」多个角色',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '并发扩容：一个线程触发，多个线程一起搬',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['线程 A（触发）', '旧表', '新表', '线程 B（后来者）'],
+                  messages: [
+                    { from: '线程 A（触发）', to: '新表', text: 'CAS 设置 sizeCtl，分配两倍容量的新表' },
+                    { from: '线程 A（触发）', to: '旧表', text: '迁移桶 i：搬完后放 ForwardingNode 占位' },
+                    { from: '线程 B（后来者）', to: '旧表', text: 'put 时撞上 ForwardingNode（hash = MOVED）' },
+                    { from: '线程 B（后来者）', to: '旧表', text: 'helpTransfer：领取一段任务，一起搬' },
+                    { from: '线程 A（触发）', to: '新表', text: '所有桶搬完，table 指向新表', reply: true },
+                  ],
+                  caption:
+                    '关键点：**扩容不是「停下来搬完再服务」，而是边服务边搬**。撞上已迁移桶的线程会去帮忙，而不是阻塞等待——这就是 CHM 在高并发下不会有明显卡顿的原因。代价是「弱一致性」：迁移过程中读可能读到旧值。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'CHM 是怎么扩容的？扩容时其他线程还能读写吗',
+                questionId: 'java-02-Q37',
+                intent:
+                  '四星题，考的是「协作式迁移」这个设计。答「能读写」很容易，说清「怎么做到」才是重点。',
+                points: [
+                  '触发：`addCount` 发现元素数超过阈值（`sizeCtl`），CAS 竞争扩容资格',
+                  '迁移：按桶逐个搬到新表，搬完的桶放 `ForwardingNode`（hash = MOVED = -1）',
+                  '`put` 撞上 ForwardingNode 时调用 `helpTransfer` **协助迁移**，而不是等待',
+                  '`get` 不加锁：读到 ForwardingNode 就按它的 `nextTable` 去新表查',
+                  '代价是弱一致性：迁移中可能读到旧值，`size()` 也是估算',
+                ],
+                depth:
+                  '能补「为什么要用 ForwardingNode」：它是一个「路标」，既告诉其他线程「这个桶已经搬走了」，又提供了去新表的指针。没有它，其他线程就无法安全地继续读写。',
+              },
+              {
+                kind: 'concept',
+                title: '为什么 CHM 不允许 null，以及「先 get 再 put」为什么还是不安全',
+                body: [
+                  '`ConcurrentHashMap` 禁止 null key 与 null value，原因不是「实现麻烦」，而是**并发语义下无法消歧**。`get(key)` 返回 null 时，单线程里你可以再 `containsKey` 确认是「没有这个键」还是「值是 null」；但在并发环境里，这两次调用之间 map 可能已被别的线程修改，第二次查询的结论不一定适用于第一次。所以 Doug Lea 干脆禁止 null，让「null 只表示不存在」，语义唯一。',
+                  '第二个问题更实用：`if (!map.containsKey(k)) map.put(k, v);` 仍然有竞态——判断与写入之间，别人可能已经放进去了。正确做法是用**原子复合方法**：`putIfAbsent(k, v)`、`computeIfAbsent(k, fn)`、`compute`、`merge`。这些方法在桶的锁内完成「判断 + 写入」，是 CHM 真正该用的 API。',
+                  '顺带一个性能陷阱：`computeIfAbsent` 的映射函数**在锁内执行**，如果里面做了耗时操作（查库、远程调用），会长时间占住桶锁。所以映射函数要短，或者先在锁外算好再 `putIfAbsent`。',
+                ],
+                points: [
+                  '不允许 null 的原因：并发下 `get` 返回 null 无法区分「不存在」与「值为 null」',
+                  '单线程的「get + containsKey」双查在并发下不成立',
+                  '复合操作用 `putIfAbsent` / `computeIfAbsent` / `compute` / `merge`，它们原子',
+                  '`computeIfAbsent` 的映射函数在锁内执行，不要放耗时逻辑',
+                  '`size()` 也只是估算，不能用于「先判断再写入」',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'CHM 为什么不允许 null？先 get 再 put 一定安全吗',
+                questionId: 'java-02-Q38',
+                intent:
+                  '这题很能区分「知道 API」和「理解并发」。答「会 NPE」是错的——它压根不让你存；真正原因是语义歧义。',
+                points: [
+                  '不允许 null key/value：`get` 返回 null 时无法区分「键不存在」与「值是 null」',
+                  '并发下「get + containsKey」两次调用之间状态可能变化，双查不成立',
+                  '「先 get 再 put」不安全：check-then-act 不是原子操作',
+                  '正确做法：`putIfAbsent` / `computeIfAbsent` / `compute` / `merge`',
+                  '注意 `computeIfAbsent` 的映射函数在锁内执行，不要放耗时逻辑',
+                ],
+                depth:
+                  '能对比 `HashMap` 说清差异更好：HashMap 允许 null 是因为单线程下「双查」成立；CHM 禁止 null 正是为了让「null = 不存在」这个等式在并发下也成立。同一个设计问题，两种场景两个答案。',
+              },
+              {
+                kind: 'compare',
+                title: 'CHM vs Hashtable，以及各 Map 的 null 支持',
+                head: ['实现', '线程安全方式', 'null key / value'],
+                rows: [
+                  ['HashMap', '不安全', '允许 null key（1 个）与 null value'],
+                  ['LinkedHashMap', '不安全', '同 HashMap'],
+                  ['TreeMap', '不安全', '**不允许 null key**（比较会 NPE）；value 可为 null'],
+                  ['Hashtable', '全表 `synchronized`', '都不允许'],
+                  ['ConcurrentHashMap', 'CAS + 锁桶头', '都不允许'],
+                  ['ConcurrentSkipListMap', '跳表 + CAS', '都不允许'],
+                ],
+                note: 'Hashtable 被淘汰的四个理由：全表锁（并发度 1）、禁止 null、初始容量 11 且扩容 `2n+1`（不是 2 的幂，无法用位运算定位）、迭代器是 `Enumeration`（不 fail-fast）。**它唯一的历史价值是「线程安全 Map 的第一个实现」**，现在全部由 ConcurrentHashMap 承担。',
+              },
+              {
+                kind: 'question',
+                title: 'CHM 和 Hashtable 的区别？get 为什么通常不用加锁',
+                questionId: 'java-02-Q39',
+                intent:
+                  '三星题。除了「锁粒度」，还要能解释「读无锁」靠什么保证——`volatile`。',
+                points: [
+                  '锁粒度：Hashtable 全表一把锁；CHM 锁桶头（1.8）或分段（1.7）',
+                  'null：Hashtable 与 CHM 都不允许；HashMap 允许',
+                  'CHM 的 `get` 不加锁：`Node.val` 与 `next` 是 `volatile`，保证可见性',
+                  '扩容期间读也能进行：遇到 `ForwardingNode` 就按 `nextTable` 去新表查',
+                  '代价：CHM 是弱一致性（读可能读到旧值），不是「强一致」',
+                ],
+                depth:
+                  '追问「volatile 够吗」：`get` 只读一个节点链，`val` 的 volatile 写保证「put 完成后的值一定能被读到」；读到旧值也只发生在并发扩容的瞬间，且不影响正确性（CHM 的契约是弱一致）。够用，但不是「线性一致」。',
+              },
+              {
+                kind: 'concept',
+                title: 'HashMap 与 HashSet：一个是另一个的马甲',
+                body: [
+                  '`HashSet` 内部就是一个 `HashMap`：`add(e)` 调用 `map.put(e, PRESENT)`，`PRESENT` 是一个静态的空 Object 常量。所以 `HashSet` 的「元素」其实是 map 的 key，「去重」就是 map 的 key 不重复。这也解释了为什么 `HashSet` 的 `add` 返回 boolean（`put` 返回 null 说明之前没有），以及为什么它没有 `get`。',
+                  '由此可以推出两个常被追问的点：**`HashSet` 的 `contains` 是 O(1)**（走 HashMap 的桶定位）；**自定义对象去重失败的原因和 HashMap 完全一样**——没重写 `hashCode` 就落不到同一个桶，`equals` 根本没机会被调用。`LinkedHashSet` 与 `TreeSet` 同理，分别包了 `LinkedHashMap` 与 `TreeMap`。',
+                  '另外两个冷门但常考的 Map：**`WeakHashMap`** 的 key 是弱引用，key 没有其他强引用时条目会被 GC 回收，适合做「附属数据的缓存」（比如给 Class 挂元数据）；**`IdentityHashMap`** 用 `==` 而不是 `equals` 比较 key（内部用 `System.identityHashCode`），适合需要「按对象身份」区分的场景（序列化时处理循环引用、图遍历）。',
+                ],
+                points: [
+                  '`HashSet` 内部就是 `HashMap`，value 统一是常量 `PRESENT`',
+                  '`add` 返回 boolean 来自 `map.put(...) == null`；没有 `get` 方法',
+                  '`LinkedHashSet` / `TreeSet` 分别包装 `LinkedHashMap` / `TreeMap`',
+                  '`WeakHashMap`：key 弱引用，可被 GC 回收，适合附属缓存',
+                  '`IdentityHashMap`：用 `==` 比较 key，按对象身份而非逻辑相等',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'HashMap 和 HashSet 的区别',
+                questionId: 'java-02-Q41',
+                intent:
+                  '简单题，但答「一个存键值对一个存单个元素」太表面。说出「HashSet 内部就是 HashMap」才是关键。',
+                points: [
+                  '`HashSet` 内部持有一个 `HashMap`，元素作为 key，value 是常量 `PRESENT`',
+                  '所以「去重」等价于「key 不重复」，`contains` 是 O(1)',
+                  '`add` 返回 boolean，来自 `put(...) == null`；`HashSet` 没有 `get`',
+                  '两者都不线程安全，都依赖 `hashCode` + `equals` 正确实现',
+                  '`LinkedHashSet` / `TreeSet` 分别是 `LinkedHashMap` / `TreeMap` 的包装',
+                ],
+                depth:
+                  '被追问「为什么 HashSet 的 value 用常量」：因为只需要 key 的集合语义，value 不承载信息；用同一个静态常量可以省掉每个元素一个对象的内存开销。',
+              },
+            ],
+            outline: [
+              'LinkedHashMap 继承 HashMap，用双向链表加顺序；accessOrder=true + removeEldestEntry 即 LRU',
+              'TreeMap 是红黑树，O(log n)、有序、支持范围查询，key 必须可比较',
+              'CHM 1.8 是「CAS 插空桶 + synchronized 锁桶头」，1.7 才是分段锁',
+              'CHM 禁 null 是为了并发下语义唯一；复合操作用 putIfAbsent / computeIfAbsent',
+            ],
+            pitfalls: [
+              '说 ConcurrentHashMap 用分段锁，那是 JDK 7 的实现，JDK 8 已改为锁桶 + CAS',
+              '在 ConcurrentHashMap 上做「先检查再写入」的复合操作，仍然存在竞态',
+              '用 LinkedHashMap 做 LRU 时忘了 accessOrder = true，得到的是 FIFO',
+            ],
+          },
+        },
+        {
+          id: 'set-queue',
+          title: 'Set 与 Queue 的实现选择',
+          kind: 'concept',
+          sources: [
+            { topic: 'java-02', chapters: ['Set'] },
+            { topic: 'java-02', chapters: ['Queue'] },
+          ],
+          content: {
+            intro:
+              'Set 基本是 Map 的一层薄封装，理解这一点就不用单独记忆；真正的考点在 Queue：普通队列、双端队列、优先级队列、阻塞队列各自解决什么问题。生产者消费者为什么用 `BlockingQueue` 而不是 `wait/notify`，线程池为什么选 `LinkedBlockingQueue` 或 `ArrayBlockingQueue`，`SynchronousQueue` 凭什么能做到「不存储元素」——答案都在这几个类的语义差别里。这一节还有一个隐藏主线：**判等规则**。Set 判重、`TreeSet` 判重、`PriorityQueue` 排序，用的是三套不同的比较机制，混用就会出现「明明不相等却被去重了」这种灵异现象。',
+            sections: [
+              {
+                kind: 'concept',
+                title: 'Set 是 Map 的一层马甲',
+                body: [
+                  '`HashSet` 的源码里只有一个实例字段：`private transient HashMap<E,Object> map;`。`add(e)` 的实现是一行 `return map.put(e, PRESENT) == null;`，其中 `PRESENT` 是个 `static final Object` 常量。也就是说，**Set 的元素就是 Map 的 key，「去重」就是「key 不重复」**。三行源码解决了整个 Set 体系一半的面试题。',
+                  '由此可以立刻推出三件事。第一，`HashSet` 的 `contains` 是 O(1)——它走的是 HashMap 的桶定位，不是从头遍历。第二，自定义对象去重失败的原因和 HashMap 完全一样：没重写 `hashCode` 就落不到同一个桶，`equals` 连被调用的机会都没有。第三，`HashSet` 没有 `get` 方法，因为它不存 value，它只能回答「在不在」。',
+                  '`LinkedHashSet` 与 `TreeSet` 是同一套把戏：前者包 `LinkedHashMap`，后者包 `TreeMap`。所以「Set 怎么保证不重复」这个问题，答案永远是「它的那个 Map 怎么保证 key 不重复」。学会一个，白得两个。',
+                ],
+                term: {
+                  name: '马甲（包装器）',
+                  def: 'Set 不自己实现哈希表或红黑树，而是把全部存储与判重逻辑委托给一个 Map 实例，自己只负责抹掉 value。这类设计在 JDK 里很常见（Collections.unmodifiableXxx 也是）。',
+                },
+                points: [
+                  '`HashSet` 内部只有一个 `HashMap` 字段，元素作 key，value 是常量 `PRESENT`',
+                  '`add` 返回 boolean，来自 `map.put(...) == null`（put 返回旧值，null 说明原来没有）',
+                  '「Set 去重」判等与「Map 的 key 去重」完全一致，都靠 `hashCode` + `equals`',
+                  '`LinkedHashSet` / `TreeSet` 分别包装 `LinkedHashMap` / `TreeMap`',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: 'Set 家族：每一层壳背后都站着一个 Map',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: 'Set 接口',
+                    note: '元素不重复 · 至多一个 null',
+                    children: [
+                      {
+                        label: 'HashSet',
+                        note: '包 HashMap，O(1)，无序',
+                        tone: 'primary',
+                        children: [
+                          { label: 'LinkedHashSet', note: '包 LinkedHashMap，保插入序', tone: 'primary' },
+                        ],
+                      },
+                      {
+                        label: 'TreeSet',
+                        note: '包 TreeMap，红黑树，排序，O(log n)',
+                        tone: 'primary',
+                        children: [
+                          { label: 'ConcurrentSkipListSet', note: '包跳表，并发有序', tone: 'warn' },
+                        ],
+                      },
+                      { label: 'CopyOnWriteArraySet', note: '包 COW 数组，读多写极少', tone: 'warn' },
+                      { label: 'EnumSet', note: '位向量，枚举专用，内存最省', tone: 'warn' },
+                    ],
+                  },
+                  caption:
+                    '树里每一个节点都是「某个 Map 的壳」。所以面试里问「Set 的底层」，标准答法是**先说出它包装的 Map，再说出那个 Map 的结构**：`HashSet` → `HashMap` → 数组 + 链表 + 红黑树；`TreeSet` → `TreeMap` → 红黑树。只答「哈希表」会被追问到卡住。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'HashSet 的实现原理？如何保证元素不重复？',
+                questionId: 'java-02-Q42',
+                intent:
+                  '第一道送分题，但答「基于哈希表存储」只能算入门。要答到「内部就是一个 HashMap，add 就是 put，value 是同一个常量」这一层，才说明真的翻过源码。',
+                points: [
+                  '`HashSet` 内部持有一个 `HashMap`，元素作为 key，value 统一是静态常量 `PRESENT`',
+                  '`add(e)` 返回 `map.put(e, PRESENT) == null`，返回 true 表示之前不存在',
+                  '不重复由 HashMap 的 key 语义保证：先比 hash 定位桶，再用 `equals` 判断桶内是否已有相等元素',
+                  '`contains(e)` 走 `map.containsKey`，平均 O(1)；`remove(e)` 走 `map.remove`',
+                  '不保证顺序，允许一个 null 元素，非线程安全',
+                ],
+                depth:
+                  '被追问「为什么 value 要用一个常量而不是 null」：如果用 null，`contains` 就无法区分「这个 key 不存在」和「这个 key 存在但 value 是 null」。用一个哨兵常量，`map.put` 的返回值就能准确表达「原来有没有」。',
+                followup: '「那 LinkedHashSet 怎么做的？」——它继承 HashSet，但构造时把内部的 map 换成 `LinkedHashMap`，于是「怎么存」不变，「遍历顺序」变成插入顺序。',
+              },
+              {
+                kind: 'diagram',
+                title: 'add(e) 的三道关卡：hash → 桶 → equals',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['add(e)', 'hashCode()', '桶定位', 'equals()'],
+                  messages: [
+                    { from: 'add(e)', to: 'hashCode()', text: 'h = e.hashCode()，再 h ^ (h >>> 16) 扰动' },
+                    { from: 'hashCode()', to: 'add(e)', text: '扰动后的 hash', reply: true },
+                    { from: 'add(e)', to: '桶定位', text: 'index = (n - 1) & hash' },
+                    { from: '桶定位', to: 'add(e)', text: '桶为空 → 插入，返回 true', reply: true },
+                    { from: 'add(e)', to: 'equals()', text: '桶非空 → 对链表/红黑树逐个比较' },
+                    { from: 'equals()', to: 'add(e)', text: '全部不等 → 尾插，返回 true', reply: true },
+                    { from: 'equals()', to: 'add(e)', text: '有一个相等 → 不插入，返回 false', reply: true },
+                  ],
+                  caption:
+                    '这张图是**所有**哈希类集合的通用流程：`HashSet`、`HashMap`、`ConcurrentHashMap` 都一样。注意 `equals` 只在「同一个桶内」才会被调用——**桶不同，equals 永远不执行**。这就是自定义对象去重失败的全部原因。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'HashSet、LinkedHashSet、TreeSet 三者的异同与选择？',
+                questionId: 'java-02-Q43',
+                intent:
+                  '考的是「同一族类的差异化记忆」。回答时不要平铺三份源码，先给一条主线——都实现 Set，差别只在「用什么结构维护顺序」，再分别展开。',
+                points: [
+                  '共同点：都不允许重复元素，都非线程安全，都实现 Set 接口',
+                  '`HashSet` 包 `HashMap`：无序，增删查平均 O(1)，允许一个 null',
+                  '`LinkedHashSet` 继承 `HashSet`、包 `LinkedHashMap`：多一条双向链表，遍历为**插入顺序**，性能略低于 HashSet',
+                  '`TreeSet` 包 `TreeMap`：红黑树，遍历为**排序顺序**，增删查 O(log n)，**不允许 null**（要比较会 NPE）',
+                  '选型：只去重 → HashSet；去重且要稳定遍历顺序 → LinkedHashSet；去重且要排序或范围查询（`first`、`floor`、`headSet`）→ TreeSet',
+                ],
+                depth:
+                  '加分点：`LinkedHashSet` 的「插入顺序」在**重复插入已有元素时不会改变顺序**——第二次 `add` 同一个元素不会把它移到末尾。这一点常被问到「我想实现访问顺序怎么办」，答案是只能用 `LinkedHashMap`（`accessOrder=true`），Set 没有对应能力。',
+              },
+              {
+                kind: 'question',
+                title: '自定义对象放入 HashSet/HashMap 为什么有时去重失败？',
+                questionId: 'java-02-Q44',
+                intent:
+                  '这不是记忆题，是「契约题」。要能说清 hashCode 与 equals 的分工，并指出只重写一个是错在哪一步。',
+                points: [
+                  '哈希集合分两步定位：先用 `hashCode` 找桶，再在桶内用 `equals` 比较',
+                  '只重写 `equals` 不重写 `hashCode`：两个「逻辑相等」的对象 hash 不同，落到不同桶，`equals` 根本没被调用 → 去重失败',
+                  '只重写 `hashCode` 不重写 `equals`：落进同一个桶，但 `equals` 用 `==` 比较引用，仍判为不等 → 去重失败',
+                  '契约：`equals` 相等 ⇒ `hashCode` 必须相等；`hashCode` 相等 ⇏ `equals` 相等（允许哈希冲突）',
+                  '正确做法：两个都重写，且用**同一组字段**；推荐 `Objects.equals` 与 `Objects.hash`，或 IDE / Lombok / record',
+                ],
+                depth:
+                  '追问「对象放进 HashSet 后修改了参与 hashCode 的字段会怎样」：它的 hash 变了，但它在数组里的位置没变。于是 `contains` 找不到它、`remove` 删不掉它，元素变成「幽灵」——既在集合里又访问不到。**哈希集合的 key 必须是不可变的**，这是硬约束。',
+                followup: '「用 record 或 Lombok 要注意什么？」record 自动生成基于全部组件的 equals/hashCode，通常正确；Lombok 的 `@Data` / `@EqualsAndHashCode` 默认包含全部非静态字段，若实体有可变字段（如 id 在持久化后才赋值）就会踩上面的坑，需要用 `@EqualsAndHashCode(onlyExplicitlyIncluded = true)` 指定。',
+              },
+              {
+                kind: 'code',
+                title: 'equals / hashCode 契约：错一次，去重全废',
+                lang: 'java',
+                code:
+                  '// 反例：只重写 equals，没重写 hashCode\nclass BadPoint {\n    int x, y;\n    BadPoint(int x, int y) { this.x = x; this.y = y; }\n\n    @Override public boolean equals(Object o) {\n        if (!(o instanceof BadPoint p)) return false;\n        return x == p.x && y == p.y;\n    }\n    // 缺 hashCode → 用 Object 的身份哈希，两个 (1,1) 的 hash 不同\n}\n\n// 正例：两个都重写，字段集合一致\nclass GoodPoint {\n    final int x, y;                        // final：放进哈希集合后不可变\n    GoodPoint(int x, int y) { this.x = x; this.y = y; }\n\n    @Override public boolean equals(Object o) {\n        if (this == o) return true;                     // ① 快路径：同一引用\n        if (!(o instanceof GoodPoint p)) return false;  // ② 类型不对直接 false\n        return x == p.x && y == p.y;                    // ③ 逐字段比较\n    }\n\n    @Override public int hashCode() {\n        return Objects.hash(x, y);          // 与 equals 用同一组字段\n    }\n}\n\n// 验证\nSet<Object> s = new HashSet<>();\ns.add(new BadPoint(1, 1));\ns.add(new BadPoint(1, 1));\nSystem.out.println(s.size());   // 2 —— 去重失败\n\nSet<Object> t = new HashSet<>();\nt.add(new GoodPoint(1, 1));\nt.add(new GoodPoint(1, 1));\nSystem.out.println(t.size());   // 1',
+                caption:
+                  '`equals` 的三个判断顺序（同一引用 → 类型 → 字段）不是风格问题：`this == o` 快路径能让集合里大量「自己跟自己比」的场景直接返回，`instanceof` 保证后面强转安全。`Objects.hash` 内部是 `Arrays.hashCode(new Object[]{...})`，以 31 为权做累乘，与 `String.hashCode` 同源。',
+                notes: [
+                  { line: 'if (!(o instanceof BadPoint p)) return false;', text: 'Java 16 的模式匹配写法，省掉一次强转；等价于 `!(o instanceof BadPoint)` 后再 `(BadPoint) o`。' },
+                  { line: 'return Objects.hash(x, y);', text: '不能写成 `x * 31 + y` 就省事——虽然结果等价，但用 `Objects.hash` 能明确表达「与 equals 同一组字段」，改字段时不容易漏。' },
+                  { line: 'final int x, y;', text: '字段 final 是为了保证对象进集合后 hash 不变。若必须可变，就不要用它做哈希集合的 key。' },
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'TreeSet 为什么会把两个不同的对象当成重复元素？',
+                questionId: 'java-02-Q45',
+                intent:
+                  '陷阱题。答「因为红黑树判重」不够，要说清「靠 compareTo 返回 0 判重，而不是 equals」，并指出两者不一致时的后果。',
+                points: [
+                  '`TreeSet` 的判重完全基于比较结果：`compareTo`（或 `Comparator.compare`）返回 **0** 即视为同一元素',
+                  '`equals` 在 `TreeSet` 里**从不被调用**，所以两个 `equals` 返回 false 的对象也可能被判为重复',
+                  '典型翻车：`BigDecimal` 的 `compareTo` 忽略精度（`1.0` 与 `1.00` 比较为 0），但 `equals` 认为不同 → 放进 TreeSet 只剩一个',
+                  '另一种翻车：`compareTo` 只比较了部分字段（比如只比 id），其余字段不同的对象会被吞掉',
+                  '规范：`compareTo` 与 `equals` 应保持一致（`compareTo == 0` ⇔ `equals == true`），JDK 文档明确建议如此',
+                ],
+                depth:
+                  '追问「那 TreeSet 里放 String 为什么没问题」：`String` 的 `compareTo` 是按字典序逐字符比较，`equals` 也是逐字符相等，两者严格一致，所以不会冲突。冲突只出现在「比较口径」与「相等口径」不同的类上——`BigDecimal` 是教科书级反例，因为它同时有「数值相等」和「精度相等」两个语义。',
+                followup: '「`TreeSet` 里存 null 会怎样？」——插入第一个 null 时若树为空，其实能进去（`TreeMap` 允许第一个 key 为 null）；但一旦有第二个元素需要比较，就会 NPE。所以工程上直接认为**不允许 null**。',
+              },
+              {
+                kind: 'question',
+                title: 'Set 的「无序性」怎么理解？是无随机性吗？',
+                questionId: 'java-02-Q46',
+                intent:
+                  '概念辨析题，考的是「无序」这个词的准确含义。很多人答成「随机」，其实二者完全不同。',
+                points: [
+                  '「无序」指的是**不承诺任何遍历顺序**，不代表每次遍历结果都不同，也不是随机打乱',
+                  '`HashSet` 的遍历顺序由**桶下标**决定，而桶下标 = `(n-1) & hash`，对同一组元素、同一容量是**完全确定的**',
+                  '所以：同一份数据、同一个 JDK 版本，遍历顺序可复现（连跑两次结果一样）；但跨版本、跨容量（扩容后）可能变',
+                  '不承诺顺序 ≠ 顺序随机：随机是「每次不同」，无序是「不保证是你要的那个」——比如不保证插入顺序',
+                  '需要顺序时不要依赖 HashSet 的当前表现，改用 `LinkedHashSet`（插入序）或 `TreeSet`（排序）',
+                ],
+                depth:
+                  '加分点：`HashSet` 的迭代顺序实际上是「按桶下标从小到大，桶内按链表顺序」，所以小整数（hash 等于自身）在未扩容时常常看起来「有序」——这是 `(n-1) & hash` 的巧合，绝不是契约。面试时主动说出「这是实现细节，不是规范」，会让回答高一个档次。',
+              },
+              {
+                kind: 'question',
+                title: 'Queue 与 Deque 有什么区别？poll() 和 remove() 的区别？',
+                questionId: 'java-02-Q47',
+                intent:
+                  '考的是 JDK 集合 API 的一个核心设计约定：**同一操作提供两套方法，一套失败抛异常、一套失败返回特殊值**。能讲清这个约定，比背方法名有用。',
+                points: [
+                  '`Queue` 是单向队列：只能从队尾进、队首出（FIFO），核心方法 `offer`/`poll`/`peek`',
+                  '`Deque` 是双端队列：两端都能进出，因此**同时可以当队列用（FIFO）和当栈用（LIFO）**',
+                  '两套 API 的划分标准是「失败时怎么办」：`add`/`remove`/`element` 失败抛异常；`offer`/`poll`/`peek` 失败返回 `false`/`null`',
+                  '`poll()` 队列为空返回 null；`remove()` 队列为空抛 `NoSuchElementException`',
+                  '`peek()` 空返回 null；`element()` 空抛异常。入队 `offer(e)` 满返回 false；`add(e)` 满抛 `IllegalStateException`',
+                  '`Deque` 在其上补齐十二个方法：`addFirst/offerFirst/addLast/offerLast`、`removeFirst/pollFirst/...`、`getFirst/peekFirst/...`',
+                ],
+                depth:
+                  '为什么设计两套：因为「空」在不同场景下语义不同。有界队列里 `offer` 返回 false 是一种正常业务信号（队列满了，稍后再来），用异常表达既昂贵又不好看；而 `remove` 抛异常适合「空就是不正常」的场景。选哪套，本质是选「用返回值还是用异常表达失败」。',
+                followup: '「`Deque` 的 `push/pop` 对应哪一端？」——`push(e)` = `addFirst(e)`，`pop()` = `removeFirst()`，也就是**栈顶在队首**。而 `Queue` 的 `offer` 是 `addLast`。别把两端搞反，手写代码时最容易在这里出 bug。',
+              },
+              {
+                kind: 'diagram',
+                title: '两套 API 对照：抛异常 vs 返回特殊值',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['失败抛异常', '失败返回特殊值'],
+                  rows: [
+                    ['队尾入队', '`add(e)` → IllegalStateException', '`offer(e)` → false'],
+                    ['队首出队', '`remove()` → NoSuchElementException', '`poll()` → null'],
+                    ['查看队首', '`element()` → NoSuchElementException', '`peek()` → null'],
+                    ['队首入队', '`addFirst(e)`', '`offerFirst(e)` → false'],
+                    ['队尾入队', '`addLast(e)`', '`offerLast(e)` → false'],
+                    ['队首出队', '`removeFirst()`', '`pollFirst()` → null'],
+                    ['队尾出队', '`removeLast()`', '`pollLast()` → null'],
+                    ['栈式压入', '`push(e)` = `addFirst(e)`', '`offerFirst(e)`'],
+                    ['栈式弹出', '`pop()` = `removeFirst()`', '`pollFirst()`'],
+                  ],
+                  caption:
+                    '记忆口诀：**左列「会吵」，右列「会静」**。左列用于「失败即 bug」的场景（断言式编程），右列用于「失败即正常业务分支」的场景（有界队列、可能为空的取数）。`ArrayDeque` 无界（会扩容），所以它的 `add` 几乎不会失败，两套差别主要体现在「空的时候」。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'ArrayDeque 和 LinkedList 的区别？为什么当栈/队列推荐 ArrayDeque？',
+                questionId: 'java-02-Q48',
+                intent:
+                  '性能与结构双重比较题。核心论据只有一条：**数组 vs 链表在缓存局部性上的差距**，其余都是这条的推论。',
+                points: [
+                  '`ArrayDeque` 是**循环数组**，`head` / `tail` 两个下标首尾相接，两端操作都是 O(1) 均摊',
+                  '`LinkedList` 是**双向链表**，每个节点额外存 `prev` / `next` 两个引用（内存约 3 倍于一个数组槽）',
+                  '数组内存连续，CPU 缓存命中率高；链表节点散落在堆上，遍历时频繁 cache miss —— 实测 `ArrayDeque` 常快 2-3 倍',
+                  '`LinkedList` 每次插入都 `new Node`，GC 压力大；`ArrayDeque` 只在扩容时复制一次（容量翻倍，均摊 O(1)）',
+                  '`ArrayDeque` 不允许 null（null 被 `poll` 用作「空」的返回值，无法区分），`LinkedList` 允许',
+                  '`LinkedList` 唯一不可替代的场景：需要 `List` 语义（按下标访问、`get(i)`）——但它 `get(i)` 是 O(n)，实际也很少是正确选择',
+                ],
+                depth:
+                  '经典追问「链表不是插入删除 O(1) 吗，为什么还慢」：链表的 O(1) 只是「改两个指针」这一步，但**找到插入位置**通常要 O(n) 遍历，而遍历正是链表最慢的操作。数组的 O(n) 是「复制连续内存」，可以被 `System.arraycopy` 做到接近内存带宽的速度。复杂度相同不代表实际耗时相同——常数因子在这种场景能差一个数量级。',
+                followup: '「那 `Stack` 类呢？」——那是 JDK 1.0 的遗留类，继承 `Vector`，**所有方法都加了 synchronized**，单线程下白白付出锁开销，且继承关系暴露了 `get(i)` 等不该有的方法（破坏了栈的封装）。官方文档直接建议「用 `Deque` 接口 + `ArrayDeque` 实现」。',
+              },
+              {
+                kind: 'diagram',
+                title: 'ArrayDeque 的循环数组：下标绕回去，不用搬数据',
+                diagram: {
+                  type: 'memory',
+                  regions: [
+                    {
+                      name: 'elements[]',
+                      note: '长度必为 2 的幂',
+                      slots: [
+                        { label: '[0]', value: 'C', tone: 'primary' },
+                        { label: '[1]', value: 'D', tone: 'primary' },
+                        { label: '[2]', value: 'null' },
+                        { label: '[3]', value: 'null' },
+                        { label: '[4]', value: 'null' },
+                        { label: '[5]', value: 'null' },
+                        { label: '[6]', value: 'A', tone: 'primary' },
+                        { label: '[7]', value: 'B', tone: 'primary' },
+                      ],
+                    },
+                    {
+                      name: '两个指针',
+                      note: '容量 8',
+                      slots: [
+                        { label: 'head', value: '6', tone: 'primary' },
+                        { label: 'tail', value: '2', tone: 'warn' },
+                      ],
+                    },
+                  ],
+                  caption:
+                    '队列内容 = 从 `head` 顺时针读到 `tail`（不含），即 **A B C D**，它跨过了数组末尾「绕回」开头。入队只需 `elements[tail] = e; tail = (tail + 1) & 7;`，出队只需 `head = (head + 1) & 7;`——**没有任何元素搬移**。`& 7` 就是「对 8 取模」，因为容量是 2 的幂所以可以用位运算（这也是容量强制 2 的幂的原因）。真正需要搬数据的只有扩容：`doubleCapacity()` 会把两段拼成一段连续的新数组。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'PriorityQueue 的底层是什么？遍历结果一定有序吗？',
+                questionId: 'java-02-Q49',
+                intent:
+                  '一句话筛人：「遍历有序吗」答 yes 的，说明只见过输出没见过结构。后面追问复杂度与建堆，是区分「背过」和「理解」的分水岭。',
+                points: [
+                  '底层是**二叉堆**（用数组存的完全二叉树），默认小顶堆，可通过 `Comparator` 定制',
+                  '只保证**堆顶（`peek`/`poll`）是最小值**，其余元素只满足「父 ≤ 子」，兄弟之间无序',
+                  '`iterator()` 直接按数组顺序遍历，**结果不是有序的**；要按顺序取必须反复 `poll()`',
+                  '`offer` / `poll`：O(log n)（上浮 / 下沉）；`peek`：O(1)；`remove(Object)` / `contains`：O(n)（线性扫描）',
+                  '用 `Collection` 构造（`new PriorityQueue<>(list)`）是**自底向上堆化**，O(n)，不是逐个 `offer` 的 O(n log n)',
+                  '非线程安全；对应并发版本是 `PriorityBlockingQueue`（无界、`take` 阻塞）',
+                ],
+                depth:
+                  '加分点：堆的数组表示里，下标 `i` 的父节点是 `(i-1)/2`、左右孩子是 `2i+1` / `2i+2`——**0 基下标**。很多人在白板上写出 `i/2`，那是 1 基编号的写法，会直接判错。另外 `PriorityQueue` 也不允许 null（要比较）。',
+                followup: '「求 Top K 用哪个」——求**最大**的 K 个用小顶堆（堆里留 K 个，新元素比堆顶大就替换堆顶），复杂度 O(n log K)；求**最小**的 K 个用大顶堆。这个「反着选堆」的结论是高频追问点。',
+              },
+              {
+                kind: 'handwrite',
+                title: '手写二叉堆：push 上浮、pop 下沉',
+                lang: 'java',
+                prompt:
+                  '面试官：「`PriorityQueue` 的底层是二叉堆，你手写一个小顶堆，实现 push 与 pop，要求 O(log n)。」这题看着简单，但白板上八成人会在「父节点下标」和「下沉时先取较小孩子」这两处写错。',
+                signature:
+                  'class MinHeap {\n    void push(int v);   // 入堆\n    int pop();          // 取出并删除堆顶\n    int peek();         // 只看堆顶\n    int size();\n}',
+                plan: [
+                  {
+                    title: '先把「完全二叉树 → 数组」的映射钉死',
+                    detail:
+                      '下标 i 的父节点是 `(i-1)/2`，左右孩子是 `2i+1` 与 `2i+2`。0 基下标是唯一要记的公式，写错这一条后面全崩。用数组存完全二叉树的好处是：不需要任何指针，父子关系靠算术就能算出来。',
+                  },
+                  {
+                    title: 'push：放到末尾，然后「上浮」',
+                    detail:
+                      '新元素一定先放在数组末尾（保持完全二叉树形态），然后不断与父节点比较：比父小就交换，直到父 ≤ 自己或到达根。交换次数最多等于树高 = log n。',
+                  },
+                  {
+                    title: 'pop：末尾补头，然后「下沉」',
+                    detail:
+                      '堆顶就是要返回的值。把末尾元素搬到 `a[0]`、`size` 减一，然后从根开始「下沉」：每次在自己的两个孩子里挑出**较小的那个**，若它比自己小就交换，直到自己是三者中最小的或没有孩子。',
+                  },
+                  {
+                    title: '判定统一写成「父 ≤ 子」',
+                    detail:
+                      '小顶堆的不变式是「每个节点都不大于它的孩子」。把这一条写成断言，上浮与下沉的终止条件就自然出来了。改大顶堆只需把两处 `<` 反过来。',
+                  },
+                ],
+                skeleton:
+                  'class MinHeap {\n    private int[] a = new int[16];\n    private int size;\n\n    public void push(int v) {\n        // TODO: 1) 满了先扩容  2) 放到 a[size]  3) 从 size 开始上浮  4) size++\n    }\n\n    public int pop() {\n        // TODO: 1) 记住 a[0]  2) 把末尾元素搬到 a[0]，size--\n        //       3) 从 0 开始下沉  4) 返回记住的值\n        return -1;\n    }\n\n    private void siftUp(int i) {\n        // TODO: 与父节点 (i-1)/2 比较，比父小就交换，直到根\n    }\n\n    private void siftDown(int i) {\n        // TODO: 在 2i+1、2i+2 中挑较小的孩子，比自己小就交换\n    }\n\n    private void swap(int i, int j) {\n        int t = a[i]; a[i] = a[j]; a[j] = t;\n    }\n}',
+                solution:
+                  'class MinHeap {\n    private int[] a = new int[16];\n    private int size;\n\n    public void push(int v) {\n        if (size == a.length) {\n            a = Arrays.copyOf(a, size << 1);   // 扩容必须重新赋值\n        }\n        a[size] = v;\n        siftUp(size);                          // 先上浮\n        size++;                                // 再增加计数\n    }\n\n    public int pop() {\n        int top = a[0];\n        a[0] = a[--size];                      // 末尾补头，size 同时减一\n        siftDown(0);\n        return top;\n    }\n\n    public int peek() { return a[0]; }\n    public int size() { return size; }\n\n    private void siftUp(int i) {\n        while (i > 0) {\n            int p = (i - 1) >>> 1;             // 父节点：0 基下标是 (i-1)/2\n            if (a[p] <= a[i]) break;           // 小顶堆：父 <= 子 即满足\n            swap(p, i);\n            i = p;\n        }\n    }\n\n    private void siftDown(int i) {\n        while (true) {\n            int l = (i << 1) + 1;              // 左孩子\n            int r = l + 1;                     // 右孩子\n            int m = i;                         // 三者中最小者\n            if (l < size && a[l] < a[m]) m = l;\n            if (r < size && a[r] < a[m]) m = r;\n            if (m == i) break;                 // 自己最小，堆序已恢复\n            swap(i, m);\n            i = m;\n        }\n    }\n\n    private void swap(int i, int j) {\n        int t = a[i]; a[i] = a[j]; a[j] = t;\n    }\n}',
+                complexity:
+                  'push O(log n) · pop O(log n) · peek O(1) · 空间 O(n)。补充：给定 n 个元素用「自底向上对每个非叶节点下沉」建堆，总复杂度是 **O(n)** 而不是 O(n log n)——因为大部分节点都在底层，下沉距离很短。',
+                traps: [
+                  '父节点写成 `i / 2`：那是 1 基编号（根从 1 开始）的公式，0 基必须 `(i - 1) / 2`',
+                  '下沉时只比较左孩子：必须先在左右孩子里挑出**较小者**，再与父比较，否则右孩子更小时会被漏掉',
+                  '`pop` 里先 `--size` 再赋值给 `a[0]`，顺序反了就会把刚取出的堆顶又搬回去',
+                  '`Arrays.copyOf` 返回新数组，忘了 `a = ...` 赋值，扩容无效',
+                  '把 `peek` 写成返回 `a[size]`（越界）或忘了判断空堆',
+                ],
+              },
+              {
+                kind: 'question',
+                title: '什么是阻塞队列？BlockingQueue 有哪些实现？怎么选？',
+                questionId: 'java-02-Q50',
+                intent:
+                  '生产者消费者的标准解法。要答出「阻塞」的两个方向（队列满时生产者阻塞、队列空时消费者阻塞），并能按「有无界 + 锁粒度 + 是否直接交接」把实现分类。',
+                points: [
+                  '`BlockingQueue` 在 `Queue` 之上加了两个**阻塞**语义：`put(e)` 队列满时阻塞，`take()` 队列空时阻塞',
+                  '同时提供带超时的版本 `offer(e, timeout, unit)` / `poll(timeout, unit)`，避免无限等待',
+                  '四种核心实现：`ArrayBlockingQueue`（有界数组 + 单锁）、`LinkedBlockingQueue`（链表 + 双锁，可有界可无界）、`SynchronousQueue`（不存储，直接交接）、`PriorityBlockingQueue`（无界 + 堆，按优先级出队）',
+                  '另有 `DelayQueue`（元素到期才可取出）、`LinkedTransferQueue`（`transfer` 交给消费者）、`LinkedBlockingDeque`（双端）',
+                  '价值：把「等待/通知」的样板代码封进类里，不用自己写 `while` + `wait` + `notifyAll`，天然避免虚假唤醒与丢失信号',
+                  '关键前提：`put` / `take` 本身线程安全，但**多个操作组合**（先检查再操作）仍要自己加锁',
+                ],
+                depth:
+                  '为什么不直接用 `wait/notify`：手写版本必须遵守「用 `while` 而不是 `if` 判断条件」（防虚假唤醒）、必须保证 `notify` 前改了状态、必须选对 `notify` vs `notifyAll`（两个条件队列时选错会丢信号）。这些坑 `BlockingQueue` 全用两个 `Condition`（`notEmpty` / `notFull`）在内部解决了。',
+                followup: '「线程池为什么默认用 `LinkedBlockingQueue`」——`Executors.newFixedThreadPool` 用它且**不传容量**，等于无界队列，任务堆积时永远不触发拒绝策略，极端情况会 OOM。所以阿里规约明确要求「手动 `new ThreadPoolExecutor` 并指定有界队列」。',
+              },
+              {
+                kind: 'diagram',
+                title: '四种 BlockingQueue：按「存不存 + 有没有界 + 几把锁」分',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['数据结构', '是否有界', '锁 / 并发', '适用场景'],
+                  rows: [
+                    ['`ArrayBlockingQueue`', '数组', '有界，必须指定容量', '一把 `ReentrantLock` + 两个 Condition', '容量确定、要防止堆积；锁单把，吞吐略低'],
+                    ['`LinkedBlockingQueue`', '链表', '可选（默认 `Integer.MAX_VALUE` ≈ 无界）', '两把锁（putLock / takeLock）+ 两个 Condition', '高吞吐的生产消费；**务必手动传容量**'],
+                    ['`SynchronousQueue`', '不存储', '容量 0', '公平模式用队列 / 非公平用栈 + CAS', '直接交接；`newCachedThreadPool` 用它做任务转交'],
+                    ['`PriorityBlockingQueue`', '堆（数组）', '无界（`put` 永不阻塞）', '一把锁 + 一个 Condition（只有 notEmpty）', '按优先级消费；无界意味着有 OOM 风险'],
+                    ['`DelayQueue`', '堆 + 到期时间', '无界', '一把锁 + 一个 Condition +  leader 线程优化', '延时任务、订单超时取消、重试退避'],
+                  ],
+                  caption:
+                    '读表要抓三个问题：**有没有界**（决定要不要担心 OOM 与拒绝策略）、**几把锁**（决定吞吐上限：`LinkedBlockingQueue` 入队出队互不阻塞）、**存不存元素**（`SynchronousQueue` 容量为 0，生产者和消费者必须同时到场）。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'ArrayBlockingQueue 和 LinkedBlockingQueue 有什么区别？',
+                questionId: 'java-02-Q51',
+                intent:
+                  '细节对比题。核心不是「数组 vs 链表」，而是「一把锁 vs 两把锁」带来的吞吐差异，以及「有界 vs 无界」带来的稳定性差异。',
+                points: [
+                  '结构：`ArrayBlockingQueue` 用**一个定长数组** + 两个下标（`putIndex` / `takeIndex`）循环；`LinkedBlockingQueue` 用**链表**，节点按需 `new`',
+                  '锁：前者**只有一把锁**，入队与出队互斥；后者用**两把锁**（`putLock` / `takeLock`），入队与出队可并行 → 高并发下吞吐更高',
+                  '边界：前者**必须**指定容量；后者构造器可不传容量，默认 `Integer.MAX_VALUE`（≈ 无界），容易堆积到 OOM',
+                  '内存：前者预先分配整个数组（即使为空也占满）；后者按元素逐个分配 Node，含 `next` 引用，每个元素开销更大',
+                  '计数：前者用 `int count`（在同一把锁保护下）；后者用 `AtomicInteger count`（因为两把锁都可能读写它）',
+                  '选型：追求稳定与可预测 → `ArrayBlockingQueue`；追求吞吐且能明确设容量 → `LinkedBlockingQueue`',
+                ],
+                depth:
+                  '为什么 `LinkedBlockingQueue` 能用两把锁：因为队首与队尾在链表上是**不同节点**，一个线程改 `head.next`、另一个改 `tail.next`，只要计数用原子量协调，就不会互相干扰。而循环数组的 `putIndex` / `takeIndex` 会在「数组满/空」时相互影响（判断满需要看对方的位置），难以拆锁。这就是「数据结构决定并发粒度」的典型例子。',
+              },
+              {
+                kind: 'question',
+                title: 'SynchronousQueue 的原理与应用？DelayQueue 呢？',
+                questionId: 'java-02-Q52',
+                intent:
+                  '两个「特殊语义」的队列。答对 `SynchronousQueue` 的「容量为 0、必须直接交接」和 `DelayQueue` 的「到期才能取」，基本就覆盖了考点。',
+                points: [
+                  '`SynchronousQueue` **不存储元素**，`put` 会一直阻塞直到有消费者来 `take`，反之亦然——它是「一次传递」的通道',
+                  '内部有两种实现：公平模式用**队列**（FIFO，`TransferQueue`），非公平模式用**栈**（LIFO，`TransferStack`），后者吞吐更高但可能饥饿',
+                  '`Executors.newCachedThreadPool()` 用它作为工作队列：有新任务时若没有空闲线程可交接，就新建线程，从而实现「弹性扩容」',
+                  '`DelayQueue` 存的是 `Delayed` 元素（必须实现 `getDelay` 与 `compareTo`），只有 `getDelay <= 0` 的元素才能被 `take` 出',
+                  '`DelayQueue` = `PriorityBlockingQueue` + 到期判断：堆顶是最早到期的元素，`take` 时若堆顶未到期就 `awaitNanos(剩余时间)`',
+                  '典型应用：订单超时关闭、缓存过期、失败重试的退避调度、定时任务',
+                ],
+                depth:
+                  '追问「`SynchronousQueue` 为什么能提高缓存线程池性能」：它把「任务排队」变成了「任务交接」。传统队列会把任务攒起来等线程空闲，而 `SynchronousQueue` 要求立刻有人接，接不了就新建线程——所以线程数会随并发上升，空闲 60 秒后回收。代价是**不适合需要限流或削峰的场景**，因为它根本不缓冲。',
+                followup: '「`DelayQueue` 的 `leader` 是什么」——它是一个「只有队首等待者才真正 `await`」的优化：多个消费者线程同时等待时，只有 leader 线程用带超时的 `awaitNanos`，其余 `await()` 无限等待，避免所有线程同时醒来抢锁（惊群）。这是并发容器里很经典的优化手法。',
+              },
+              {
+                kind: 'principle',
+                title: '同样「不重复」，三种容器用了三套判等机制',
+                body: [
+                  '这一节最容易被忽略的主线是**判等**。同样是「元素不重复」，`HashSet` 用「hashCode 定位 + equals 确认」两步，`TreeSet` **只用** `compareTo` / `Comparator`，而 `PriorityQueue` 压根不判等——它只关心大小关系，相等的元素可以并存。这不是历史包袱，而是结构决定的必然：哈希表要的是「快速分散」，红黑树要的是「全序排列」，堆要的是「局部有序」。',
+                ],
+                steps: [
+                  {
+                    title: 'HashSet / LinkedHashSet：hashCode 定位，equals 确认',
+                    detail:
+                      '两步走。`hashCode` 决定落到哪个桶（O(1) 定位），`equals` 在桶内确认是否真的相等（处理哈希冲突）。所以两者必须**同时**重写且用同一组字段，否则去重失效。',
+                  },
+                  {
+                    title: 'TreeSet：compareTo 返回 0 即判重，equals 从不被调用',
+                    detail:
+                      '红黑树需要一条全序来「往左走还是往右走」，判等只是「比较结果为 0」的副产品。因此 `equals` 返回 false 的对象也可能被吞掉——`BigDecimal` 的 `1.0` 与 `1.00` 就是经典反例。',
+                  },
+                  {
+                    title: 'PriorityQueue：只比大小，不判重',
+                    detail:
+                      '堆只维护「父 ≤ 子」的局部序，不做任何去重。所以你可以往 `PriorityQueue` 里放十个相同的值，它们会全部存在。它和 Set 的语义是正交的。',
+                  },
+                  {
+                    title: '代价：有序从来不是免费的',
+                    detail:
+                      '`HashSet` 定位是一次位运算加一次数组访问；`TreeSet` 要走 log n 层比较，每次比较都可能逐字符/逐字段展开。**O(1) 与 O(log n) 的差别在数据量大时就是量级差别**，这也是「去重优先选 HashSet」的根本原因。',
+                  },
+                ],
+                takeaway:
+                  '一句话收口：**哈希靠 hash 分散、红黑树靠比较排序、堆靠局部序取极值。结构决定判等口径，判等口径决定你会踩哪个坑。** 面试问「TreeSet 为什么去重失败」，答「它不用 equals」就赢了。',
+              },
+            ],
+            outline: [
+              'HashSet 是 HashMap 的马甲：元素作 key，value 是常量 PRESENT，add 返回 put == null',
+              'HashSet 靠 hashCode + equals 判重，TreeSet 只靠 compareTo == 0 判重，不一致会吞数据',
+              '「无序」指不承诺顺序、不是随机；需要顺序时用 LinkedHashSet（插入序）或 TreeSet（排序）',
+              'Queue / Deque 各有两套 API：抛异常（add/remove/element）与返回特殊值（offer/poll/peek）',
+              'ArrayDeque 是循环数组，栈与队列首选；阻塞队列按「有无界 + 几把锁 + 存不存」区分',
+            ],
+            pitfalls: [
+              '说 TreeSet 用 equals 判重：它只用 compareTo / compare 返回 0 判重，equals 从不被调用',
+              '把 PriorityQueue 的 iterator 当成有序遍历：它按数组顺序输出，要按序必须反复 poll',
+              '用 Executors 的默认工厂方法建线程池，底层是无界 LinkedBlockingQueue，任务堆积会 OOM',
+            ],
+          },
+        },
+        {
+          id: 'iterator-misc',
+          title: '迭代器与集合选型',
+          kind: 'concept',
+          sources: [
+            { topic: 'java-02', chapters: ['迭代器'] },
+            { topic: 'java-02', chapters: ['不可变集合'] },
+          ],
+          content: {
+            intro:
+              '最后这一节收口：迭代器为什么设计成 fail-fast、`removeIf` 为什么能安全删除、并发容器为什么改用 fail-safe。然后把散落各处的「排序」「不可变集合」「通配符」三块拼上，最后回到工程视角做一次完整选型——按「要不要去重、要不要有序、读写比例、是否跨线程」四个维度给结论，而不是背「ArrayList 查快增删慢」这种半句话。这一节的目标是：遇到「你会选哪个集合」这种开放题，你有一套可复述的回答框架，而不是报流水账。',
+            sections: [
+              {
+                kind: 'concept',
+                title: '迭代器：把「怎么走」从「怎么存」里抽出来',
+                body: [
+                  '`Iterator` 是**遍历协议**，不是数据结构。它只承诺三件事：`hasNext()` 问还有没有、`next()` 取下一个、`remove()` 删掉刚取的那个。至于底层是数组、链表还是红黑树，调用方完全不需要知道。这就是为什么 `for (String s : list)` 既能遍历 `ArrayList` 也能遍历 `HashSet`——它们都实现了同一个协议。',
+                  '**`for-each` 只是语法糖**，编译后就是 `Iterator it = list.iterator(); while (it.hasNext()) { s = it.next(); ... }`。所以「增强 for 里删元素会抛异常」这件事，本质是「你在用迭代器遍历的同时，绕开迭代器修改了容器」。',
+                  '这也顺带解释了为什么把「遍历」和「修改」系在同一个对象上是必要的：只有迭代器自己知道「当前走到哪个桶、哪个下标」，容器本身不知道有多少个迭代器在跑。于是 JDK 选了一个非常保守的策略——**发现结构被改过就直接失败**（fail-fast），宁可报错，也不给你一个可能错乱的结果。',
+                ],
+                term: {
+                  name: 'fail-fast（快速失败）',
+                  def: '在检测到「不安全的并发修改」时立刻抛 ConcurrentModificationException，而不是继续执行给出错误结果。它是**bug 检测机制**，不是并发保障——不能靠它保证多线程正确性。',
+                },
+                points: [
+                  '`Iterator` 只暴露 `hasNext` / `next` / `remove`，与底层结构解耦',
+                  '`for-each` 编译后就是 `Iterator` 的 `while` 循环，没有任何魔法',
+                  'fail-fast 是「尽早暴露 bug」，不提供任何线程安全保证',
+                  '并发场景要的是 fail-safe（弱一致性快照），不是 fail-fast',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '四种「遍历器」的分工',
+                diagram: {
+                  type: 'tree',
+                  root: {
+                    label: '遍历方式',
+                    note: '都靠「协议」而非继承具体容器',
+                    children: [
+                      {
+                        label: 'Iterator',
+                        note: '单向、只能删',
+                        tone: 'primary',
+                        children: [
+                          { label: 'hasNext / next / remove', note: 'remove 删的是「上次 next 返回的那个」' },
+                        ],
+                      },
+                      {
+                        label: 'ListIterator',
+                        note: '双向 + 可改 + 可插',
+                        tone: 'primary',
+                        children: [
+                          { label: 'hasPrevious / previous', note: '可倒着走' },
+                          { label: 'set(e) / add(e)', note: '就地替换、插入' },
+                          { label: 'nextIndex / previousIndex', note: '能拿到位置' },
+                        ],
+                      },
+                      {
+                        label: 'Enumeration',
+                        note: 'JDK 1.0 遗留，已被取代',
+                        tone: 'warn',
+                        children: [{ label: 'hasMoreElements / nextElement', note: '没有 remove，方法名冗长' }],
+                      },
+                      {
+                        label: 'Spliterator',
+                        note: 'JDK 8，为并行流设计',
+                        tone: 'warn',
+                        children: [
+                          { label: 'trySplit', note: '把剩余元素切一半给另一个线程' },
+                          { label: 'characteristics', note: '声明 ORDERED / SIZED / DISTINCT 等' },
+                        ],
+                      },
+                    ],
+                  },
+                  caption:
+                    '关键区别一句话：`Iterator` 只读加删、`ListIterator` 多「双向 + set/add」、`Enumeration` 是历史遗留且没有删除、`Spliterator` 是为**并行**切分数据而生。注意 `Spliterator` 的 `estimateSize` 只是估计值，并行流拿它做任务切分，所以并行流的中间结果不保证顺序（除非用 `forEachOrdered`）。',
+                },
+              },
+              {
+                kind: 'question',
+                title: '什么是 fail-fast？它的原理（modCount）？',
+                questionId: 'java-02-Q53',
+                intent:
+                  '机制题。能说出 `modCount` 与 `expectedModCount` 的比对算及格；能说清「为什么只在这几个方法里检查」「为什么它不是线程安全的」才算过关。',
+                points: [
+                  '`AbstractList` 维护一个 `modCount`：任何**结构性修改**（增、删、扩容导致重排）都会 `modCount++`；仅修改元素值不算',
+                  '迭代器创建时把 `modCount` 拷进自己的 `expectedModCount`',
+                  '每次 `next()` / `remove()` / `forEachRemaining()` 前调用 `checkForComodification()`，不一致就抛 `ConcurrentModificationException`',
+                  '`hasNext()` **不做检查**——所以有时候异常会延迟到下一次 `next()` 才抛，看起来「出错位置很怪」',
+                  '它是**尽力而为**的检测：只在上述方法里查，多线程下可能「刚好错过」而不报错，因此**绝不能当成线程安全机制**',
+                  '单线程也会触发：`for (X x : list) list.remove(x)` 就是典型的单线程自伤',
+                ],
+                depth:
+                  '追问「为什么不改成加锁」：因为 `ArrayList` 的定位就是**非线程安全的高性能容器**。加锁会让单线程场景白白付出代价，而集合的迭代器是「临时对象」，根本无法承担锁的生命周期管理。JDK 的选择是：把「单线程误用」用最快的方式暴露出来（一次 int 比较），把「多线程正确性」交给 `java.util.concurrent` 里的另一套容器。**职责分离，而不是一个类包打天下。**',
+                followup: '「那 `modCount` 为什么不是 `volatile`」——因为它不需要跨线程可见性。fail-fast 是给单线程 bug 用的；多线程读到一个过期的 `modCount`，恰好说明这个机制本来就不是为你服务的。',
+              },
+              {
+                kind: 'principle',
+                title: 'checkForComodification 的三步闭环',
+                body: [
+                  '整个 fail-fast 只有三个字段和一行判断，但每一处位置都不是随便放的。理解「为什么放在这里」，就理解了它的设计边界。',
+                ],
+                steps: [
+                  {
+                    title: '① `modCount`：容器自己记账',
+                    detail:
+                      '`ArrayList` 的 `add`、`remove`、`clear`、`ensureCapacity` 扩容等会改变数组结构的操作里都有 `modCount++`。而 `set(i, e)` 只是覆盖某个槽，**不算结构修改，不递增**——所以遍历时 `set` 不会抛异常。这个区分常被追问。',
+                  },
+                  {
+                    title: '② `expectedModCount`：迭代器开局拍快照',
+                    detail:
+                      '`iterator()` 返回 `new Itr()`，构造时执行 `expectedModCount = modCount`。它记的是「我出生那一刻，容器被改过多少次」，之后容器再被改，两个数就会分叉。',
+                  },
+                  {
+                    title: '③ `checkForComodification()`：只在「要交付数据」时校验',
+                    detail:
+                      '放在 `next()`、`remove()`、`forEachRemaining()` 的开头。**不放在 `hasNext()`** 里，因为 `hasNext()` 只是比一下下标，不读元素——即便结构变了，它返回的布尔值也不会造成数据错乱，没必要付出检查成本。代价是异常可能「迟到一步」，报错行号看起来不直观。',
+                  },
+                  {
+                    title: '④ `Itr.remove()` 自己同步 `expectedModCount`',
+                    detail:
+                      '迭代器自己的 `remove()` 在删完后执行 `expectedModCount = modCount`，所以「用迭代器删」是合法的。这就是「正确写法」的全部秘密——**不是不能删，而是必须让迭代器知道这次删除**。',
+                  },
+                ],
+                takeaway:
+                  '一句话记：**容器改一次账（modCount++），迭代器开局面账（快照），每次交付数据前对账（check），自己对账自己更新（Itr.remove 同步）。** 四个动作，构成完整的 fail-fast。',
+              },
+              {
+                kind: 'question',
+                title: '遍历时删除元素抛 ConcurrentModificationException 的原因和正确写法？',
+                questionId: 'java-02-Q55',
+                intent:
+                  '这是 fail-fast 的实战版。要说清「为什么 for-each 删会炸，而 if 判断也救不了」，并给出至少四种正确写法及各自适用场景。',
+                points: [
+                  '原因：`for-each` 底层用迭代器，你调 `list.remove()` 让 `modCount++`，而迭代器的 `expectedModCount` 没更新，下一次 `next()` 检查失败',
+                  '`if (x.equals(target)) list.remove(x)` 只是让删除「偶发」，不是修复——只要删了，下一次 `next()` 照样抛',
+                  '写法一：`Iterator.remove()`，删完自动同步 `expectedModCount`（**唯一推荐用于 `ArrayList` 的通用写法**）',
+                  '写法二：`list.removeIf(x -> 条件)`，JDK 8 起内部就是这么实现的，最简洁',
+                  '写法三：`Collection.removeAll(sub)` 或 `retainAll(keep)`，按集合批量操作',
+                  '写法四：倒序 `for (int i = size - 1; i >= 0; i--)`，删元素不影响未遍历的下标（仅 `List` 可用）',
+                  '`CopyOnWriteArrayList` 的迭代器不抛异常，但**迭代过程中看不到新增元素**，且 `iterator().remove()` 直接抛 `UnsupportedOperationException`',
+                ],
+                depth:
+                  '为什么正序 `for (int i = 0; i < size; i++)` 删除是错的：删掉下标 `i` 后，后面所有元素**前移一位**，原本的 `i+1` 变成了 `i`，而循环推进到 `i+1`，于是**漏掉一个元素**。这是比异常更危险的 bug——不报错，静默少删。倒序循环没有这个问题，因为被删元素后面的元素前移不会影响前面还没遍历的下标。',
+                followup: '「`Arrays.asList(...)` 上调用 `removeIf` 会怎样」——`Arrays.asList` 返回的是 `Arrays` 的内部 `ArrayList`，它**没有实现 `remove`**，`removeIf` 默认实现会走 `iterator().remove()`，于是抛 `UnsupportedOperationException`。这是面试常挖的坑，下一节会专门讲这三种「不可变」的区别。',
+              },
+              {
+                kind: 'code',
+                title: '遍历删除的四种写法：对、错、以及「不报错但错」',
+                lang: 'java',
+                code:
+                  'List<String> list = new ArrayList<>(List.of("a", "bb", "ccc", "dd"));\n\n// ✗ 崩溃：for-each + 集合的 remove\nfor (String s : list) {\n    if (s.length() == 2) list.remove(s);      // ConcurrentModificationException\n}\n\n// ✗ 更阴险：不报错但漏删\nfor (int i = 0; i < list.size(); i++) {\n    if (list.get(i).length() == 2) list.remove(i);\n    // 删掉 "bb" 后 "ccc" 前移到下标 1，i 却推进到 2 → "ccc" 被跳过\n}\n\n// ✓ 写法一：Iterator.remove()\nIterator<String> it = list.iterator();\nwhile (it.hasNext()) {\n    if (it.next().length() == 2) it.remove();  // 内部同步 expectedModCount\n}\n\n// ✓ 写法二：removeIf（最简洁，内部就是写法一）\nlist.removeIf(s -> s.length() == 2);\n\n// ✓ 写法三：倒序下标（只有 List 能用）\nfor (int i = list.size() - 1; i >= 0; i--) {\n    if (list.get(i).length() == 2) list.remove(i);\n}\n\n// ✓ 写法四：批量集合运算\nlist.removeAll(Set.of("bb", "dd"));',
+                caption:
+                  '四种正确写法里，**`removeIf` 是唯一该无脑选的**：一行、语义清楚、内部用迭代器不存在漏删风险。倒序下标在「需要拿下标做别的事」时更方便，但只适用于 `List`，且对 `LinkedList` 是 O(n²)。注意上面第二种错误写法——它不抛异常，是本节最值得记住的「静默 bug」。',
+                notes: [
+                  { line: 'if (it.next().length() == 2) it.remove();', text: '`it.remove()` 删的是**上一次 `next()` 返回的元素**。连续两次 `remove()` 会抛 `IllegalStateException`，因为它不知道要删哪个。' },
+                  { line: 'list.remove(i);  // 正序删除', text: '删完必须 `i--` 才能修正下标。这个「手动 --」就是倒序写法存在的理由。' },
+                  { line: 'list.removeAll(Set.of("bb", "dd"));', text: '`removeAll` 内部会判断「参数集合是否更小」来决定遍历哪一边，所以传 `Set`（O(1) 查找）比传 `List`（O(n) 查找）快得多。' },
+                ],
+              },
+              {
+                kind: 'question',
+                title: '什么是 fail-safe？哪些集合是 fail-safe？遍历线程安全的集合一定能看到最新数据吗？',
+                questionId: 'java-02-Q54',
+                intent:
+                  '两个连环问。第一问考「弱一致性」这个概念，第二问是陷阱——很多人以为线程安全就等于「能读到最新」，实际恰恰相反。',
+                points: [
+                  'fail-safe 指遍历时**不抛异常**，因为它遍历的是一份**快照**或**弱一致性视图**，与容器的实时状态解耦',
+                  '`CopyOnWriteArrayList` / `CopyOnWriteArraySet`：写时复制整个数组，迭代器持有的是**创建时的那个数组引用**',
+                  '`ConcurrentHashMap`：弱一致性迭代器，遍历过程中能看到**部分**修改，既不保证看到全部、也不抛异常',
+                  '结论：**遍历线程安全的集合，不能保证看到最新数据**。COW 系列完全看不到遍历开始后的修改；CHM 只能「大概率看到」',
+                  '代价：COW 每次写都复制整个数组，写操作 O(n) 且内存瞬时翻倍；CHM 无此问题但有弱一致性的语义让步',
+                  '`Collections.synchronizedList` 返回的是**加锁但不 fail-safe** 的包装，遍历时仍需自己 `synchronized (list) {}`，否则照样抛 CME',
+                ],
+                depth:
+                  '为什么 COW 敢用「看不到最新」换性能：它的设计假设是**读远多于写**（典型如监听器列表、黑白名单）。读操作完全无锁、无 volatile 争用，写操作虽然昂贵但次数少。反过来，如果写很频繁，每次写都复制整个数组，性能会崩塌——所以 COW **绝不能**用在写多的场景。这是「用语义换性能」的教科书案例。',
+                followup: '「那要强一致的遍历怎么办」——`ConcurrentHashMap` 改用 `forEach` 之类的聚合方法（在内部加锁点保证一致），或者干脆在外层加锁。语义与性能不能同时拿满，必须选一个。',
+              },
+              {
+                kind: 'diagram',
+                title: 'fail-fast 与 fail-safe：两种「发现修改」的态度',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: 'fail-fast：发现就炸',
+                    tone: 'bad',
+                    items: [
+                      '代表：ArrayList / HashMap / HashSet / TreeMap',
+                      '机制：modCount 与 expectedModCount 比对',
+                      '遍历的是容器本体，不加拷贝',
+                      '检测到修改 → 立刻抛 ConcurrentModificationException',
+                      '优点：零额外内存，bug 暴露得早',
+                      '缺点：多线程下可能漏检（不是安全机制）',
+                    ],
+                  },
+                  right: {
+                    title: 'fail-safe：装作没看见',
+                    tone: 'good',
+                    items: [
+                      '代表：CopyOnWriteArrayList / ConcurrentHashMap',
+                      '机制：快照（COW）或弱一致性遍历（CHM）',
+                      '遍历的是副本或加锁后的弱一致视图',
+                      '检测不到修改 → 永不抛 CME',
+                      '优点：遍历永不中断，读无锁',
+                      '缺点：看不到最新数据；COW 写操作昂贵',
+                    ],
+                  },
+                  caption:
+                    '一句话对照：**fail-fast 用「报错」保护正确性，fail-safe 用「旧数据」保护可用性。** 面试里被问「怎么选」，答案取决于「你能接受读到旧数据吗」——能接受就用 fail-safe，不能接受就必须在业务层加锁并接受串行化。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'Iterator 和 ListIterator 有什么区别？Enumeration 和 Iterator 呢？',
+                questionId: 'java-02-Q56',
+                intent:
+                  '纯记忆题，但要答出「为什么 ListIterator 只给 List」这一层原因，才显得不是背的。',
+                points: [
+                  '`Iterator` 是根接口，适用于所有 `Collection`（Set、Queue 也能用）；只有 `hasNext` / `next` / `remove`',
+                  '`ListIterator` 是 `Iterator` 的子接口，**只由 `List` 提供**，因为「按位置双向走」需要下标概念，而 Set 无序、Queue 只能单向出',
+                  '`ListIterator` 多出：`hasPrevious` / `previous`（双向）、`nextIndex` / `previousIndex`（位置）、`set(e)`（替换刚返回的元素）、`add(e)`（在当前位置插入）',
+                  '`set` 不能连续调用两次（中间必须有一次 `next`/`previous`），否则 `IllegalStateException`',
+                  '`Enumeration` 是 JDK 1.0 的遗留接口，只有 `hasMoreElements` / `nextElement`，**没有 `remove`**，方法名冗长；`Vector` / `Hashtable` 还在用',
+                  '`Collections.enumeration(c)` 可以把任意集合适配成 Enumeration，用于兼容老 API',
+                ],
+                depth:
+                  '为什么 `ListIterator` 不给 `Set`：`add(e)` / `set(e)` 在 Set 上语义诡异——`add` 一个已存在的元素要不要报错？`set` 改的是「顺序上的下一个」还是「值」？而无序集合根本没有「位置」这个概念。接口设计上，把能力限制在语义成立的地方，比「多给几个方法」更负责。',
+              },
+              {
+                kind: 'question',
+                title: '增强 for 循环的底层原理？',
+                questionId: 'java-02-Q57',
+                intent:
+                  '一句话能答完，但追问「数组和集合的实现不一样」才是分水岭。答出「数组用下标、集合用迭代器」就到位了。',
+                points: [
+                  '对 **`Iterable`**（所有 `Collection`）：编译成 `Iterator it = c.iterator(); while (it.hasNext()) { E e = it.next(); ... }`',
+                  '对 **数组**：编译成传统的下标 `for (int i = 0; i < arr.length; i++)`，**不产生迭代器对象**，所以数组的 `for-each` 没有额外开销',
+                  '因此自定义类只要实现 `Iterable<T>`（提供 `iterator()`），就能被 `for-each` 遍历',
+                  '`for-each` 里拿不到下标、也拿不到迭代器引用 → **无法调用 `it.remove()`**，这正是「遍历删除」问题的根源',
+                  '`for-each` 遍历时修改被遍历对象（不只是删除，`add` 也算）都会触发 CME',
+                ],
+                depth:
+                  '进阶：`Iterable` 只要求 `iterator()`，JDK 8 起还提供了 `forEach(Consumer)` 与 `spliterator()` 两个默认方法——所以实现 `Iterable` 的类自动获得「lambda 遍历」和「可被 Stream 支持」两项能力。这也是「实现接口即得能力」的设计范式。',
+              },
+              {
+                kind: 'question',
+                title: 'Comparable 和 Comparator 的区别？集合怎么排序？',
+                questionId: 'java-02-Q58',
+                intent:
+                  '基础题，但要答全「自然序 vs 外部序」「改不了类怎么办」「链式比较器怎么写」三点，才能显出工程经验。',
+                points: [
+                  '`Comparable<T>`：**内建**的自然顺序，实现 `compareTo(T o)`，只能有一种默认排序，需要修改类本身',
+                  '`Comparator<T>`：**外部**策略，实现 `compare(T a, T b)`，可以有无穷多种，无需改类（适合第三方类）',
+                  '`compareTo` / `compare` 的返回值语义：负数 = 前者小、0 = 相等、正数 = 前者大。**不要只返回 -1/1**，正确写法是 `Integer.compare(a, b)` 之类',
+                  '`Collections.sort(list)` / `list.sort(c)`：底层是 **TimSort**（归并 + 插入的混合），稳定排序，O(n log n)，JDK 7 起对「违反比较器契约」的输入会直接抛 `IllegalArgumentException`',
+                  '`TreeSet` / `TreeMap` 依赖比较器维持顺序，构造时传入 `Comparator` 即改变排序规则',
+                  '链式：`Comparator.comparing(P::getName).thenComparingInt(P::getAge).reversed()`；`nullsFirst` / `nullsLast` 处理 null',
+                ],
+                depth:
+                  '为什么「只返回 -1/1」是 bug：TimSort 依赖比较结果的**传递性**与**符号一致性**。如果 `a.compareTo(b)` 与 `b.compareTo(a)` 都返回 -1（用减法溢出时就会发生），排序可能抛 `Comparison method violates its general contract!`。经典翻车写法是 `return a - b;` 比较两个大整数——溢出后符号反了。正确写法 `Integer.compare(a, b)`。',
+                followup: '「`Collections.sort` 和 `Arrays.sort` 一样吗」——对对象数组都是 TimSort；但 `Arrays.sort` 对**基本类型数组**用的是**双轴快排**（DualPivotQuicksort），因为基本类型没有「稳定性」的意义，快排更快更省内存。这是「值语义 vs 引用语义」决定算法选择的典型例子。',
+              },
+              {
+                kind: 'diagram',
+                title: '链式比较器：从「按名字」到「按名字再按年龄倒序」',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['list.sort(cmp)', 'TimSort', 'cmp.compare(a,b)', '结果'],
+                  messages: [
+                    { from: 'list.sort(cmp)', to: 'TimSort', text: '传入数组 + 比较器' },
+                    { from: 'TimSort', to: 'cmp.compare(a,b)', text: '两两比较，先进 comparing(name) 这一级' },
+                    { from: 'cmp.compare(a,b)', to: '结果', text: '名字不等 → 直接返回其符号', reply: true },
+                    { from: 'TimSort', to: 'cmp.compare(a,b)', text: '名字相等 → thenComparingInt(age)' },
+                    { from: 'cmp.compare(a,b)', to: '结果', text: '再比年龄，相等返回 0', reply: true },
+                    { from: 'TimSort', to: 'list.sort(cmp)', text: '归并 run，写入原数组（稳定）', reply: true },
+                  ],
+                  caption:
+                    '链式比较器的语义是「**短路**」：前一级返回非 0 就立刻返回，只有相等才进入下一级。所以比较次数远小于「字段数 × 元素对数」，加字段几乎不增加成本。`reversed()` 作用于**它左边**的整个比较器——写在链末尾就是整体倒序，写在中间只翻转前面那一段，这个优先级常被写错。',
+                },
+              },
+              {
+                kind: 'question',
+                title: 'JDK 9 的不可变集合 List.of()？它和 Collections.unmodifiableList、Arrays.asList 的区别？',
+                questionId: 'java-02-Q59',
+                intent:
+                  '三种「看起来都不可变」的东西，实际差异很大。答出「真的不可变 / 视图 / 定长」这三档，就是满分。',
+                points: [
+                  '`List.of(...)`（`Set.of` / `Map.of`）：**真正不可变**，独立的新集合，任何修改方法都抛 `UnsupportedOperationException`，且**不允许 null**',
+                  '`Collections.unmodifiableList(list)`：**视图（wrapper）**，不复制。你改不了它，但**原 list 改了它会跟着变**；底层仍允许 null',
+                  '`Arrays.asList(arr)`：**定长**列表，底层直接引用原数组（写回原数组），`set` 可以、`add`/`remove` 不行（抛 `UnsupportedOperationException`）；`Arrays.asList(int[])` 会得到 `List<int[]>` 而不是 `List<Integer>`',
+                  '`List.of()` 的额外优势：内部是紧凑的专用实现（小规模甚至用字段直存），**内存比 `ArrayList` 更省**，且是「值语义」的天然载体',
+                  '三者都**不可序列化保证一致**（`List.of` 可序列化但反序列化后是新实例，不保证同一性），也都不是线程安全的「可变集合的替代品」——它们只是不可变，读并发天然安全',
+                  '要「不可变 + 允许 null」→ 用 `Collections.unmodifiableList(new ArrayList<>(src))`（拷贝一层再包）',
+                ],
+                depth:
+                  '为什么 `Arrays.asList` 的 `set` 会写回原数组：因为它内部就是 `Arrays` 的私有静态类 `ArrayList`，字段直接持有你传进来的那个数组引用，没有拷贝。这意味着「拿到这个 List 的人可以改你的数组」——这是它最大的安全陷阱。所以在 API 边界上接收 `List` 参数时，若要防御性拷贝，必须 `new ArrayList<>(list)`，而不是 `Arrays.asList`。',
+                followup: '「`List.of()` 为什么不允许 null」——不可变集合通常被当作常量、Map 的 key、缓存的值，若允许 null 会让 `contains(null)`、`indexOf(null)` 的语义变得含糊；同时 null 会迫使实现增加分支，破坏紧凑存储。JDK 9 的取舍是：**直接禁止，换来实现更简单、语义更明确**。',
+              },
+              {
+                kind: 'compare',
+                title: '三种「不可变列表」的真实差异',
+                head: ['维度', 'List.of()', 'Collections.unmodifiableList()', 'Arrays.asList()'],
+                rows: [
+                  ['是否真的不可变', '是（独立集合）', '视图不可变，底层可变', '定长：不能增删，可 set'],
+                  ['是否拷贝数据', '拷贝（生成新结构）', '**不拷贝**，只是包装', '**不拷贝**，直接引用原数组'],
+                  ['原集合改动是否影响它', '不影响', '**会跟着变**（这是最大坑）', '会变（同一份数组）'],
+                  ['允许 null', '不允许，NPE', '允许（取决于底层）', '允许'],
+                  ['set 是否可用', '不可用', '不可用', '**可用**，写回原数组'],
+                  ['内存开销', '最省（紧凑实现）', '一个包装对象', '一个包装对象'],
+                  ['典型用途', '常量列表、返回值、Map 的值', '对外暴露只读视图', '快速把数组转成 List 传给 API'],
+                ],
+                note:
+                  '记忆抓手：**`List.of` 是「造一个新的」，`unmodifiableList` 是「给旧的戴个手套」，`Arrays.asList` 是「给数组穿了件 List 的马甲」。** 三者对「不可变」的承诺强度依次递减。',
+              },
+              {
+                kind: 'question',
+                title: '泛型通配符 ? extends / ? super 在集合中怎么用（PECS 原则）？List<int> 为什么报错？',
+                questionId: 'java-02-Q60',
+                intent:
+                  '泛型的高频题。核心是 PECS 四个字母，但要能讲出「为什么只能读」的原因（编译器的类型安全推理），才算真懂。',
+                points: [
+                  'PECS = **Producer Extends, Consumer Super**：只从中**读**（生产者）用 `? extends T`，只向里**写**（消费者）用 `? super T`',
+                  '`List<? extends Number>`：可以读成 `Number`，但**不能 add**（除了 null）——因为编译器不知道它实际是 `List<Integer>` 还是 `List<Double>`',
+                  '`List<? super Integer>`：可以 `add(Integer)`（及其子类），但 `get` 只能拿到 `Object`——因为实际可能是 `List<Object>`',
+                  '典型签名：`Collections.copy(List<? super T> dest, List<? extends T> src)`——源是生产者、目标是消费者，一个方法用全了两侧',
+                  '`List<int>` 报错是因为**泛型只支持引用类型**，基本类型必须用包装类 `List<Integer>`，靠自动装箱桥接（代价是装箱开销与缓存外的对象创建）',
+                  '`List<?>` 是「未知类型的列表」，只能读成 `Object`、不能写（除 null），常用于「只关心元素个数/清空」的场景',
+                ],
+                depth:
+                  '为什么 `? extends` 不能 add：假设 `List<? extends Number> list = new ArrayList<Integer>();`，如果能 `add(3.14d)`，那这个 `ArrayList<Integer>` 里就混进了 `Double`，之后有人按 `Integer` 读就会 `ClassCastException`。泛型的类型安全靠**编译期**保证，所以编译器必须在「可能不安全」的地方直接拒绝——这就是通配符「一部分能力被关掉」的根本原因。可写的通配符只有 `? super`，因为它保证「塞进去的东西类型上一定兼容」。',
+              },
+              {
+                kind: 'diagram',
+                title: 'PECS：一个通配符，一半能力被关掉',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '? extends Number（生产者）',
+                    tone: 'good',
+                    items: [
+                      '读：`Number n = list.get(0)` ✓ 允许',
+                      '写：`list.add(1)` ✗ 编译错误',
+                      '唯一能写的是 `add(null)`',
+                      '原因：不知道实际是 List<Integer> 还是 List<Double>',
+                      '典型位置：方法的**入参**（只读取数据）',
+                      '返回类型用它，调用方只能读，安全',
+                    ],
+                  },
+                  right: {
+                    title: '? super Integer（消费者）',
+                    tone: 'warn',
+                    items: [
+                      '读：`Object o = list.get(0)` 只能当 Object',
+                      '写：`list.add(1)` ✓ 允许',
+                      '也能 add Integer 的子类（若有）',
+                      '原因：实际类型至少是 Integer 的父类，塞 Integer 一定安全',
+                      '典型位置：方法的**出参/容器参数**（只写入）',
+                      '`Collections.copy` 的 dest 就是它',
+                    ],
+                  },
+                  caption:
+                    '面试时能背出 `Collections.copy(List<? super T> dest, List<? extends T> src)` 这个签名，基本就不用再解释了——JDK 自己就是 PECS 的最佳范例：**src 只被读（生产者，extends），dest 只被写（消费者，super）**。',
+                },
+              },
+              {
+                kind: 'handwrite',
+                title: '手写一个 fail-fast 的迭代器',
+                lang: 'java',
+                prompt:
+                  '面试官：「`ArrayList` 的迭代器为什么能发现你偷偷改了集合？你手写一个简化版，要求遍历过程中如果集合被外部修改，`next()` 抛 `ConcurrentModificationException`；而用迭代器自己的 `remove()` 则不抛。」这题考的是对 modCount 机制的真实掌握，不是背结论。',
+                signature:
+                  'class MyList<E> implements Iterable<E> {\n    void add(E e);\n    E remove(int index);\n    int size();\n    Iterator<E> iterator();   // 返回内部类 Itr\n}',
+                plan: [
+                  {
+                    title: '先在容器里放一个「修改计数器」',
+                    detail:
+                      '`int modCount` 每次结构性修改（`add` / `remove`）都递增。注意 `set`（覆盖某位置）不算结构修改，不递增——这个区分是评分点。',
+                  },
+                  {
+                    title: '迭代器构造时拍下快照',
+                    detail:
+                      '内部类 `Itr` 有 `expectedModCount = modCount`。它记的是「我出生那一刻容器改过几次」，之后容器再改，两个数就分叉。',
+                  },
+                  {
+                    title: 'next() 开头先对账',
+                    detail:
+                      '`checkForComodification()` 比较两个计数，不等就抛异常。**放在 `next()` 开头而不是 `hasNext()`**——因为 `next()` 才真正交付数据，`hasNext()` 只是比下标。',
+                  },
+                  {
+                    title: 'Itr.remove() 删完自己同步计数',
+                    detail:
+                      '删掉 `lastRet` 位置的元素，然后 `expectedModCount = modCount`。这一步是「用迭代器删为什么不抛」的全部答案。删完还要把 `cursor` 回退一位（因为后面元素前移了），并把 `lastRet` 置 -1（防止连续删）。',
+                  },
+                ],
+                skeleton:
+                  'class MyList<E> implements Iterable<E> {\n    private Object[] a = new Object[8];\n    private int size;\n    int modCount;                       // 结构修改计数\n\n    public void add(E e) {\n        if (size == a.length) a = Arrays.copyOf(a, size << 1);\n        a[size++] = e;\n        modCount++;                     // 结构性修改\n    }\n\n    @SuppressWarnings("unchecked")\n    public E remove(int i) {\n        E old = (E) a[i];\n        // TODO: 前移后续元素、size--、末位置 null、modCount++\n        return old;\n    }\n\n    public int size() { return size; }\n    public Iterator<E> iterator() { return new Itr(); }\n\n    private class Itr implements Iterator<E> {\n        int cursor;                     // 下一个要返回的下标\n        int lastRet = -1;               // 上一次返回的下标\n        int expectedModCount = modCount;\n\n        public boolean hasNext() { return cursor != size; }\n\n        public E next() {\n            // TODO: 先 checkForComodification()，再取 a[cursor]，更新 cursor 与 lastRet\n            return null;\n        }\n\n        public void remove() {\n            // TODO: lastRet < 0 抛 IllegalStateException；调用 MyList.this.remove(lastRet)；\n            //       同步 expectedModCount；cursor--；lastRet = -1\n        }\n\n        final void checkForComodification() {\n            if (modCount != expectedModCount)\n                throw new ConcurrentModificationException();\n        }\n    }\n}',
+                solution:
+                  'class MyList<E> implements Iterable<E> {\n    private Object[] a = new Object[8];\n    private int size;\n    int modCount;\n\n    public void add(E e) {\n        if (size == a.length) a = Arrays.copyOf(a, size << 1);\n        a[size++] = e;\n        modCount++;\n    }\n\n    @SuppressWarnings("unchecked")\n    public E remove(int i) {\n        E old = (E) a[i];\n        int moved = size - i - 1;\n        if (moved > 0) System.arraycopy(a, i + 1, a, i, moved);\n        a[--size] = null;                // 帮助 GC\n        modCount++;                      // 结构变了\n        return old;\n    }\n\n    public int size() { return size; }\n    public Iterator<E> iterator() { return new Itr(); }\n\n    private class Itr implements Iterator<E> {\n        int cursor;                      // 下一个要返回的下标\n        int lastRet = -1;                // 上一次返回的下标,-1 表示没有\n        int expectedModCount = modCount; // 开局快照\n\n        public boolean hasNext() { return cursor != size; }\n\n        @SuppressWarnings("unchecked")\n        public E next() {\n            checkForComodification();            // ① 先对账\n            if (cursor >= size) throw new NoSuchElementException();\n            E e = (E) a[cursor];\n            lastRet = cursor++;                  // ② 记录并前进\n            return e;\n        }\n\n        public void remove() {\n            if (lastRet < 0) throw new IllegalStateException();\n            checkForComodification();\n            MyList.this.remove(lastRet);          // ③ 删容器\n            expectedModCount = modCount;          // ④ 同步,所以不抛\n            cursor = lastRet;                     // ⑤ 后面元素前移,回退一位\n            lastRet = -1;                         // ⑥ 禁止连续删\n        }\n\n        final void checkForComodification() {\n            if (modCount != expectedModCount)\n                throw new ConcurrentModificationException();\n        }\n    }\n}',
+                complexity:
+                  '`next()` O(1)（一次 int 比较 + 一次数组访问）· `Itr.remove()` O(n)（数组元素前移）· 额外空间 O(1)（三个 int 字段）。',
+                traps: [
+                  '把 `checkForComodification()` 放进 `hasNext()`：能工作，但会让「本该在 `next()` 抛」的异常提前到 `hasNext()`，与 JDK 行为不一致，也不好解释',
+                  '`Itr.remove()` 里忘了 `cursor--`：删完后面元素前移，光标不回退会跳过下一个元素',
+                  '`Itr.remove()` 里忘了同步 `expectedModCount`：于是自己的删除也会被自己判为非法修改，立刻抛异常',
+                  '连续两次 `remove()` 不重置 `lastRet`：第二次会删错元素（JDK 的做法是抛 `IllegalStateException`）',
+                  '`remove(int i)` 里忘了 `a[--size] = null`：被删对象的引用还留在数组里，导致内存泄漏',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'Java 集合的选型总结 / 最佳实践？',
+                questionId: 'java-02-Q61',
+                intent:
+                  '开放题，考的是「有没有框架」。别报流水账地背「ArrayList 查快增删慢」，按维度给决策树才显水平：先说清四个问题，再落到具体类。',
+                points: [
+                  '**① 要不要去重**：要 → `Set` 家族；不要 → `List` / `Queue`',
+                  '**② 要不要顺序**：不要 → `HashSet` / `HashMap`；要插入序 → `LinkedHashSet` / `LinkedHashMap`；要排序或范围查询 → `TreeSet` / `TreeMap`',
+                  '**③ 读写比例**：读多写少且 `List` → `ArrayList`；写多且频繁头插 → `ArrayDeque`（不是 `LinkedList`）；读极多写极少且有并发 → `CopyOnWriteArrayList`',
+                  '**④ 是否跨线程**：单线程 → 普通容器（**别用 `Vector` / `Hashtable`**）；高并发键值 → `ConcurrentHashMap`；生产者消费者 → `BlockingQueue`；并发有序 → `ConcurrentSkipListMap`',
+                  '**⑤ 初始化容量**：已知规模时给 `ArrayList` / `HashMap` 指定容量（`HashMap` 要按 `(int)(n / 0.75f) + 1` 算，避免扩容与 rehash）',
+                  '其他：枚举集合用 `EnumSet` / `EnumMap`（位向量，极省内存）；只需要「键是否存在」用 `Set` 而不是 `Map<K, Boolean>`',
+                ],
+                depth:
+                  '最能体现水平的一点：**`LinkedList` 几乎没有正当理由**。它只有在「持有中间节点引用、需要在其前后 O(1) 插入」这种极窄场景才赢，而业务代码几乎不会这么用；`get(i)` 是 O(n)，做队列又输给 `ArrayDeque`。JDK 官方在 `Deque` 的文档里都直接推荐 `ArrayDeque`。敢说「我基本不用 LinkedList，并说清为什么」，比背十条选型规则更有说服力。',
+                followup: '「`HashMap` 的初始容量为什么按 `n/0.75+1` 算」——因为 `HashMap` 的阈值是 `capacity * loadFactor`，如果直接传 `n`，在元素数达到 `n` 之前就会触发扩容。`tableSizeFor` 还会向上取到 2 的幂，所以实际值可能比算出来的略大，但这样能保证「装 n 个元素不扩容」。',
+              },
+              {
+                kind: 'diagram',
+                title: '选型决策矩阵：按场景直接落类',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['单线程首选', '并发场景替代', '常见误用'],
+                  rows: [
+                    ['按序列表', '`ArrayList`', '`CopyOnWriteArrayList`（读极多）/ 加锁', '用 `LinkedList` 当队列'],
+                    ['去重', '`HashSet`', '`ConcurrentHashMap.newKeySet()`', '用 `List.contains` 做去重（O(n²)）'],
+                    ['保插入序的去重', '`LinkedHashSet`', '加锁或 `Collections.synchronizedSet`', '指望 `HashSet` 的遍历顺序稳定'],
+                    ['排序 / 范围查询', '`TreeSet` / `TreeMap`', '`ConcurrentSkipListMap`', '用 `TreeSet` 装 `BigDecimal`（compareTo 与 equals 不一致）'],
+                    ['栈', '`ArrayDeque`（`push`/`pop`）', '加锁', '用遗留的 `Stack`（继承 Vector，全同步）'],
+                    ['队列 / 双端队列', '`ArrayDeque`', '`LinkedBlockingDeque`', '用 `LinkedList`（缓存不友好）'],
+                    ['优先级队列', '`PriorityQueue`', '`PriorityBlockingQueue`', '用 `iterator()` 期望有序遍历'],
+                    ['生产者消费者', '—（单线程无此场景）', '`ArrayBlockingQueue` / `LinkedBlockingQueue`', '自己写 `wait`/`notify`，或用无界队列导致 OOM'],
+                    ['键值映射', '`HashMap`', '`ConcurrentHashMap`', '用 `Hashtable`（全表锁）/ `Collections.synchronizedMap`'],
+                    ['枚举作 key', '`EnumMap` / `EnumSet`', '加锁', '用 `HashMap<Enum, ?>`（浪费且慢）'],
+                  ],
+                  caption:
+                    '这张表可以当速查卡。注意第三列的「常见误用」——面试真正的区分点往往不在「你会选哪个」，而在「你知道哪个是坑」。尤其是「用 `LinkedList` 当队列」和「用无界队列做生产者消费者」，都是线上事故的常见来源。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: '把整门课收成一张「结构 → 能力 → 代价」的账',
+                body: [
+                  '十七节课下来，所有集合的知识都可以归到一个三元组：**它用什么结构，因此获得什么能力，因此付出什么代价**。面试时只要能从这三句展开，任何选型题都不会卡住。',
+                ],
+                steps: [
+                  {
+                    title: '数组 → 随机访问 O(1)，代价是增删要搬数据',
+                    detail:
+                      '`ArrayList`、`ArrayDeque`、`PriorityQueue`（堆也是数组）、`HashMap` 的桶数组都属于这一族。数组连续内存带来的缓存友好，是它们在绝大多数场景胜过链表的根本原因。',
+                  },
+                  {
+                    title: '链表 → 改指针 O(1)，代价是定位 O(n) 与缓存不友好',
+                    detail:
+                      '`LinkedList`、`LinkedHashMap` 的双向链表、`LinkedBlockingQueue`。注意 `LinkedHashMap` 是**数组 + 链表**的混合体，哈希定位仍走数组，链表只负责顺序——所以它没有链表的性能缺点。',
+                  },
+                  {
+                    title: '哈希表 → 平均 O(1)，代价是无序 + 依赖 hashCode 质量 + 扩容抖动',
+                    detail:
+                      '`HashMap` / `HashSet` / `ConcurrentHashMap`。哈希函数质量差会导致碰撞退化成链表，所以 JDK 8 加了「链表长度 ≥ 8 且容量 ≥ 64 时转红黑树」的兜底。',
+                  },
+                  {
+                    title: '红黑树 → 有序 + O(log n)，代价是常数大、要求可比较',
+                    detail:
+                      '`TreeMap` / `TreeSet`。它能提供哈希表给不了的 `floor` / `ceiling` / `subMap` 等范围能力，这也是它存在的唯一理由。',
+                  },
+                  {
+                    title: '堆 → 极值 O(1) 可见、插入删除 O(log n)，代价是只有「局部有序」',
+                    detail:
+                      '`PriorityQueue` / `PriorityBlockingQueue` / `DelayQueue`。堆是最省事的「要最值不要全序」的方案，Top K 问题全靠它。',
+                  },
+                ],
+                takeaway:
+                  '最后一句话：**没有最好的集合，只有匹配场景的结构。** 你能说清「这个结构给了我什么、收了我多少」，就已经超过大多数背结论的候选人了。',
+              },
+            ],
+            outline: [
+              'fail-fast 靠 modCount 与 expectedModCount 比对，仅用于暴露单线程 bug，不是线程安全机制',
+              '迭代器自己的 remove 会同步 expectedModCount，所以「用迭代器删」安全，「用集合删」抛 CME',
+              'fail-safe 遍历的是快照或弱一致视图，永不抛异常，但看不到最新数据',
+              'for-each 对集合用 Iterator、对数组用下标；Comparable 是自然序，Comparator 是外部策略',
+              'List.of 真不可变、unmodifiableList 是视图、Arrays.asList 是定长马甲；PECS：生产者 extends、消费者 super',
+            ],
+            pitfalls: [
+              '把 fail-fast 当成线程安全机制：它只是尽力而为的检测，多线程下完全可能漏检',
+              '正序 for 循环按下标删除元素：不报错但会漏删，比抛异常更危险',
+              '写 compareTo 时用 `return a - b`：大整数相减溢出会翻转符号，导致排序抛违反契约异常',
+            ],
+          },
+        },
+      ],
+    },
+  ],
+}

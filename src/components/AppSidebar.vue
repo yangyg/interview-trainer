@@ -1,30 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import {
-  BookOpenIcon,
-  CalculatorIcon,
-  FileTextIcon,
-  GraduationCapIcon,
-  HomeIcon,
-  LayersIcon,
-  NotebookIcon,
-  TimerIcon,
-} from '@lucide/vue'
+import { FileTextIcon, GraduationCapIcon } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { MAIN_NAV, isNavActive } from '@/lib/nav'
 import { useDataStore } from '@/stores/data'
 
 const route = useRoute()
 const dataStore = useDataStore()
-
-const mainNav = [
-  { icon: HomeIcon, label: '首页', to: { name: 'home' } },
-  { icon: BookOpenIcon, label: '题库浏览', to: { name: 'browse' } },
-  { icon: LayersIcon, label: '背题卡片', to: { name: 'flashcards' } },
-  { icon: TimerIcon, label: '模拟面试', to: { name: 'quiz' } },
-  { icon: CalculatorIcon, label: '学习统计', to: { name: 'stats' } },
-  { icon: NotebookIcon, label: '错题本', to: { name: 'wrongbook' } },
-]
 
 const docNav = computed(() =>
   (dataStore.index?.docs ?? []).map((d) => ({
@@ -33,9 +16,9 @@ const docNav = computed(() =>
   })),
 )
 
+/** 文档路由共用 name 'doc',需进一步比对 params.id 才能区分当前项 */
 function isActive(to: { name: string; params?: { id?: string } }): boolean {
   if (route.name !== to.name) return false
-  // 文档路由共用 name 'doc',需进一步比对 params.id 才能区分当前项
   if (to.params?.id !== undefined) return route.params.id === to.params.id
   return true
 }
@@ -55,12 +38,12 @@ function isActive(to: { name: string; params?: { id?: string } }): boolean {
 
     <nav class="flex flex-col gap-0.5">
       <RouterLink
-        v-for="item in mainNav"
-        :key="item.label"
+        v-for="item in MAIN_NAV"
+        :key="item.key"
         :to="item.to"
         :class="cn(
           'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
-          isActive(item.to) && 'bg-accent font-medium text-accent-foreground',
+          isNavActive(route, item) && 'bg-accent font-medium text-accent-foreground',
         )"
       >
         <component :is="item.icon" class="size-4" />

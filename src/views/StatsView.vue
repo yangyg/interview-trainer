@@ -19,11 +19,13 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { useTheme } from '@/composables/useTheme'
+import { useCourseStore } from '@/stores/course'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
 
 const dataStore = useDataStore()
 const progress = useProgressStore()
+const courseStore = useCourseStore()
 const router = useRouter()
 const { isDark } = useTheme()
 
@@ -180,6 +182,8 @@ function onImportFile(e: Event) {
 
 function resetProgress() {
   progress.reset()
+  // 课程完成度是另一份数据(course-v1);只清 SRS 会出现「课时已完成但题都没标过」的矛盾状态
+  courseStore.resetAll()
   toast.success('学习进度已重置')
 }
 </script>
@@ -347,7 +351,7 @@ function resetProgress() {
             <AlertDialogHeader>
               <AlertDialogTitle>确定重置全部学习进度?</AlertDialogTitle>
               <AlertDialogDescription>
-                所有「掌握 / 模糊 / 不会」标记与学习统计将被清空且不可恢复。如需保留,请先导出备份。
+                所有「掌握 / 模糊 / 不会」标记、学习统计与课程课时完成记录将被清空且不可恢复。如需保留,请先导出备份。
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
