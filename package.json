@@ -5,16 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "npm run courses",
     "build": "vue-tsc -b && vite build",
+    "prebuild": "npm run courses",
     "preview": "vite preview",
-    "parse": "node scripts/parse.mjs"
+    "parse": "node scripts/parse.mjs",
+    "courses": "node scripts/build-courses.mjs",
+    "courses:check": "node scripts/build-courses.mjs --check"
   },
   "dependencies": {
     "@lucide/vue": "^1.61.0",
     "@vueuse/core": "^15.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cn": "^0.5.0",
     "dayjs": "^1.11.23",
     "dompurify": "^3.4.17",
     "echarts": "^6.1.0",
