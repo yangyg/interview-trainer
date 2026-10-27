@@ -20,7 +20,7 @@
   "stageCount": 4,
   "lessonCount": 7,
   "uniqueQuestionCount": 106,
-  "estimatedMinutes": 349,
+  "estimatedMinutes": 352,
   "stages": [
     {
       "id": "scheduler",
@@ -2582,6 +2582,54 @@
                 "note": "**判据:`fmt` 用在「日志、错误信息、一次性输出」;`strconv` 用在「热点路径、序列化、协议编码」。** **两者可读性差距不大,但性能差距是数量级。**"
               },
               {
+                "kind": "compare",
+                "title": "`sort.Slice` 与 `slices.Sort`:同一件事,一层反射的差距",
+                "body": [
+                  "这两个函数排的都是切片,区别不在用法而在**编译器知道多少**。`sort.Slice` 是 `interface{}` 时代的产物:它接收一个 `less(i, j int) bool`,自己并不知道元素是什么类型,交换元素只能靠 `reflect.Swapper` 现场造一个交换函数——[[每一次交换都走一次反射加两次接口调用]]。",
+                  "`slices.Sort` 是 Go 1.21 引入的泛型版本:元素类型在编译期就定死了,排序过程由 `cmp.Ordered` 约束下的普通比较驱动,没有反射、没有接口装箱。所以官方在新代码里一律推荐后者,**不是因为「新」,而是因为少了一层运行期开销**。",
+                  "稳定性是另一半问题,而且两者默认都**不稳定**。稳定排序的代价是额外内存:它不能随意远距离交换,只能相邻搬移,于是既要更多移动、又要一块临时缓冲。所以只有当你「先按次关键字排、再按主关键字排」这种两趟排序时,才需要 `slices.SortStableFunc` / `sort.SliceStable`。"
+                ],
+                "head": [
+                  "维度",
+                  "`sort.Slice`",
+                  "`slices.Sort`"
+                ],
+                "rows": [
+                  [
+                    "引入版本",
+                    "Go 1.8(随 `reflect.Swapper` 一起)",
+                    "Go 1.21(泛型)"
+                  ],
+                  [
+                    "元素类型",
+                    "`interface{}`,运行期才知",
+                    "编译期确定(`cmp.Ordered`)"
+                  ],
+                  [
+                    "比较函数",
+                    "`less(i, j int) bool`,靠下标",
+                    "`Sequence` 元素本身,直接给值"
+                  ],
+                  [
+                    "交换方式",
+                    "`reflect.Swapper` 造交换函数,反射加接口调用",
+                    "直接赋值,可内联"
+                  ],
+                  [
+                    "是否稳定",
+                    "否(`sort.SliceStable` 才是)",
+                    "否(`slices.SortStableFunc` 才是)"
+                  ],
+                  [
+                    "什么时候还用旧的",
+                    "元素不是有序类型、要自定义比较,且不想引泛型约束",
+                    "新代码默认用它"
+                  ]
+                ],
+                "note": "「稳定性」的准确含义:相等元素在排序后保持原有相对顺序。它只在**多关键字**场景里才有意义——先按时间排一次,再用稳定排序按状态排一次,时间序才不会被破坏;如果不稳定,第二步会把第一步的结果打乱。",
+                "caption": "面试里这道题的分水岭是能不能说出「为什么后者快」:答「泛型更快」是背的,答「`sort.Slice` 每次交换要过一遍 `reflect.Swapper`,而泛型版本编译期就把类型定死了,可以直接赋值」才是懂了。再补一句「两者都不稳定,要稳定得显式选 Stable 版本」,这题就完整了。"
+              },
+              {
                 "kind": "question",
                 "title": "Q90 · 反射的原理是什么？为什么慢？什么时候必须用？",
                 "questionId": "go-index-Q90",
@@ -2659,7 +2707,7 @@
             "go-index-Q101",
             "go-index-Q102"
           ],
-          "estimatedMinutes": 49
+          "estimatedMinutes": 52
         },
         {
           "id": "go-perf",

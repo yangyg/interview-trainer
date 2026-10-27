@@ -20,7 +20,25 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { COURSES } from './curriculum/index.mjs'
-import { PSEUDO_CHAPTER, ID_RE, LIMITS, BLOCK_KINDS, DIAGRAM_TYPES } from './curriculum/schema.mjs'
+import {
+  PSEUDO_CHAPTER,
+  ID_RE,
+  LIMITS,
+  BLOCK_KINDS,
+  BLOCK_FIELDS,
+  DIAGRAM_TYPES,
+  EXPLORE_DIRECTIONS,
+  EXPLORE_BRANCH_MAX,
+} from './curriculum/schema.mjs'
+
+/** explore 分支必填字段的中文名,报错时直接告诉作者该写什么 */
+const EXPLORE_FIELD_LABEL = {
+  related: '关联知识',
+  basis: '联系依据',
+  shared: '相似之处',
+  diff: '不同之处',
+  value: '探索价值',
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -81,6 +99,15 @@ function countSectionChars(sections = []) {
     add(s.intent)
     add(s.depth)
     add(s.followup)
+    // explore:当前知识 + 每个分支的四问
+    add(s.from)
+    for (const b of s.branches ?? []) {
+      add(b.related)
+      add(b.basis)
+      add(b.shared)
+      add(b.diff)
+      add(b.value)
+    }
     // handwrite:手写题的全部文字都算,包括骨架与参考实现
     add(s.prompt)
     add(s.signature)
@@ -164,6 +191,18 @@ function validateSections(sections, ids, where) {
     }
     kinds.add(s.kind)
     if (!s.title || !String(s.title).trim()) fail(`${at}: 缺少 title`)
+
+    // 字段白名单:写错的字段名会被渲染器静默忽略,页面看着正常、内容其实没了
+    const allowed = BLOCK_FIELDS[s.kind]
+    if (allowed) {
+      const unknown = Object.keys(s).filter((f) => !allowed.includes(f))
+      if (unknown.length) {
+        fail(
+          `${at}(${s.kind}): 未知字段 ${unknown.join(', ')}——渲染器不会读它,内容会静默消失。` +
+            `允许的字段:${allowed.join(' / ')}`,
+        )
+      }
+    }
 
     // 单一区块下限定成「至少说了点什么」,防止标题党
     const own = countSectionChars([s])
@@ -258,6 +297,43 @@ function validateSections(sections, ids, where) {
     }
     if (s.kind === 'code' && (!s.code || !String(s.code).trim())) {
       fail(`${at}: code 区块缺少代码`)
+    }
+    // 版本与验证状态:字段存在才算数,不写就不渲染 —— 但不能写错类型静默失效
+    if (s.kind === 'code') {
+      if (s.version !== undefined && typeof s.version !== 'string') {
+        fail(`${at}: code.version 应为字符串(如 'MySQL 8.0' / 'JDK 21')`)
+      }
+      if (s.env !== undefined && typeof s.env !== 'string') {
+        fail(`${at}: code.env 应为字符串`)
+      }
+      if (s.verified !== undefined && typeof s.verified !== 'boolean') {
+        fail(`${at}: code.verified 应为布尔值(true 表示实际跑过)`)
+      }
+    }
+    // explore:《规范》6.3 的六问缺一项就不算建立了联系,只列名字的分支要拦掉
+    if (s.kind === 'explore') {
+      if (!s.from || !String(s.from).trim()) {
+        fail(`${at}: explore 缺少 from(当前知识:我们刚学的是什么)`)
+      }
+      const branches = s.branches ?? []
+      if (!branches.length) fail(`${at}: explore 至少要 1 个分支`)
+      if (branches.length > EXPLORE_BRANCH_MAX) {
+        fail(`${at}: explore 有 ${branches.length} 个分支,最多 ${EXPLORE_BRANCH_MAX} 个(多了就是另开一课)`)
+      }
+      for (const [bi, b] of branches.entries()) {
+        if (!EXPLORE_DIRECTIONS.has(b?.direction)) {
+          fail(
+            `${at}: 第 ${bi + 1} 个分支方向 ${JSON.stringify(b?.direction)} 不合法` +
+              `(可选 ${[...EXPLORE_DIRECTIONS.keys()].join(' / ')})`,
+          )
+          continue
+        }
+        for (const key of ['related', 'basis', 'shared', 'diff', 'value']) {
+          if (!b[key] || !String(b[key]).trim()) {
+            fail(`${at}: 第 ${bi + 1} 个分支缺少 ${key}(${EXPLORE_FIELD_LABEL[key]})`)
+          }
+        }
+      }
     }
     // analogy 的正文在 text 里(不是 body),mapping 用 real/tech —— 写错会静默白屏,这里卡住
     if (s.kind === 'analogy') {

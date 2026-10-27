@@ -220,8 +220,14 @@ onUnmounted(stopSeq)
     </div>
 
     <!-- matrix:二维分类对照 -->
-    <div v-else-if="diagram.type === 'matrix'" class="overflow-x-auto">
-      <table class="w-full border-collapse text-left text-xs">
+    <div v-else-if="diagram.type === 'matrix'">
+      <!-- 每列给一个下限宽度:否则手机上四列表会被压成一字一行,右列直接被裁掉。
+           桌面端 w-full 仍会撑满,不影响原有版式。 -->
+      <div class="overflow-x-auto">
+      <table
+        class="w-full border-collapse text-left text-xs"
+        :style="{ minWidth: `${(diagram.cols.length + 1) * 104}px` }"
+      >
         <thead>
           <tr>
             <th class="border-b border-border/70 px-2 py-1.5 font-medium text-muted-foreground">
@@ -244,13 +250,16 @@ onUnmounted(stopSeq)
             <td
               v-for="(cell, ci) in row.slice(1)"
               :key="ci"
-              class="border-b border-border/40 px-2 py-1.5 text-center text-muted-foreground"
+              class="border-b border-border/40 px-2 py-1.5 text-center align-top text-muted-foreground"
             >
               <RichText :text="cell" />
             </td>
           </tr>
         </tbody>
       </table>
+      </div>
+      <!-- 手机上表格会横向滚动,不给提示的话右半边容易被当成「没有内容」 -->
+      <p class="mt-1.5 text-[10px] text-muted-foreground sm:hidden">← 左右滑动看完整表格 →</p>
     </div>
 
     <!-- memory:内存区域 + 槽位 + 引用指向 -->

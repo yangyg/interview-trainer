@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import EmptyState from '@/components/EmptyState.vue'
 import LessonContent from '@/components/course/LessonContent.vue'
+import LessonQuestionIndex from '@/components/course/LessonQuestionIndex.vue'
 import LessonRunner from '@/components/course/LessonRunner.vue'
 import LessonToc from '@/components/course/LessonToc.vue'
 import { useCourseStore } from '@/stores/course'
@@ -28,6 +29,11 @@ const courseId = computed(() => String(route.params.courseId ?? ''))
 const lessonId = computed(() => String(route.params.lessonId ?? ''))
 
 const course = computed(() => courseStore.courseOf(courseId.value))
+
+/** 正文里被「真题拆解」讲到的题;清单据此标出「正文精讲」 */
+const focusQuestionIds = computed(() =>
+  (lesson.value?.content.sections ?? []).filter((s) => s.kind === 'question').map((s) => s.questionId),
+)
 const found = computed(() =>
   courseStore.flatLessons(courseId.value).find((x) => x.lesson.id === lessonId.value),
 )
@@ -188,6 +194,8 @@ function go(id: string) {
       <Card>
         <CardContent class="pt-5">
           <LessonContent :content="lesson.content" />
+          <!-- 讲义 → 题库的对应关系:正文只精讲其中一两道,其余靠这张清单自查 -->
+          <LessonQuestionIndex :ids="lesson.questionIds" :focus="focusQuestionIds" />
         </CardContent>
       </Card>
 

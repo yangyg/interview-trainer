@@ -5,6 +5,7 @@ import {
   BookOpenIcon,
   ChevronRightIcon,
   CodeIcon,
+  CompassIcon,
   LightbulbIcon,
   ListChecksIcon,
   MessageSquareQuoteIcon,
@@ -12,6 +13,7 @@ import {
   SparklesIcon,
   TableIcon,
   WorkflowIcon,
+  XIcon,
 } from '@lucide/vue'
 import LessonDiagram from '@/components/course/LessonDiagram.vue'
 import HandwriteBlock from '@/components/course/HandwriteBlock.vue'
@@ -45,7 +47,38 @@ const HEAD_ICON = {
   diagram: NetworkIcon,
   compare: TableIcon,
   code: CodeIcon,
+  explore: CompassIcon,
 } as const
+
+/**
+ * 发散探索的展示约定,与 scripts/curriculum/schema.mjs 的 EXPLORE_DIRECTIONS 保持一致
+ * (脚本侧负责构建期校验,这里只负责显示;两处都改才是加方向)
+ */
+const EXPLORE_LABEL: Record<string, string> = {
+  down: '向下深入',
+  lateral: '横向比较',
+  cross: '跨领域迁移',
+  outward: '向外延伸',
+  reverse: '反向探索',
+}
+
+/** 《规范》6.3 的六问去掉「当前知识」(块级 from)后的四行 */
+const EXPLORE_ROWS = [
+  { key: 'basis', label: '联系依据' },
+  { key: 'shared', label: '相似之处' },
+  { key: 'diff', label: '不同之处' },
+  { key: 'value', label: '探索价值' },
+] as const
+
+/**
+ * 版本徽标:版本串常常自带语言名('Python 3.11+'、'Java 21'),而左边已经有 lang 标签,
+ * 直接并排就成了「PYTHON Python 3.11+」。重复的前缀去掉,产品名不同的('MySQL 8.0' + sql)保留。
+ */
+function versionLabel(lang: string, version: string) {
+  const m = /^([A-Za-z+#.]+)\s*(.+)$/.exec(version)
+  if (m && lang && m[1].toLowerCase() === lang.toLowerCase()) return m[2]
+  return version
+}
 </script>
 
 <template>
@@ -106,6 +139,12 @@ const HEAD_ICON = {
             <span class="min-w-0"><RichText :text="p" /></span>
           </li>
         </ul>
+        <p
+          v-if="block.caption"
+          class="rounded-lg bg-muted/50 px-3.5 py-2.5 text-sm leading-6 text-foreground/85"
+        >
+          <RichText :text="block.caption" />
+        </p>
       </section>
 
       <!-- 为什么 -->
@@ -116,6 +155,55 @@ const HEAD_ICON = {
         </h3>
         <p v-for="(p, i) in block.body" :key="i" class="text-[15px] leading-7 text-foreground/85">
           <RichText :text="p" />
+        </p>
+        <!-- 现场:报错、执行计划、错误输出。读者得先看见,才谈得上猜 -->
+        <div v-if="block.code" class="overflow-hidden rounded-lg border bg-muted/40">
+          <div class="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
+            <span class="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              {{ block.code.language }}
+            </span>
+            <span
+              v-if="block.code.caption"
+              class="min-w-0 truncate text-[11px] text-muted-foreground"
+            >
+              <RichText :text="block.code.caption" />
+            </span>
+          </div>
+          <pre
+            class="overflow-x-auto p-3 font-mono text-xs leading-5 text-foreground/90"
+          ><code>{{ block.code.code }}</code></pre>
+        </div>
+        <!-- 错解:先让读者的猜测被否掉,后面的答案才有人要听 -->
+        <div v-if="block.wrong?.length" class="rounded-lg border border-dashed px-3.5 py-2.5">
+          <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            先排除几种容易被想到的原因
+          </p>
+          <ul class="mt-1.5 space-y-1.5">
+            <li
+              v-for="(w, i) in block.wrong"
+              :key="i"
+              class="flex gap-2 text-sm leading-6 text-foreground/85"
+            >
+              <XIcon class="mt-1 size-3.5 shrink-0 text-muted-foreground/60" />
+              <span class="min-w-0"><RichText :text="w" /></span>
+            </li>
+          </ul>
+        </div>
+        <!-- 答案:钩子的落点,缺了它前面就只剩一个悬念 -->
+        <div
+          v-if="block.real"
+          class="rounded-lg border-l-[3px] border-primary/60 bg-primary/[0.05] py-2.5 pl-3.5 pr-3"
+        >
+          <p class="text-[11px] font-medium uppercase tracking-wider text-primary">真正的原因</p>
+          <p class="mt-1 text-[15px] leading-7 text-foreground/90">
+            <RichText :text="block.real" />
+          </p>
+        </div>
+        <p
+          v-if="block.reveal"
+          class="border-l-2 border-border pl-3 text-sm leading-6 text-muted-foreground"
+        >
+          <RichText :text="block.reveal" />
         </p>
         <div v-if="block.without" class="rounded-lg border border-dashed px-3.5 py-2.5">
           <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -164,6 +252,12 @@ const HEAD_ICON = {
         >
           <RichText :text="block.takeaway" />
         </p>
+        <p
+          v-if="block.caption"
+          class="rounded-lg bg-muted/50 px-3.5 py-2.5 text-sm leading-6 text-foreground/85"
+        >
+          <RichText :text="block.caption" />
+        </p>
       </section>
 
       <!-- 类比 -->
@@ -172,6 +266,13 @@ const HEAD_ICON = {
           <component :is="HEAD_ICON.analogy" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h3>
+        <p
+          v-for="(p, i) in block.body"
+          :key="`ab${i}`"
+          class="text-[15px] leading-7 text-foreground/85"
+        >
+          <RichText :text="p" />
+        </p>
         <div class="rounded-xl border bg-muted/35 p-4">
           <p class="text-[15px] leading-7 text-foreground/85"><RichText :text="block.text" /></p>
           <div
@@ -280,10 +381,30 @@ const HEAD_ICON = {
           <component :is="HEAD_ICON.code" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h3>
+        <p
+          v-for="(p, i) in block.body"
+          :key="`cb${i}`"
+          class="text-[15px] leading-7 text-foreground/85"
+        >
+          <RichText :text="p" />
+        </p>
         <div class="overflow-hidden rounded-lg border bg-muted/40">
           <div class="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
             <span class="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
               {{ block.lang }}
+            </span>
+            <!-- 版本/环境由数据渲染,不是作者记得写的一句话:漏了就一眼看得出来 -->
+            <span
+              v-if="block.version"
+              class="shrink-0 rounded border border-border/70 bg-background px-1 py-px font-mono text-[10px] text-muted-foreground"
+            >
+              {{ versionLabel(block.lang, block.version) }}
+            </span>
+            <span
+              v-if="block.verified === false"
+              class="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400"
+            >
+              未验证
             </span>
             <span v-if="block.caption" class="min-w-0 truncate text-[11px] text-muted-foreground">
               <RichText :text="block.caption" />
@@ -293,6 +414,9 @@ const HEAD_ICON = {
             class="overflow-x-auto p-3 font-mono text-xs leading-6 text-foreground/90"
           ><code>{{ block.code }}</code></pre>
         </div>
+        <p v-if="block.env" class="text-[11px] leading-5 text-muted-foreground">
+          运行环境:<RichText :text="block.env" />
+        </p>
         <ul v-if="block.notes?.length" class="space-y-1.5">
           <li
             v-for="(n, i) in block.notes"
@@ -303,6 +427,52 @@ const HEAD_ICON = {
             <span class="min-w-0 text-muted-foreground"><RichText :text="n.text" /></span>
           </li>
         </ul>
+        <p v-if="block.note" class="text-sm leading-6 text-foreground/85">
+          <RichText :text="block.note" />
+        </p>
+      </section>
+
+      <!-- 发散探索 -->
+      <section v-else-if="block.kind === 'explore'" class="space-y-2.5">
+        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+          <component :is="HEAD_ICON.explore" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <span class="min-w-0"><RichText :text="block.title" /></span>
+        </h3>
+        <p
+          class="rounded-lg border-l-[3px] border-primary/40 bg-primary/[0.04] py-2 pl-3.5 pr-3 text-[13px] leading-6 text-foreground/80"
+        >
+          <span class="text-muted-foreground">当前知识：</span><RichText :text="block.from" />
+        </p>
+        <div
+          v-for="(b, bi) in block.branches"
+          :key="bi"
+          class="rounded-xl border bg-card p-4"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              class="shrink-0 rounded border border-primary/30 bg-primary/[0.07] px-1.5 py-px text-[10px] font-medium text-primary"
+            >
+              {{ EXPLORE_LABEL[b.direction] ?? b.direction }}
+            </span>
+            <span class="min-w-0 text-sm font-semibold leading-6">
+              <RichText :text="b.related" />
+            </span>
+          </div>
+          <dl class="mt-2.5 space-y-1.5 border-t border-border/60 pt-2.5">
+            <div
+              v-for="row in EXPLORE_ROWS"
+              :key="row.key"
+              class="flex gap-2.5 text-[13px] leading-6"
+            >
+              <dt class="w-16 shrink-0 text-[11px] leading-6 text-muted-foreground">
+                {{ row.label }}
+              </dt>
+              <dd class="min-w-0 text-foreground/85">
+                <RichText :text="b[row.key as keyof typeof b] as string" />
+              </dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       <!-- 手写代码 -->

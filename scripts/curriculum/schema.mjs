@@ -41,7 +41,63 @@ export const BLOCK_KINDS = new Set([
   'code',
   'handwrite',
   'question',
+  'explore',
 ])
+
+/**
+ * 发散探索的五个方向(对应《规范》6.2)
+ * - down:    向下深入底层机制
+ * - lateral: 横向比较其他实现方案
+ * - cross:   跨领域迁移,寻找共同原理
+ * - outward: 向外延伸,联系工程实践与系统设计
+ * - reverse: 反向探索,研究反例与失效条件
+ *
+ * 每个分支必须回答 6.3 的六问:当前知识(块级 from)、关联知识(related)、
+ * 联系依据(basis)、相似之处(shared)、不同之处(diff)、探索价值(value)。
+ */
+export const EXPLORE_DIRECTIONS = new Map([
+  ['down', '向下深入'],
+  ['lateral', '横向比较'],
+  ['cross', '跨领域迁移'],
+  ['outward', '向外延伸'],
+  ['reverse', '反向探索'],
+])
+
+/** 一个 explore 区块最多带几个分支:超过就不是「延伸」而是另开一课 */
+export const EXPLORE_BRANCH_MAX = 2
+
+/**
+ * 每种区块允许出现的字段。构建期逐个比对,出现未知字段直接失败。
+ *
+ * 为什么需要这张表:字段名写错(把 `term` 写成 `terms`、把 `notes` 写成 `note`)时,
+ * 渲染器只是不读它,**页面看上去正常、内容却消失了**。曾经有 16 个 why 区块的
+ * `code/wrong/real/reveal` 全被静默丢掉,钩子只剩一个没有答案的悬念。
+ * 宁可构建失败,也不要静默丢内容。
+ */
+export const BLOCK_FIELDS = {
+  concept: ['kind', 'title', 'body', 'term', 'points', 'caption'],
+  why: ['kind', 'title', 'body', 'code', 'wrong', 'real', 'reveal', 'without'],
+  principle: ['kind', 'title', 'body', 'steps', 'takeaway', 'caption'],
+  analogy: ['kind', 'title', 'body', 'text', 'mapping', 'limit'],
+  diagram: ['kind', 'title', 'body', 'diagram', 'caption'],
+  // cols 是历史遗留:内容恒等于 head 去掉首列,渲染不用它,保留以兼容旧课时
+  compare: ['kind', 'title', 'body', 'head', 'rows', 'cols', 'note', 'caption'],
+  code: ['kind', 'title', 'body', 'lang', 'code', 'caption', 'notes', 'note', 'version', 'env', 'verified'],
+  handwrite: [
+    'kind',
+    'title',
+    'lang',
+    'prompt',
+    'signature',
+    'plan',
+    'skeleton',
+    'solution',
+    'complexity',
+    'traps',
+  ],
+  question: ['kind', 'title', 'questionId', 'intent', 'points', 'depth', 'followup'],
+  explore: ['kind', 'title', 'from', 'branches'],
+}
 
 /**
  * 图示类型

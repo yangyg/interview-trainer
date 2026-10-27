@@ -163,6 +163,8 @@ export default {
                   kind: 'code',
                   title: '三十行:论断级引用校验器',
                   lang: 'python',
+                  version: 'Python 3.11+',
+                  verified: false,
                   code:
                     'import re\n\n# 事实性论断的弱判据：包含数字/时间/专名，或长度超过阈值\nFACT_HINT = re.compile(r"\\d|年|月|日|元|%|第[一二三四五六七八九十]")\nCITE = re.compile(r"\\[(\\d{1,2})\\]")\n\ndef check_citations(answer: str, n_blocks: int, min_len: int = 18):\n    """返回（引用覆盖率, 无据论断列表, 非法引用列表）"""\n    valid = set(range(1, n_blocks + 1))\n    sentences = [s.strip() for s in re.split(r"[。;!?\\n]", answer) if s.strip()]\n\n    total_fact, cited_fact = 0, 0\n    uncited, bad_refs = [], []\n\n    for s in sentences:\n        cites = [int(x) for x in CITE.findall(s)]\n        bad_refs += [c for c in cites if c not in valid]          # 引用了不存在的块\n        looks_factual = bool(FACT_HINT.search(s)) or len(s) >= min_len\n        if not looks_factual:\n            continue                                              # 寒暄/过渡句不要求引用\n        total_fact += 1\n        if cites:\n            cited_fact += 1\n        else:\n            uncited.append(s)\n\n    ratio = cited_fact / total_fact if total_fact else 1.0\n    return ratio, uncited, bad_refs\n\n# ---- 用法：出站前的门禁 ----\nratio, uncited, bad = check_citations(answer, n_blocks=len(blocks))\nif bad:\n    # 引用了不存在的块号 = 强编造信号，直接重答（并把错误回灌给模型）\n    return regenerate(hint=f"你引用了不存在的材料编号 {bad}，只能引用 1~{len(blocks)}")\nif ratio < 0.85:\n    # 覆盖率不足：降级为「不确定」话术，或补充检索后重答\n    return degrade(answer, reason=f"引用覆盖率 {ratio:.0%} 偏低")\nreturn answer',
                   caption:
@@ -306,6 +308,8 @@ export default {
                   kind: 'code',
                   title: '出域前脱敏、回域后还原:占位符映射表只活在本域内存',
                   lang: 'python',
+                  version: 'Python 3.11+',
+                  verified: false,
                   code:
                     'import re, secrets\n\nPATTERNS = {\n    "PHONE": re.compile(r"\\b1[3-9]\\d{9}\\b"),\n    "IDCARD": re.compile(r"\\b\\d{17}[\\dXx]\\b"),\n    "BANK": re.compile(r"\\b\\d{16,19}\\b"),\n    "EMAIL": re.compile(r"[\\w.+-]+@[\\w-]+\\.[\\w.]+"),\n}\n\nclass Redactor:\n    """一次请求一个实例；映射表只存在内存里，不落盘不进日志"""\n    def __init__(self):\n        self._map = {}          # placeholder -> 原文\n        self._rev = {}          # 原文 -> placeholder（同一实体复用同一占位符）\n\n    def _ph(self, kind, raw):\n        if raw in self._rev:\n            return self._rev[raw]\n        token = f"<<{kind}_{secrets.token_hex(3)}>>"   # 随机后缀，防止被猜\n        self._map[token] = raw\n        self._rev[raw] = token\n        return token\n\n    def scrub(self, text: str) -> str:\n        for kind, pat in PATTERNS.items():\n            text = pat.sub(lambda m: self._ph(kind, m.group(0)), text)\n        return text\n\n    def restore(self, text: str) -> str:\n        for token, raw in self._map.items():\n            text = text.replace(token, raw)\n        return text\n\n    def __del__(self):\n        self._map.clear()   # 用完即弃\n\n# ---- 一次完整调用 ----\nred = Redactor()\nsafe_prompt = red.scrub(user_input)           # ① 出域前脱敏\nresp = llm.chat(safe_prompt)                  # ② 只有占位符发出去\nanswer = red.restore(resp)                    # ③ 回域后还原\n# ④ 日志存 safe_prompt 与 resp（含占位符），不存明文',
                   caption:

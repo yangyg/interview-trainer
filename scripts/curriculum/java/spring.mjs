@@ -27,366 +27,249 @@ export default {
       lessons: [
         {
           id: 'spring-overview',
-          title: 'Spring 总览与模块划分',
-          kind: 'concept',
+          title: 'Spring 总览：三个问题串起整个框架',
+          minutes: 40,
           sources: [{ topic: 'java-05', chapters: ['一、Spring 总览'] }],
           content: {
             intro:
-              '这一节先把 Spring 的全貌立起来，避免后面陷入细节时失去方向。核心只有两件事：IoC 容器负责对象生命周期与依赖装配，AOP 负责把横切逻辑从业务代码里抽出来。围绕这两件事长出了 spring-core、beans、context、aop、tx、web 等模块，以及后来的 Spring Boot 与 Spring Cloud。理解模块之间的依赖方向、以及 BeanFactory 与 ApplicationContext 的分层，你就能判断某个功能该去哪个模块找答案，也能回答「Spring 启动时到底做了什么」。',
+              '面试里问「介绍一下 Spring」,十个候选人里九个会从「IoC 和 AOP」开始背,然后卡在「那 Spring 有哪些模块」——因为脑子里是一堆散点,没有一条线能把它们串起来。这一课先立骨架:[[框架里的每一个知识点,都在回答三个问题——这个对象是谁造的、我拿到的还是原来那个对象吗、这些配置是谁给我的]]。有了这三问,模块划分、容器分层、设计模式、启动流程都不再是记忆题,而是同一张地图上的不同位置。',
             outline: [
-              'IoC 与 AOP 是内核，其余模块都是围绕它们的能力扩展',
-              'BeanFactory 是最底层容器（懒加载），ApplicationContext 是其超集（预初始化 + 企业级能力）',
-              'refresh() 的十二步是容器启动的主线，BeanFactoryPostProcessor 与 BeanPostProcessor 是两大扩展点',
-              'Spring Boot 解决的是「配置与启动」，Spring Cloud 解决的是分布式治理',
+              'Spring 只做两件事:把对象的创建权交给容器(IoC),把横切逻辑从业务代码里抽出去(AOP)',
+              '模块依赖方向是单向的:core → beans → context → aop / tx / web,Boot 与 Cloud 在框架之上',
+              '基础容器懒加载、企业级容器预实例化——差别不在「功能多」,而在「什么时候失败」',
+              '`FactoryBean` 是「生产对象的 Bean」,加不加前缀决定你拿到产品还是工厂',
+              '容器启动的主线只有四个分界点:图纸齐了、后置处理器就位了、单例造好了、事件发出了',
             ],
             pitfalls: [
-              '把 Spring Boot 当成新框架，实际上它是 Spring 的自动配置与内嵌容器封装',
-              '把 FactoryBean 与 BeanFactory 混为一谈，两者职责完全不同（一个是容器，一个是「生产对象的 Bean」）',
+              '把 Boot 当成新框架:它用的是同一套容器,只是换了启动方式与装配方式',
+              '把 `FactoryBean` 与 `BeanFactory` 混为一谈:一个是容器,一个是「生产对象的 Bean」,职责完全不重叠',
             ],
             sections: [
               {
-                kind: 'concept',
-                title: '本课地图：Spring 只做两件事',
+                kind: 'why',
+                title: '三个报错,看起来毫无关系',
                 body: [
-                  'Spring 被讲得很复杂，但它最初要解决的只有两个痛点：**对象谁来创建**（把 `new` 的权力交给容器）、**横切逻辑怎么不污染业务代码**（把事务、日志、安全从方法体里抽出去）。前者是 IoC，后者是 AOP。所有模块、所有注解、所有扩展点，都是这两件事的延伸。',
-                  '理解顺序建议这样：先记住「**容器 = 一张 BeanDefinition 图纸表 + 一个单例缓存 Map + 一串扩展点**」这个结构，再理解「AOP 是在 Bean 生命周期的某个时机把它替换成代理」。这两点打通之后，「为什么事务会失效」「为什么循环依赖要三级缓存」这类问题的答案就是同一个：**你拿到的对象是不是原始对象**。',
+                  '同一个人在同一天遇到的三个问题:加在方法上的事务注解没生效;启动时报循环依赖错误;某个接口一直注入失败,提示找不到 Bean。三个现象分属三个方向,查资料时也是三篇不同的文章。',
                 ],
-                points: [
-                  '**IoC 容器**：`BeanDefinition`（图纸）→ `BeanFactory`（工厂）→ 单例缓存（`singletonObjects`）→ 扩展点（`BeanPostProcessor`）',
-                  '**AOP**：在 Bean 初始化后（`postProcessAfterInitialization`）判断是否需要代理，需要则返回代理对象',
-                  '**模块依赖方向**：core ← beans ← context ← aop / tx / web，越往上越「企业级」',
-                  '**Boot 与 Cloud**：Boot 是「装配与启动」的封装，Cloud 是「分布式治理」的组合，都不改内核',
+                code: {
+                  language: 'java',
+                  code:
+                    "// ① 事务注解写了,数据没回滚\n@Service\npublic class OrderService {\n    public void outer() {\n        this.inner();          // 同类调用\n    }\n    @Transactional\n    public void inner() { ... }\n}\n\n// ② 启动失败:循环依赖\n// ③ 注入失败:NoSuchBeanDefinitionException\n//    业务类放在了启动类所在包的「兄弟目录」下",
+                  caption: '三个问题的排查路径完全不同:一个看调用方式,一个看依赖图,一个看包结构。',
+                },
+                wrong: [
+                  '**猜法一:三个独立的问题,分别查?** 能修好,但下次换个写法还会再犯——因为没有找到它们共同的那一层。',
+                  '**猜法二:都是「注解没生效」?** 只有第一个是。第二个是依赖图的问题,第三个是「类压根没被看见」,和注解无关。',
+                  '**猜法三:都是框架的 bug 或版本问题?** 都不是,三个现象在任何一个版本上都稳定复现,因为它们是机制的必然结果。',
+                ],
+                real:
+                  '它们确实属于同一个框架的三条不同主线:**第一个是 AOP 侧**——你拿到的是不是代理对象;第二个是 IoC 侧——对象是谁造的、依赖怎么给;第三个是装配侧——这个类到底有没有被扫描进来。',
+                reveal:
+                  '这三条主线正好对应本课的三个问题。[[把「Spring 的所有知识点」压缩成三个提问,再多的细节都能挂上去]]:问「谁造的」,就走到 Bean 定义、生命周期、容器分层;问「拿到的是不是原对象」,就走到代理与织入;问「配置从哪来」,就走到扫描、导入、条件装配。下面按这个顺序把地图铺开,后面几课都是在这张图上加细节。',
+              },
+              {
+                kind: 'concept',
+                title: '地图:整个框架只做两件事',
+                body: [
+                  '先把噪音去掉。这个框架最初要解决的只有两个痛点:**对象谁来创建**(把创建权从业务代码收归容器)、**横切逻辑怎么不污染业务**(把事务、日志、安全从方法体里抽出去)。前者是 IoC,后者是 AOP。所有模块、注解、扩展点,都是这两件事的延伸。',
+                  '记住一个结构,两个方向就够了。容器侧:**一张 `BeanDefinition` 图纸表 + 一个 `singletonObjects` 单例缓存 + 一串 `BeanPostProcessor` 扩展点**。AOP 侧:**在对象初始化的某个时机,把它替换成代理**。',
+                  '这两点打通之后,后面那些看起来玄学的问题就都有同一个答案:**你手里这个对象,到底是原始的,还是被包装过的**。事务失效、异步失效、缓存失效、`@PostConstruct` 里拿不到某个组件,全部落在这句话上。',
+                  '模块的划分也不是随意的,它反映的是依赖方向:`spring-core` 在最底,`spring-context` 在其上,`spring-aop` 与 `spring-web` 再往上,越往上越「企业级」。理解了方向,你就能判断「某个功能该去哪个模块找」——这个能力比背模块名单有用得多。',
                 ],
               },
               {
-                kind: 'question',
-                title: '简单介绍一下 Spring / Spring 家族？有哪些核心模块？',
-                questionId: 'java-05-Q1',
-                intent:
-                  '这题考「有没有一张地图」。先说定位（IoC + AOP 容器），再按六个分组报模块，最后说清依赖方向，比按字母背模块名强得多。',
-                points: [
-                  '**一句话定位**：轻量级的 **IoC + AOP 容器框架**，核心使命是解耦——把对象创建与依赖管理交给容器，把横切逻辑（事务、日志、安全）从业务代码抽离',
-                  '**核心容器**：`spring-core`（工具与 IoC 基础）、`spring-beans`（BeanDefinition 与 BeanFactory）、`spring-context`（ApplicationContext、事件、国际化）、`spring-expression`（SpEL）',
-                  '**AOP**：`spring-aop`（代理与通知）、`spring-aspects`（集成 AspectJ 注解）',
-                  '**数据访问**：`spring-jdbc`、`spring-tx`（事务抽象）、`spring-orm`（整合 MyBatis / Hibernate）、`spring-oxm`、`spring-jms`',
-                  '**Web**：`spring-web`（基础，如 `HttpMessageConverter`）、`spring-webmvc`（MVC 框架）、`spring-webflux`（Spring 5 起的响应式栈）',
-                  '**家族成员**：Spring Boot（脚手架 + 自动装配 + 内嵌容器）、Spring Cloud（微服务治理）、Spring Data（数据访问统一抽象）、Spring Security（认证授权）、Spring Batch / Integration',
-                  '**依赖方向**：`core → beans → context → aop / tx / web`。所以 `spring-web` 依赖 `spring-context`，而 `spring-context` 不可能反过来依赖 `spring-web`',
+                kind: 'analogy',
+                title: '类比:搬进一间有人管的办公室',
+                text:
+                  '自己创业时,桌椅要自己买、网线自己拉、打印机自己修——每样东西你都得知道去哪弄。搬进一间有人管的写字楼就不一样了:你只跟行政说「我要一张桌子、两个显示器」,东西会送到你工位上;坏了自己不用修,报修就行。更微妙的是,你拿到的工位可能带着门禁卡——它不是你想象中那张「裸桌子」,而是被加了一层权限控制的版本。',
+                mapping: [
+                  { real: '跟行政提需求,不自己买', tech: '声明依赖,由容器注入,而不是自己创建' },
+                  { real: '行政手上的采购清单', tech: '`BeanDefinition`:类名、作用域、初始化方法、依赖' },
+                  { real: '东西直接送到工位', tech: '依赖注入:容器在创建时把依赖传进来' },
+                  { real: '自己去仓库领', tech: '依赖查找:对象调用 `getBean()` 主动索取' },
+                  { real: '带门禁卡的工位不是裸桌子', tech: '代理对象:Bean 初始化后被替换成代理' },
+                  { real: '楼里统一装的消防、监控', tech: '横切逻辑:事务、日志、权限由代理统一施加' },
+                  { real: '楼还没盖好就先定好房号', tech: '先有图纸、后有实例:先注册定义,再创建对象' },
                 ],
-                depth:
-                  '为什么模块划分值得记？因为它决定了「某个功能该去哪找」。比如：`@Transactional` 的实现在 `spring-tx` 而不是 `spring-context`；`HttpMessageConverter` 在 `spring-web` 而不是 `spring-webmvc`（所以 WebFlux 也能用）；`BeanPostProcessor` 在 `spring-beans`（所以哪怕不用 ApplicationContext、只用 BeanFactory 也能用扩展点）。**知道「这个类属于哪个 jar」，就能推出「它能不能用、依赖谁」**——这在排查 `NoSuchMethodError`、`ClassNotFoundException` 这类依赖冲突时非常实用。',
-                followup:
-                  '「Spring 5 的 WebFlux 和 Spring MVC 是什么关系」——是**两套并列的 Web 栈**，共用 `spring-web` 的基础抽象（`HttpMessageConverter`、`WebClient` 底层），但 MVC 是「一请求一线程」的阻塞模型，WebFlux 是「事件循环 + 响应式」的非阻塞模型。两者可以共存（同一个应用里不同路径走不同栈），但**不建议混用**，因为阻塞代码会拖死事件循环线程。',
+                limit:
+                  '有一处不像:写字楼里「带门禁卡」是你能看见的差异,而程序里**代理对象和原始对象长得一模一样**——同样的类型、同样的方法名,你不打印类名根本分不出来。这正是很多「注解不生效」问题难查的原因:[[对象看起来没变,但它已经不是那个会被拦截的对象了]]。另一处差别是行政不会「因为你自己买了桌子就退让」,而容器会。',
               },
               {
                 kind: 'diagram',
-                title: '模块的依赖方向：越往上越「企业级」',
+                title: '模块的依赖方向:越往上越「企业级」',
                 body: [
-                  '把模块按依赖方向摞起来，就能一眼看出「谁能用谁」。注意 AOP 与 tx / web 都在 context 之上，这说明它们都建立在「容器能管理 Bean」这个前提上。',
+                  '把模块按依赖方向摞起来,一眼就能看出「谁能用谁」。注意 AOP 与事务、Web 都在上下文模块之上——这说明它们都建立在「容器能管理对象」这个前提上。',
                 ],
                 diagram: {
                   type: 'layers',
                   items: [
-                    { label: 'spring-core', note: '工具类、资源加载、IoC 最底层（`Resource`、`ClassUtils`）', tone: 'muted' },
-                    { label: 'spring-beans', note: '`BeanDefinition`、`BeanFactory`、`BeanPostProcessor`', tone: 'muted' },
-                    { label: 'spring-expression', note: 'SpEL 表达式引擎（`@Value` 的求值基础）', tone: 'muted' },
-                    { label: 'spring-context', note: '`ApplicationContext`、事件、国际化、`@ComponentScan`', tone: 'primary' },
-                    { label: 'spring-aop / spring-tx', note: '代理与通知、事务抽象（都依赖「Bean 可被代理」）', tone: 'primary' },
+                    { label: 'spring-core', note: '工具类、资源加载、最底层的公共能力', tone: 'muted' },
+                    { label: 'spring-beans', note: '「怎么造对象」的图纸、基础容器、扩展点接口', tone: 'muted' },
+                    { label: 'spring-expression', note: '表达式引擎(注解里写表达式的求值基础)', tone: 'muted' },
+                    { label: 'spring-context', note: '企业级容器、事件、国际化、组件扫描', tone: 'primary' },
+                    { label: 'spring-aop / spring-tx', note: '代理与通知、事务抽象(都依赖「对象可被代理」)', tone: 'primary' },
                     { label: 'spring-web / spring-webmvc', note: 'Web 基础抽象与 MVC 实现', tone: 'good' },
-                    { label: 'spring-boot / spring-cloud', note: '自动装配与启动、分布式治理（在 Framework 之上）', tone: 'good' },
+                    { label: 'spring-boot / spring-cloud', note: '自动装配与启动、分布式治理(在框架之上)', tone: 'good' },
                   ],
                   caption:
-                    '两个实用推论：① **`spring-beans` 里就有 `BeanPostProcessor`**，所以哪怕你手动 `new DefaultListableBeanFactory()` 也能用扩展点，不一定需要 ApplicationContext；② **`spring-web` 在 `webmvc` 之下**，所以 `HttpMessageConverter`、`RestTemplate` 这类类不属于 MVC 专用，WebFlux 也能用。判断「这个类属于哪层」是排查依赖冲突的起点。',
+                    '两个实用推论。**第一,扩展点接口在最底层的 beans 模块里**,所以哪怕你手动 new 一个基础容器也能用它们,不一定非要企业级容器。**第二,Web 基础模块在 MVC 模块之下**,所以「请求体转换」「HTTP 客户端」这类类不属于 MVC 专用,响应式栈也能用。[[判断「某个类属于哪一层」是排查依赖冲突的起点]]——两个 jar 里的同名类打架时,先看它们是不是同一层的不同版本。',
                 },
               },
               {
-                kind: 'question',
-                title: '什么是 IoC？它有什么好处？',
-                questionId: 'java-05-Q2',
-                intent:
-                  '不要只答「控制反转」四个字。要说清「反转的是什么控制权」，以及「Spring 用什么数据结构实现它」。',
-                points: [
-                  '**定义**：IoC（Inversion of Control）是一种设计思想——把**对象的创建、依赖组装、生命周期管理**的控制权，从程序代码反转给容器',
-                  '**反转的是什么**：传统写法 `A` 需要 `B` 就 `new B()`，控制权在 `A`；用 IoC 后 `A` 只声明「我需要一个 `B`」，由容器决定「给哪个实现、什么时候创建」',
-                  '**好处一：解耦**。对象只依赖抽象（接口），替换实现不改代码，符合开闭原则',
-                  '**好处二：便于测试**。测试时注入 Mock 实现，不需要启动整个环境',
-                  '**好处三：统一生命周期**。容器集中管理创建、初始化、销毁，还能顺手施加 AOP 增强（事务就是这么来的）',
-                  '**好处四：减少样板代码**。不用手写工厂、单例、查找逻辑（`ServiceLocator` 那一套）',
-                  '**实现层面**：Spring 用「**一堆 Map 存单例** + **BeanDefinition 描述怎么创建**」实现。`DefaultSingletonBeanRegistry.singletonObjects` 就是那个核心 Map',
+                kind: 'compare',
+                title: 'IoC、DI、DIP:三个最容易混的概念',
+                head: ['维度', 'DIP(依赖倒置原则)', 'IoC(控制反转)', 'DI(依赖注入)'],
+                rows: [
+                  ['层级', '设计原则', '设计思想', '具体实现技术'],
+                  ['一句话', '高层与低层都依赖抽象', '控制权从代码交给容器', '容器把依赖传进来'],
+                  ['反转的是什么', '**依赖的方向**(都指向抽象)', '**控制权的归属**(谁来创建)', '不反转,只是「传递方式」'],
+                  ['Spring 中的体现', '面向接口编程(`UserService` 接口)', '`ApplicationContext` 管理对象', '`@Autowired` / 构造器注入'],
+                  ['反例', '直接依赖具体实现类', '自己创建一切、自己管单例', '在方法体里 new 依赖'],
                 ],
-                depth:
-                  '「反转」这个词容易让人误解成「依赖方向反转」。其实 IoC 反转的是**控制权的归属**，**依赖倒置原则（DIP）** 才是反转依赖方向（高层与低层都依赖抽象）。三者的关系是：**DIP 是设计原则，IoC 是达成它的手段，DI 是 IoC 的具体实现方式**。面试里把这三层分清，比反复说「控制反转」有说服力得多——因为很多人答完 IoC 被追问「那 DIP 呢」就卡住了。',
-                followup:
-                  '「IoC 有什么缺点」——三个真实代价：① **运行时才暴露装配错误**（写错了 `@Qualifier` 要到启动才报，编译器帮不上）；② **跳转不直观**（IDE 里点不进「谁调用了这个方法」，因为调用方是容器的反射）；③ **启动变慢**（大量 Bean 预实例化 + 反射 + 代理生成）。所以「小工具用 IoC」往往是过度设计——**IoC 的收益与「对象图复杂度」成正比**。',
-              },
-              {
-                kind: 'question',
-                title: 'DI 和 IoC 是什么关系？',
-                questionId: 'java-05-Q3',
-                intent:
-                  '一句话答清：**IoC 是思想，DI 是实现方式之一**。再补上「依赖查找」这个另一种实现，就完整了。',
-                points: [
-                  '**IoC 是思想 / 设计原则**：控制权交给容器，这是方向性的约定',
-                  '**DI 是 IoC 最主流的实现方式**：容器在创建 Bean 时，把依赖**注入**进去（构造器注入、Setter 注入、字段注入）',
-                  '**另一种实现：依赖查找（Dependency Lookup）**：对象自己主动向容器要依赖（如 `beanFactory.getBean("x")`、JNDI 的 `lookup`）。Spring 支持但**不推荐**，因为它让代码依赖容器 API',
-                  '**第三种：依赖拖拽（Contextualized Dependency Lookup）**：容器把依赖「推」给一组实现了特定接口的对象，多见于老框架',
-                  '**一句话总结**：IoC 说的是「**谁来控制**」，DI 说的是「**怎么把依赖给进来**」',
-                  '**DIP（依赖倒置原则）** 是让 IoC 能落地的设计原则：高层模块与低层模块都依赖抽象，抽象不依赖细节',
-                ],
-                depth:
-                  '为什么 Spring 主推 DI 而不是依赖查找？因为依赖查找**把容器 API 写进了业务代码**——`applicationContext.getBean(Foo.class)` 让这个类从此离不开 Spring，单元测试必须造一个容器。而 DI 的 Bean 只是一个普通类（`Foo` 的字段被注入），测试时可以直接 `new Foo(mockBar)`。**这是「框架侵入性」的核心差别**：DI 是「容器来找你」，查找是「你去找容器」。前者业务代码干净，后者方便但污染。',
-                followup:
-                  '「字段注入（`@Autowired` 直接标在字段上）算不算好的 DI」——能用但不推荐。它有三个问题：**无法声明 `final`**（对象可变，破坏不可变性）、**无法脱离容器测试**（必须反射注入或起容器）、**容易掩盖循环依赖**（构造器注入会直接报错，字段注入靠反射能绕过，于是问题被推迟到运行时）。Spring 官方从 4.3 起就明确推荐构造器注入，单构造器时连 `@Autowired` 都可以省略。',
+                note:
+                  '面试时最稳的说法是:**依赖倒置原则是「为什么可以反转」——因为大家都依赖抽象;控制反转是「反转了什么」——创建权;依赖注入是「怎么反转的」——把依赖传进来**。三层是递进的:没有抽象做前提,反转之后依然耦合;没有容器接管,注入无从谈起。',
+                caption: '顺带记住第二种实现方式:依赖查找(对象主动向容器索取)。它和依赖注入是并列的两种「控制反转实现」,只是注入更主流——因为业务代码不用认识容器。',
               },
               {
                 kind: 'compare',
-                title: 'IoC、DI、DIP：三个容易混的概念',
-                head: ['维度', 'DIP（依赖倒置原则）', 'IoC（控制反转）', 'DI（依赖注入）'],
+                title: 'BeanFactory 与 ApplicationContext:差别不在功能多少',
+                head: ['维度', '`BeanFactory`', '`ApplicationContext`'],
                 rows: [
-                  ['层级', '设计原则', '设计思想 / 模式', '具体实现技术'],
-                  ['一句话', '高层与低层都依赖抽象', '控制权从代码交给容器', '容器把依赖传进来'],
-                  ['反转的是什么', '**依赖的方向**（都指向抽象）', '**控制权的归属**（谁来创建）', '不反转，只是「传递方式」'],
-                  ['谁提出', 'Robert C. Martin（SOLID 的 D）', 'Martin Fowler 总结的术语', 'Martin Fowler 命名'],
-                  ['Spring 中的体现', '面向接口编程（`UserService` 接口）', '`ApplicationContext` 管理 Bean', '`@Autowired` / 构造器注入'],
-                  ['反例', '直接 `new MySQLDao()`', '自己 `new` 一切、自己管单例', '在方法里 `new` 依赖'],
+                  ['层级', '最底层的容器接口', '`BeanFactory` 的子接口(超集)'],
+                  ['核心方法', '`getBean()`', '继承全部,外加大量企业级能力'],
+                  ['对象创建时机', '**懒加载**,第一次取的时候才造', '刷新时**预实例化**所有非懒加载单例'],
+                  ['扩展点', '需手动 `addBeanPostProcessor`', '**自动**发现并注册'],
+                  ['国际化', '不支持', '`MessageSource`'],
+                  ['事件机制', '不支持', '`ApplicationEventPublisher`'],
+                  ['资源加载', '不支持', '`ResourceLoader`(`classpath:` / `file:`)'],
+                  ['环境抽象', '不支持', '`Environment`(配置源 + profile)'],
+                  ['典型实现', '`DefaultListableBeanFactory`', '`AnnotationConfigApplicationContext`'],
                 ],
-                caption:
-                  '最容易混的是「反转的是什么」这一行：**DIP 反转依赖的方向**（原本高层依赖低层，现在都依赖抽象）、**IoC 反转控制权**（原本自己创建，现在容器创建）、**DI 不反转任何东西**，它只是「把依赖送进去」的动作。面试里被问「IoC 和 DI 的区别」，答这一行就够；被追问「那 DIP 呢」，能接上第三列就是加分。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 框架中用到了哪些设计模式？',
-                questionId: 'java-05-Q4',
-                intent:
-                  '不要背名单。挑 4~5 个**能说出具体类名**的讲，比列 10 个更有说服力。',
-                points: [
-                  '**工厂模式**：`BeanFactory` / `ApplicationContext` 创建与管理 Bean；`FactoryBean` 是「生产对象」的特殊工厂',
-                  '**单例模式**：容器级单例（`singleton` 作用域），缓存就是 `DefaultSingletonBeanRegistry.singletonObjects` 那个 `ConcurrentHashMap`',
-                  '**代理模式**：AOP 的 JDK 动态代理与 CGLIB；`@Transactional` / `@Async` / `@Cacheable` 全靠它',
-                  '**模板方法**：`JdbcTemplate`、`RestTemplate`、`RedisTemplate`——把「获取连接、执行、释放」的骨架定死，只留回调给用户',
-                  '**观察者模式**：`ApplicationEvent` + `ApplicationListener`，事件发布与监听',
-                  '**适配器模式**：`HandlerAdapter`（适配不同类型的 Handler）、`AdvisorAdapter`（适配不同类型的通知）',
-                  '**策略模式**：`Resource` 的不同实现（`ClassPathResource` / `FileSystemResource`）、`InstantiationStrategy`（反射 vs CGLIB 实例化）',
-                  '**责任链模式**：MVC 的 `HandlerInterceptor` 链、AOP 的 `ReflectiveMethodInvocation`（逐个通知推进，`proceed()` 就是链式调用）',
-                  '**装饰器模式**：`BeanWrapper` 包装 Bean、MyBatis 的 `CachingExecutor` 装饰 `Executor`',
-                ],
-                depth:
-                  '「责任链」这一条最能体现深度：AOP 的拦截器链不是「数组遍历调用」，而是**每个拦截器持有一个 `MethodInvocation`（其实是它自己），调 `proceed()` 就推进到下一个**。所以拦截器的「前置」代码在 `proceed()` 之前、「后置」在之后，形成嵌套结构（像洋葱）。这也解释了「为什么 `@Around` 能改变返回值」——它可以在 `proceed()` 之后改。**能把 `ReflectiveMethodInvocation.proceed()` 说出来，基本可以确认你读过源码。**',
-                followup:
-                  '「为什么说 Spring 是「模式大杂烩」」——因为它要解决的是「通用容器」问题，必须对「创建方式、资源类型、处理器类型」都保持开放，于是每种变化点都对应一个模式。反过来，**这些模式不是为了炫技而用，而是「扩展点」的实现手段**：`BeanPostProcessor` 是策略、`HandlerAdapter` 是适配器、`HandlerInterceptor` 是责任链——**理解了扩展点，模式自然就记住了**。',
+                note:
+                  '「预实例化」这一条的真正意义不是「快」,而是**早失败早暴露**:配置写错、依赖缺失、构造器注入造成的循环依赖,都会在启动时就报错,而不是等到第一次请求。[[懒加载的容器会把错误推迟到运行时,而运行时错误比启动错误贵得多]]。',
+                caption: '一个常被追问的细节:企业级容器之所以能「自动发现扩展点」,是因为它多了一次「按类型取出所有实现」的能力——这本身又是它比基础容器多出来的那部分企业级能力。',
               },
               {
                 kind: 'diagram',
-                title: '八个设计模式在 Spring 里的具体落点',
+                title: '`FactoryBean`:同一个名字,两种取法',
                 body: [
-                  '这张表的价值是「模式 → 类名」的映射。面试时说出类名，比说「Spring 用了工厂模式」可信得多。',
+                  '这是最容易被名字坑到的一处。「生产对象的 Bean」和「容器」是两个完全不同的东西,但它们的中文名和英文名都长得很像。看下面这条路径就清楚了。',
+                ],
+                diagram: {
+                  type: 'flow',
+                  direction: 'v',
+                  items: [
+                    { label: '容器里注册的是 `MapperFactoryBean`', note: '它实现了 `FactoryBean`,是「生产对象的 Bean」' },
+                    { label: '按名字取,得到**产品**', note: '`getBean("mapperFactoryBean")` → 走 `getObject()`,返回 Mapper 代理对象' },
+                    { label: '加 `&` 前缀取,得到**工厂本身**', note: '`getBean("&mapperFactoryBean")` → 跳过 `getObject()`,返回工厂' },
+                    { label: '什么时候需要后者', note: '调试、`getObjectType()`,或在容器外手动触发一次创建' },
+                  ],
+                  caption:
+                    '注意第二步的产物:一个**接口的代理对象**。这就解释了「为什么能直接注入一个只有接口、没有实现类的 Mapper」——接口本身不能实例化,容器里放的是工厂生产出来的动态代理。[[持久层框架与容器整合的本质,就是「用工厂 Bean 把接口变成对象」]]。理解了这一句,后面讲持久层那一课时很多问题都不用再讲。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '八个设计模式,落在哪些类上',
+                body: [
+                  '这张表的价值是「模式 → 类名」的映射。面试时说出类名,比说「框架用了工厂模式」可信得多。',
                 ],
                 diagram: {
                   type: 'matrix',
-                  head: ['模式', 'Spring 中的落点', '解决的问题'],
-                  cols: ['Spring 中的落点', '解决的问题'],
+                  head: ['模式', '框架中的落点', '解决的问题'],
+                  cols: ['框架中的落点', '解决的问题'],
                   rows: [
                     ['工厂', '`BeanFactory` / `FactoryBean`', '对象的创建与装配'],
                     ['单例', '`singletonObjects` 缓存', '全局唯一实例'],
-                    ['代理', 'JDK Proxy / CGLIB', '无侵入地加横切逻辑'],
+                    ['代理', 'JDK 动态代理 / CGLIB', '无侵入地加横切逻辑'],
                     ['模板方法', '`JdbcTemplate` / `RedisTemplate`', '固定流程 + 可变回调'],
-                    ['观察者', '`ApplicationEvent` / `ApplicationListener`', '解耦事件发布与处理'],
+                    ['观察者', '`ApplicationEvent` / `ApplicationListener`', '解耦事件的产生与处理'],
                     ['适配器', '`HandlerAdapter` / `AdvisorAdapter`', '统一多种实现形态'],
                     ['策略', '`Resource` / `InstantiationStrategy`', '运行期选择算法'],
                     ['责任链', '`HandlerInterceptor` / `MethodInvocation`', '多个处理器依次生效'],
                   ],
                   caption:
-                    '注意「代理」与「责任链」是 AOP 的两块基石：**代理**负责「让调用经过拦截器」，**责任链**负责「多个拦截器怎么排」。理解了这两个，`@Transactional`、`@Cacheable`、`@Async` 都只是「往链上插一个拦截器」而已——它们的差异只在「拦截器做了什么」。',
+                    '注意「代理」与「责任链」是 AOP 的两块基石:**代理**负责「让调用经过拦截器」,**责任链**负责「多个拦截器怎么排」。理解了这两个,事务、缓存、异步注解都只是「往链上插一个拦截器」而已——[[它们的差异只在「拦截器做了什么」,而不在机制]]。这也是为什么「注解不生效」的排查思路对它们全都通用:先确认代理生成了没有,再确认调用经过了没有。',
                 },
               },
               {
-                kind: 'question',
-                title: 'BeanFactory 和 ApplicationContext 有什么区别？',
-                questionId: 'java-05-Q5',
-                intent:
-                  '两个关键差异：**加载时机**（懒加载 vs 预实例化）与**能力范围**（裸容器 vs 企业级）。',
-                points: [
-                  '**定位差异**：`BeanFactory` 是最底层的容器接口（核心方法 `getBean()`）；`ApplicationContext` 是它的**子接口**，属于企业级容器',
-                  '**加载时机**：`BeanFactory` **懒加载**（`getBean` 时才创建）；`ApplicationContext` 在 `refresh()` 时**预实例化**所有非懒加载单例',
-                  '**为什么默认预实例化**：**早失败早暴露**。配置错、依赖缺失、循环依赖（构造器注入那种）都会在启动时报错，而不是等到第一次请求',
-                  '**扩展能力**：`ApplicationContext` 集成了 `MessageSource`（国际化）、`ApplicationEventPublisher`（事件）、`ResourceLoader`（资源）、`Environment`（配置）、**自动注册 `BeanPostProcessor` 与 `BeanFactoryPostProcessor`**',
-                  '**`BeanFactory` 没有的**：上述企业级能力一个都没有，`BeanPostProcessor` 也要手动 `addBeanPostProcessor`',
-                  '**常用实现**：`DefaultListableBeanFactory`（最底层的完整实现）；`AnnotationConfigApplicationContext`（注解驱动）；Boot 里是 `AnnotationConfigServletWebServerApplicationContext`',
-                  '**一句话**：`BeanFactory` 是「发动机」，`ApplicationContext` 是「整车」——发动机能跑，整车才有空调、音响、仪表盘',
-                ],
-                depth:
-                  '「预实例化」这个设计为什么重要？因为它把「配置错误」从**运行期**提前到了**启动期**。想象一个 `@Autowired` 的依赖在容器里找不到：懒加载容器要等第一次 `getBean` 才报 `NoSuchBeanDefinitionException`——那时可能已经是线上第一个请求了；预实例化则在启动时就失败，CI/CD 阶段就能发现。**这也解释了为什么 Spring Boot 启动慢**：它不是「无缘无故慢」，而是在**替你把所有 Bean 都造一遍、把依赖图全部验证一遍**。这个成本换来的是「启动成功 ≈ 依赖没问题」的确定性。',
-                followup:
-                  '「怎么用 BeanFactory 手动搭一个最小容器」——三步：`DefaultListableBeanFactory factory = new DefaultListableBeanFactory();` → 注册 `BeanDefinition`（可用 `AnnotatedBeanDefinitionReader` 或手写 `RootBeanDefinition`）→ `factory.getBean(Foo.class)`。这样跑起来没有事件、没有 AOP 自动代理、没有 `@Autowired` 处理（除非手动加 `AutowiredAnnotationBeanPostProcessor`）。**手搭一次，就能深刻理解 ApplicationContext 到底多做了哪些事。**',
-              },
-              {
-                kind: 'compare',
-                title: 'BeanFactory 与 ApplicationContext 逐项对照',
-                head: ['维度', 'BeanFactory', 'ApplicationContext'],
-                rows: [
-                  ['层级', '最底层容器接口', 'BeanFactory 的子接口（超集）'],
-                  ['核心方法', '`getBean()` / `getBeanProvider()`', '继承全部 + 大量企业级 API'],
-                  ['Bean 创建时机', '**懒加载**，首次 `getBean` 时', '`refresh()` 时**预实例化**非懒加载单例'],
-                  ['BeanPostProcessor', '需手动 `addBeanPostProcessor`', '**自动**发现并注册'],
-                  ['国际化', '不支持', '`MessageSource`'],
-                  ['事件机制', '不支持', '`ApplicationEventPublisher`'],
-                  ['资源加载', '不支持', '`ResourceLoader`（`classpath:` / `file:`）'],
-                  ['环境抽象', '不支持', '`Environment`（profile + properties）'],
-                  ['典型实现', '`DefaultListableBeanFactory`', '`AnnotationConfigApplicationContext`'],
-                ],
-                caption:
-                  '第四行是实际开发中最容易感知的差异：**用裸 `BeanFactory` 时 `@Autowired` 不生效**——因为处理它的 `AutowiredAnnotationBeanPostProcessor` 根本没被注册。这也是「为什么自己搭最小容器时要手动加一堆 PostProcessor」的原因。反过来说，`ApplicationContext` 的「自动注册」是通过 `refresh()` 里的 `registerBeanPostProcessors()` 实现的。',
-              },
-              {
-                kind: 'question',
-                title: 'FactoryBean 是什么？它和 BeanFactory 有什么区别？',
-                questionId: 'java-05-Q6',
-                intent:
-                  '名字像、职责完全不同。要能说出三个方法、两个 `getBean` 的差别，以及框架里的真实用例。',
-                points: [
-                  '**`BeanFactory`**：IoC 容器本身，负责生产和管理**所有** Bean（`getBean` 是它的方法）',
-                  '**`FactoryBean`**：一个**特殊的 Bean**——它自己是「生产对象的工厂」，实现 `getObject()` / `getObjectType()` / `isSingleton()` 三个方法',
-                  '**关键语义**：容器里注册的「产品」是 `getObject()` 的返回值，而**不是** `FactoryBean` 实例本身',
-                  '**两种取法**：`getBean("myFactoryBean")` 拿到**产品**；`getBean("&myFactoryBean")` 拿到 **FactoryBean 本身**（`&` 前缀）',
-                  '**用途**：封装**复杂对象的创建过程**（需要一堆初始化逻辑、需要访问容器、需要动态代理）',
-                  '**框架里的真实用例**：MyBatis 的 `SqlSessionFactoryBean`（建 `SqlSessionFactory`）、`MapperFactoryBean`（把 Mapper 接口变成可注入的代理）、OpenFeign 的 `FeignClientFactoryBean`、Spring 自己的 `ProxyFactoryBean`',
-                  '**判断依据**：如果一个 Bean 的创建过程「不像 new 一个对象那么简单」，而是「要做一堆装配」，就该用 `FactoryBean`',
-                ],
-                depth:
-                  '`FactoryBean` 的真正价值在「**把「创建逻辑」也变成一个可管理的 Bean**」。对比一下：用 `@Bean` 方法也能创建复杂对象，但 `@Bean` 是「配置类里的一个方法」——它无法被注入、无法被 AOP 增强、无法被其他 Bean 依赖「创建器」本身。而 `FactoryBean` 是一个货真价实的 Bean：它可以被注入、可以有属性、可以感知容器（实现 `ApplicationContextAware`）。**MyBatis 的 `MapperFactoryBean` 正是靠这一点，才能「拿到 SqlSessionTemplate + Mapper 接口，动态生成代理」**——这件事用 `@Bean` 很难优雅地做到。',
-                followup:
-                  '「`getBean("&x")` 的 `&` 是怎么处理的」——`AbstractBeanFactory.getBean` 里会先判断 `name.startsWith("&")`，若是则 `beanName = name.substring(1)` 且 `isFactoryDereference = true`，最后从 `factoryBeanInstanceCache` 取 FactoryBean 实例本身而不是 `getObject()` 的产物。这个 `&` 是 Spring 里少见的「特殊字符约定」，容易在排查时被忽略——**看到 `&` 就知道「要的是工厂不是产品」**。',
-              },
-              {
                 kind: 'diagram',
-                title: 'FactoryBean 的两次取值：产品还是工厂',
+                title: '容器启动的主干:四个分界点',
                 body: [
-                  '同一个 beanName，加不加 `&` 决定你拿到的是「产品」还是「工厂」。这张图把两条路径分开画。',
+                  '启动流程有十几个步骤,但不用全记。记住四个「分界点」就够用:图纸什么时候齐、扩展点什么时候就位、单例什么时候造好、事件什么时候发出。',
                 ],
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '容器里注册了 `mapperFactoryBean`', note: '类型是 `MapperFactoryBean`（实现了 `FactoryBean`）' },
-                    { label: 'getBean("mapperFactoryBean")', note: '→ 走 `getObject()`，返回 **Mapper 代理对象**（产品）' },
-                    { label: 'getBean("&mapperFactoryBean")', note: '→ 跳过 `getObject()`，返回 **FactoryBean 本身**' },
-                    { label: '为什么需要后者', note: '调试、拿 `getObjectType()`、或在容器外部手动触发创建' },
+                    { label: '① `prepareRefresh`', note: '记录启动时间、初始化 `Environment`、校验必需属性' },
+                    { label: '② `obtainFreshBeanFactory`', note: '得到 `DefaultListableBeanFactory`' },
+                    { label: '③ 执行 `BeanFactoryPostProcessor`', note: '**解析配置类 → `BeanDefinition` 全部就位**' },
+                    { label: '④ 注册 `BeanPostProcessor`', note: '**注入与代理能力在这一步就位,之后才有 AOP**' },
+                    { label: '⑤ 初始化基础设施', note: '国际化资源、事件广播器' },
+                    { label: '⑥ 创建 Web 容器', note: '内嵌服务器在这一步启动(非 Web 应用跳过)' },
+                    { label: '⑦ `finishBeanFactoryInitialization`', note: '**遍历图纸,逐个 `getBean()` 走完整生命周期**' },
+                    { label: '⑧ `finishRefresh`', note: '启动 `Lifecycle` 组件、发布 `ContextRefreshedEvent`' },
                   ],
                   caption:
-                    '注意第 2 步的产物：**Mapper 接口的代理对象**。这就解释了「为什么 `@Autowired UserMapper mapper` 能直接注入一个接口」——接口本身不能实例化，容器里放的是 `MapperFactoryBean` 生产出来的 JDK 动态代理。**MyBatis 与 Spring 的整合，本质就是「用 FactoryBean 把接口变成 Bean」**。理解了这一句，MyBatis 那一课的很多问题都能提前打通。',
+                    '四个分界点:**③ 之后图纸齐了**(能看到所有对象定义)、**④ 之后扩展点就位了**(此时才有代理与注入的处理能力)、**⑦ 之后单例都造好了**、**⑧ 之后事件发出**(启动后要执行的任务在这之后跑)。排查「某个组件为什么没生效」时,先定位它本该在哪一步出现——[[大多数「没生效」都是「它本该在 ③ 之前就存在,但没有」]]。',
                 },
-              },
-              {
-                kind: 'question',
-                title: '怎么理解 Bean？Spring 容器和 Web 容器有什么区别？',
-                questionId: 'java-05-Q7',
-                intent:
-                  '考「边界感」。关键是说清「两者是嵌套关系」而不是「替代关系」。',
-                points: [
-                  '**Bean 是什么**：由 Spring 容器**实例化、组装、管理**的对象。本质还是普通 Java 对象，区别只在「生老病死由容器接管」',
-                  '**Web 容器是什么**：Tomcat / Jetty / Undertow，管理 **Servlet、Filter、Listener** 等 Web 组件的生命周期，负责 HTTP 连接的接收与响应',
-                  '**Spring 容器管什么**：业务 Bean（Service、Repository、Controller）、事务、AOP 代理',
-                  '**关系是嵌套，不是替代**：Web 容器启动 → 通过 `ContextLoaderListener`（传统 SSM）或 Boot 的内嵌方式 → 拉起 Spring 容器',
-                  '**Boot 的变化**：把 Tomcat 变成**内嵌**的（`SpringApplication` 启动时创建 `ServletWebServerApplicationContext`，内部 `new Tomcat()`），所以「jar 直接跑」——但**仍然是 Web 容器在跑，只是它被 Spring 管起来了**',
-                  '**为什么这个区分重要**：端口、连接数、线程池属于 Web 容器；Bean 作用域、事务、代理属于 Spring 容器。排查「请求超时」与「事务不生效」要去完全不同的地方',
-                ],
-                depth:
-                  '「谁先启动」这件事在传统 SSM 与 Boot 里正好相反。传统方式：**Web 容器先起**（`web.xml` 里配 `ContextLoaderListener`），再由它加载 `applicationContext.xml`——所以「Web 容器是宿主，Spring 是客人」。Boot 方式：**Spring 先起**（`main` 方法），在 `refresh()` 的 `onRefresh()` 阶段**创建并启动**内嵌 Tomcat——「Spring 是宿主，Web 容器是它创建的一个组件」。这个顺序反转带来两个可观测差异：① Boot 里能用 Spring 的 profile / 条件装配决定「要不要起 Web 容器」（`WebApplicationType.NONE`）；② 传统方式下 Web 容器启动失败时，Spring 可能压根没初始化。',
-                followup:
-                  '「`DispatcherServlet` 属于谁」——它是个 **Servlet**，活在 Web 容器里，但它是由 **Spring 容器创建并注册**到 Web 容器的（Boot 里通过 `ServletRegistrationBean` 或 `DispatcherServletAutoConfiguration`）。所以它同时跨两个世界：**生命周期归 Web 容器（`init` / `destroy`），依赖注入归 Spring 容器**。这也是为什么 `DispatcherServlet` 里能 `@Autowired` 各种 Bean。',
-              },
-              {
-                kind: 'question',
-                title: '项目启动时，Spring 的 IoC 容器做了什么？',
-                questionId: 'java-05-Q8',
-                intent:
-                  '`refresh()` 的十二步是这题的骨架。至少要能说出「解析配置 → 执行 BFPP → 注册 BPP → 预实例化」四段。',
-                points: [
-                  '**① 定位与解析配置**：处理 `@ComponentScan` / `@Import` / `@Bean` / XML，把类扫描成 **`BeanDefinition`**（图纸：类名、作用域、懒加载、依赖、初始化方法）注册进 `BeanDefinitionRegistry`',
-                  '**② 执行 `BeanFactoryPostProcessor`（BFPP）**：典型是 `ConfigurationClassPostProcessor`（解析配置类，**这一步才会发现 `@Bean` 方法**）与 `PropertySourcesPlaceholderConfigurer`（占位符替换）',
-                  '**③ 注册 `BeanPostProcessor`（BPP）**：`AutowiredAnnotationBeanPostProcessor`（处理 `@Autowired`）、`CommonAnnotationBeanPostProcessor`（`@Resource` / `@PostConstruct` / `@PreDestroy`）、`AnnotationAwareAspectJAutoProxyCreator`（**AOP 代理就是它做的**）',
-                  '**④ 初始化基础设施**：`MessageSource`（国际化）、`ApplicationEventMulticaster`（事件广播器）、`LifecycleProcessor`',
-                  '**⑤ 预实例化单例**：`finishBeanFactoryInitialization()` 遍历所有非懒加载单例的 `BeanDefinition`，逐个 `getBean()` 走完整生命周期',
-                  '**⑥ 完成刷新**：`finishRefresh()` 启动 `Lifecycle` Bean（如内嵌 Tomcat 的启动在更早的 `onRefresh`）、发布 `ContextRefreshedEvent`',
-                  '**关键顺序**：**BFPP 先于 BPP，BPP 先于普通 Bean**。因为 BPP 本身也是 Bean，而它要在「普通 Bean 创建时」生效，所以必须先就位',
-                ],
-                depth:
-                  '为什么 BFPP 与 BPP 的时机不同？因为**它们操作的对象不同**：`BeanFactoryPostProcessor` 操作的是「**图纸**」（`BeanDefinition`），所以必须在「按图纸造对象」之前执行——`ConfigurationClassPostProcessor` 正是在这个阶段把 `@Bean` 方法解析成 `BeanDefinition`；而 `BeanPostProcessor` 操作的是「**对象**」，所以必须在「造对象」的流程里生效。**一个是改图纸，一个是改产品**。这个区分能解释很多「为什么这个扩展点在这里不生效」的困惑。',
-                followup:
-                  '「怎么验证这些时机」——写一个类同时实现 `BeanFactoryPostProcessor`、`BeanPostProcessor`、`InitializingBean`、`DisposableBean`，每个方法里打印一行。你会看到：`postProcessBeanFactory`（最早）→ `postProcessBeforeInitialization` / `afterPropertiesSet` / `postProcessAfterInitialization`（每个 Bean 各一次）→ `destroy`（容器关闭）。**打印一次胜过读十遍博客**，而且能顺手发现「BPP 自己被创建时也会走 BPP 流程」这个容易忽略的细节。',
-              },
-              {
-                kind: 'diagram',
-                title: 'refresh() 的主干：从解析配置到发布事件',
-                body: [
-                  '十二步不用全记，记住四个「分界点」就够了：图纸什么时候齐、BFPP 什么时候跑、BPP 什么时候就位、单例什么时候造。',
-                ],
-                diagram: {
-                  type: 'flow',
-                  direction: 'v',
-                  items: [
-                    { label: '① prepareRefresh：准备环境、校验必需属性', note: '记录启动时间、初始化 `Environment`' },
-                    { label: '② obtainFreshBeanFactory：创建/刷新 BeanFactory', note: '得到 `DefaultListableBeanFactory`' },
-                    { label: '③ invokeBeanFactoryPostProcessors', note: '**解析配置类 → BeanDefinition 全部就位**' },
-                    { label: '④ registerBeanPostProcessors', note: '**BPP 就位（AOP 代理器在这一步注册）**' },
-                    { label: '⑤ initMessageSource / initApplicationEventMulticaster', note: '国际化与事件基础设施' },
-                    { label: '⑥ onRefresh：创建 Web 容器（Boot）', note: '内嵌 Tomcat 在这一步启动' },
-                    { label: '⑦ finishBeanFactoryInitialization', note: '**预实例化所有非懒加载单例**' },
-                    { label: '⑧ finishRefresh：启动 Lifecycle、发布 ContextRefreshedEvent', note: '容器就绪' },
-                  ],
-                  caption:
-                    '四个分界点：**③ 之后图纸齐了**（此时能看到所有 `BeanDefinition`）、**④ 之后 BPP 齐了**（此时才有 AOP、`@Autowired` 的处理能力）、**⑦ 之后单例都造好了**（启动完成的主体）、**⑧ 之后事件发出**（`ApplicationRunner` / `CommandLineRunner` 在这之后）。排查「某个 Bean 为什么没生效」时，先定位它在哪一步该出现——**大多数「没生效」都是「它在 ③ 之前就该存在，但没有」**。',
-                },
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot 和 Spring 的区别与关系？Spring MVC 和 Spring Boot 呢？',
-                questionId: 'java-05-Q9',
-                intent:
-                  '核心是「Boot 不是替代，是封装」。四个增强点要能各举一例，最后一句「MVC 是模块、Boot 是脚手架」收尾。',
-                points: [
-                  '**Spring 是基础框架**：提供 IoC / AOP / 事务 / MVC 等能力，但需要大量配置（XML 或 JavaConfig）、手工管理依赖版本',
-                  '**Boot 不是替代，是增强**，四个点：① **起步依赖（starter）** 解决依赖版本冲突；② **自动装配**消灭大量配置；③ **内嵌容器**让 jar 直接跑；④ **生产级特性**（Actuator 的健康检查、指标）',
-                  '**Spring MVC 是 Spring 的一个 Web 模块**（`spring-webmvc`），实现「请求 → 处理器 → 响应」的链路',
-                  '**Boot 与 MVC 的关系**：Boot 把「Spring + MVC + 内嵌容器」打包成开箱即用的脚手架。所以「Boot 项目里也能只用 WebFlux」「MVC 也能不用 Boot 手动配」——**两者是正交的**',
-                  '**一句话**：Spring 是**能力**，Spring MVC 是**Web 能力的具体实现**，Spring Boot 是**把这些能力快速组装起来的脚手架**',
-                  '**常见误解**：以为 Boot 是「新的 IoC 容器」——它用的是完全一样的 `ApplicationContext`，只是换了启动方式与装配方式',
-                ],
-                depth:
-                  '「Boot 让配置变简单」这件事，本质是把「**约定优于配置**」落到了依赖与装配两个层面。依赖层面：`spring-boot-starter-web` 里已经声明好「Spring MVC + Jackson + 内嵌 Tomcat + 校验」的兼容版本组合，你不需要再纠结版本。装配层面：`@EnableAutoConfiguration` 会读取所有 jar 里的 `AutoConfiguration.imports` 清单，用 `@Conditional` 筛选出「当前 classpath 下该生效的配置类」。**所以「引了依赖就有默认配置」不是魔法，而是「有人在 jar 里写好了配置类，且它的生效条件被满足了」**。',
-                followup:
-                  '「Spring Cloud 与 Boot 的关系」——Cloud 依赖 Boot（它用 Boot 的自动装配来「一键开启」注册中心客户端、配置中心客户端、网关等）。但 Cloud 解决的是**分布式治理**（服务发现、配置、网关、熔断、链路追踪），属于**应用层组合**，不改 IoC 内核。所以「Cloud 组件坏了」时，排查方向通常是网络、注册中心状态、超时配置，而不是 Spring 容器本身。',
               },
               {
                 kind: 'principle',
-                title: '抓住三个问题，Spring 全课都能串起来',
+                title: '三个问题:后面每一课都是它们的细节',
                 body: [
-                  'Spring 的知识点极多，但它们都在回答同样三个问题。把这三个问题记住，后面每一课都只是给它们加细节。',
+                  '这一课的目的是立骨架,所以最后要把骨架收成三句话。知识点极多,但它们都在回答同样三个问题;记住这三个问题,后面每一课都只是给它们加细节。',
                 ],
                 steps: [
                   {
-                    title: '① 「这个对象是谁造的」——IoC 侧',
+                    title: '① 这个对象是谁造的',
                     detail:
-                      '回答这条链上的所有问题：`BeanDefinition` 哪来的（扫描 / `@Bean` / XML）、什么时候造（懒加载 / 预实例化）、依赖怎么给（构造器 / setter / 字段）、造完谁管（单例缓存 / 作用域）。**「Bean 生命周期」「循环依赖」「作用域」都属于这一条。**',
+                      '回答容器侧的一切:`BeanDefinition` 从哪来(扫描、`@Bean`、配置文件)、什么时候造(懒加载还是预实例化)、依赖怎么给(构造器、setter、字段)、造完谁管(作用域、销毁回调)。[[「Bean 找不到」「循环依赖」都在这条线上]]。',
                   },
                   {
-                    title: '② 「我拿到的还是原来的对象吗」——AOP 侧',
+                    title: '② 我拿到的还是原来那个对象吗',
                     detail:
-                      'Bean 在 `postProcessAfterInitialization` 里可能被替换成代理。于是「事务为什么失效」（自调用拿到的是 `this`）、「`@Async` 为什么不生效」（同类调用）、「注入的是代理还是原对象」（循环依赖三级缓存）全都归到这一条。**这是 Spring 里最值钱的一个提问方式。**',
+                      '回答代理侧的一切:对象在初始化的哪个时机被替换成代理、JDK 代理与 CGLIB 各自的前提、以及由此带来的所有「注解不生效」。自调用、同类调用、`final` 方法、异步线程——四个失效原因都是同一个:[[调用没有经过代理]]。',
                   },
                   {
-                    title: '③ 「这些配置是谁给我的」——装配侧',
+                    title: '③ 这些配置是谁给我的',
                     detail:
-                      '`@ComponentScan` 扫到了什么、`@Import` 导入了什么、`@Conditional` 判断了什么、`AutoConfiguration.imports` 里列了什么。**Boot 的「自动配置」「starter」「覆盖默认值」都属于这一条。**',
+                      '回答装配侧的一切:扫描到了什么、导入了什么、条件判断了什么、清单文件里列了什么。这一条是 Spring Boot 的主场,但它的机制完全建立在容器与前两条之上——所以不懂容器直接看自动配置,只能背步骤。',
                   },
                   {
-                    title: '④ 推论：几乎所有「Spring 玄学」都能归因',
+                    title: '④ 推论:几乎所有「玄学」都能归因',
                     detail:
-                      '「注解不生效」→ ②（代理没生成或没经过代理）；「Bean 找不到」→ ③（没被扫描到 / 条件不满足）；「启动报循环依赖」→ ①（构造器注入无法提前暴露）；「改了配置没起效」→ ③（条件装配的优先级没搞清）。**先归类，再查证，比漫无目的地搜异常栈高效得多。**',
+                      '「注解不生效」→ 第二条(代理没生成或没经过);「Bean 找不到」→ 第三条(没被扫描到或条件不满足);「启动报循环依赖」→ 第一条(构造器注入无法提前暴露);「改了配置没起效」→ 第三条(条件装配的优先级比你想的高)。[[能这样归因,说明你不是在背 Spring,而是在用它]]。',
                   },
                 ],
-                takeaway:
-                  '一句话：**Spring 的所有「魔法」都可以还原成「一个 Map + 一张图纸表 + 一串扩展点 + 一层代理」**。容器不是黑盒，它做的每件事都有明确的时机与数据结构。所以学 Spring 的正确姿势不是「记注解」，而是「记时机」——**「这件事发生在 refresh 的哪一步」，比「这个注解什么意思」重要十倍**。',
+              },
+              {
+                kind: 'concept',
+                title: '收口:三句话讲完这个框架',
+                body: [
+                  '第一句:**它把创建对象的权力收归容器**——你只声明需要什么,容器读 `BeanDefinition` 负责造、负责给、负责销毁,顺带用 `BeanPostProcessor` 把横切逻辑加上去。第二句:**它靠代理实现横切**——所以「拿到的是不是原对象」是排查一切失效问题的第一个问题。第三句:**它的模块是单向依赖的**——所以遇到不认识的类,先看它在哪一层,就知道它能用谁。',
+                  '还有一处值得单独记住:基础容器与企业级容器的差别不是「功能多几个」,而是**失败时机不同**。预实例化让错误在启动时暴露,这是「生产可用」和「玩具能用」的分界线。',
+                  '自测一道:一个接口只有声明没有实现类,为什么能被注入?如果答得出「容器里注册的是工厂 Bean,它生产出来的是动态代理」,那持久层那一课可以直接跳着看。',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'Q8 · 项目启动时，Spring 的 IoC 容器做了什么？',
+                questionId: 'java-05-Q8',
+                intent: '考的是「能不能按四个分界点组织答案」。能背十几个步骤不算会,能说出「哪一步之后什么就绪了」才说明理解了启动的阶段性。',
+                points: [
+                  '**① 定位与解析配置**:把扫描、导入、显式声明都变成「对象图纸」——类名、作用域、懒加载、初始化方法',
+                  '**② 执行容器级后置处理器**:解析配置类;很多「注解不生效」的问题在这一步就已经决定了(定义压根没生成)',
+                  '**③ 注册 Bean 级后置处理器**:注入与代理的处理能力在这一步就位,所以它必须先于普通对象创建',
+                  '**④ 初始化基础设施**:国际化资源、事件广播器、生命周期处理器',
+                  '**⑤ 预实例化单例**:遍历图纸,逐个走「实例化 → 属性填充 → 初始化前后回调 → 初始化方法」的完整生命周期',
+                  '**⑥ 完成刷新**:启动生命周期组件、发布容器就绪事件,之后才轮到「启动后执行一次」的任务',
+                  '**关键顺序**:容器级后置处理器先于 Bean 级,Bean 级先于普通对象——[[因为它们本身也是对象,而它们要在别的对象创建时生效]]',
+                ],
+                depth:
+                  '拉开分档:普通答法能按顺序说出步骤;好答法会指出「第 ② 步之前图纸还没齐,此时谈『有没有这个对象』没有意义」;[[最好的答法会把这套流程和具体的失效现象挂钩]]——比如「自调用失效不是在启动阶段发生的,但代理是在第 ③ 步之后才可能生成,所以启动阶段的判断只决定『有没有代理』,不决定『有没有经过代理』」。',
+                followup: '追问:你说第 ⑤ 步才创建单例,那如果两个单例互相依赖,是靠什么机制提前拿到的?这个机制能解决构造器注入的情况吗?',
               },
             ],
           },
@@ -398,437 +281,242 @@ export default {
           sources: [{ topic: 'java-05', chapters: ['二、IoC 与 Bean'] }],
           content: {
             intro:
-              'Bean 生命周期是 Spring 面试的必考题，也是最容易背成流水账的一题。正确的记法是抓住四条主线：实例化、属性填充、初始化、销毁；每一段前后都有对应扩展点——`BeanPostProcessor` 在初始化前后各拦一次，Aware 接口注入容器自身能力，`@PostConstruct` 与 `init-method` 在初始化阶段按序执行。抓住这条主线，再多的扩展点也能挂上去。本节还会讲清四种注入方式的取舍、六种作用域的语义、`@Configuration` 为什么必须被 CGLIB 增强——这些都与「生命周期在哪个时刻发生什么」直接相关。',
-            outline: [
-              '四阶段主干：实例化 → 属性填充 → 初始化（Aware → BPP 前置 → init → BPP 后置）→ 销毁',
-              '初始化三方法的顺序固定：`@PostConstruct` > `afterPropertiesSet` > `init-method`',
-              'BFPP 改「图纸」，BPP 改「成品」；`@Configuration` 靠 CGLIB 增强保证 `@Bean` 单例语义',
-              '单例 Bean 只保证「创建」线程安全，不保证「使用」线程安全，无状态设计才是正解',
-            ],
-            pitfalls: [
-              '把 `init-method` 与 `afterPropertiesSet` 的顺序说反，实际是 `@PostConstruct` → `afterPropertiesSet` → `init-method`',
-              '用字段注入并声称它更好，忽略无法 `final`、掩盖循环依赖、无法脱离容器测试这三个问题',
-            ],
+              '先从一段会出事的代码说起:`new UserService()` 之后照常调它的方法,结果里面 `@Autowired` 的字段是 null,标了 `@Transactional` 的方法也不走事务。同一个类,为什么从容器里拿就能用,自己 new 就不行?因为[[容器给你的根本不是你写的那个对象]]。这一课沿着「一个 Bean 从图纸到成品」这条线走一遍:容器做了哪两件事、四个阶段各自能挂什么钩子、`@Configuration` 为什么要被增强,最后回答五个最常被追问的问题。',
             sections: [
               {
-                kind: 'concept',
-                title: '本课地图：一张生命周期图撑起整节课',
+                kind: 'why',
+                title: '自己 new 出来的对象，为什么那些注解全失效？',
                 body: [
-                  '本课 12 道题，看起来分散（作用域、注入方式、`@Autowired` 原理、初始化顺序、`@Bean` 与 `@Component`、Aware、`@Value`），但它们全是同一张图的注脚：**一个 Bean 从「图纸」变成「可用的单例」，中间要经过哪些步骤、每步能挂什么钩子**。',
-                  '把这张图记牢，剩下的都是「把某个注解放到图上对应的位置」。比如：`@Autowired` 在「属性填充」；`@PostConstruct` 在「初始化」；`BeanPostProcessor` 横跨「初始化」的前后；AOP 代理生成在「初始化后」；`@Configuration` 的 CGLIB 增强发生在「BeanDefinition 阶段」。**先有图，再有注解**，这是本节唯一的学习方法。',
+                  '写个 `UserService`,里面用 `@Autowired` 拿 `UserMapper`,方法上标 `@Transactional`。从容器里注入进来用,一切正常;自己 `new UserService()` 再调,注入是 null,事务也不生效。注解明明还写在类上。',
+                  '一个常见的猜法是「注解要在启动时被扫描才生效,现在启动完了,所以没扫到」。这个猜想能解释 null,但解释不了另一半:**就算你用反射把 `userMapper` 塞进去了,`@Transactional` 依然不生效**。所以问题不在"注解有没有被看到"。',
+                  '真实情况是:[[你 new 出来的那个是「原装对象」,而容器交给你的是「加工过的对象」]]。事务、缓存、异步这些能力不是注解自带的,是容器在对象造好之后**再套一层代理**加上去的;new 出来的对象没经过这道工序,自然什么都没有。',
+                  '这就是 IoC(控制反转)在工程上的真实含义:**对象的创建权从「你自己 new」交给容器**,代价是你不能完全掌控它怎么被造出来,收益是容器能在造的过程中往里加东西——注入依赖、套代理、注册销毁回调。',
+                  '所以这一课要回答的其实是同一个问题的五个侧面:容器造对象时到底做了哪些步骤,每一步能挂什么钩子,以及为什么有些东西只有容器造的对象才有。',
                 ],
-                points: [
-                  '**图纸阶段**：`BeanDefinition` 注册 → `BeanFactoryPostProcessor` 修改图纸（占位符替换、配置类解析）',
-                  '**生产阶段**：实例化（反射 / 工厂方法）→ 属性填充（`@Autowired`）→ Aware 回调 → 初始化（三方法按序）→ **BPP 后置（AOP 代理在这里生成）**',
-                  '**使用与销毁**：单例进缓存，`prototype` 不归容器管；销毁时 `@PreDestroy` → `destroy()` → `destroy-method`',
-                  '**两条铁律**：BPP 对**每个 Bean**都生效；BFPP 只在**容器启动时**跑一次',
-                ],
+                without:
+                  '反过来想:如果所有对象都自己 new,依赖注入、声明式事务、AOP、`@Value` 配置绑定就全都没有了——这些能力的共同前提都是「对象由容器创建,并且经过容器的手」。[[所以「Bean 和 new 出来的对象有什么区别」这个问题的答案,本质是「有没有经过容器那几道工序」]]。',
               },
               {
-                kind: 'question',
-                title: '说一下 Spring Bean 的生命周期（完整流程）',
-                questionId: 'java-05-Q10',
-                intent:
-                  '这题的分水岭是「能不能把扩展点插到正确位置」。四阶段是骨架，Aware 与 BPP 的位置是细节。',
-                points: [
-                  '**① 实例化（Instantiation）**：容器按 `BeanDefinition` 通过**反射调用构造器**（或工厂方法）创建「原始对象」。此时字段全是默认值，依赖还是 null',
-                  '**② 属性填充（Populate）**：注入 `@Autowired` / `@Resource` / `@Value` 依赖，由 `AutowiredAnnotationBeanPostProcessor.postProcessProperties` 完成',
-                  '**③ Aware 回调**：`BeanNameAware` → `BeanClassLoaderAware` → `BeanFactoryAware`（由 `invokeAwareMethods` 直接调用）；`ApplicationContextAware` / `EnvironmentAware` 由 `ApplicationContextAwareProcessor`（一个 BPP）在前置阶段触发',
-                  '**④ 初始化前**：`BeanPostProcessor.postProcessBeforeInitialization`（`@PostConstruct` 就是在这一步被 `CommonAnnotationBeanPostProcessor` 调用的）',
-                  '**⑤ 初始化**：`InitializingBean.afterPropertiesSet()` → `init-method`（或 `@Bean(initMethod=...)`）',
-                  '**⑥ 初始化后**：`BeanPostProcessor.postProcessAfterInitialization`——**AOP 代理在这里生成**（`AbstractAutoProxyCreator`），返回的可能是代理对象而不是原对象',
-                  '**⑦ 使用**：单例进 `singletonObjects` 缓存；`prototype` 交给调用方，容器不再持有',
-                  '**⑧ 销毁**：容器关闭时 `@PreDestroy` → `DisposableBean.destroy()` → `destroy-method`；仅对单例有效',
+                kind: 'concept',
+                title: '容器做两件事：先有你写的图纸，再有能用的成品',
+                body: [
+                  '容器启动时,先做一件很多人忽略的事:**把每个类读成一张「配置单」**,Spring 管它叫 `BeanDefinition`。这张单子上不存对象,只存"怎么造"的信息——类名、作用域(单例还是每次新建)、要不要懒加载、构造参数、哪些字段要注入。',
+                  '有了配置单,容器才开始造对象。造的过程分四步:实例化、填依赖、初始化、销毁。**这套分工解释了一个高频困惑**:为什么有的扩展点能改作用域,有的只能改对象?',
+                  '因为 Spring 有两类"插手的机会",分别对应两个阶段。第一类叫 `BeanFactoryPostProcessor`(简称 BFPP),它在**所有对象还没造出来之前**执行,手里只有配置单,所以它只能改配置单——改作用域、改属性值、把占位符 `${}` 换成真实值。第二类叫 `BeanPostProcessor`(简称 BPP),它在**每个对象造好之后**执行,手里是活的对象,所以它能替换对象、能套代理。',
+                  '一句话记法:[[BFPP 改图纸,BPP 改成品]]。后面所有"这个功能是谁实现的"的问题,都可以先用这句话猜一遍,再去验证。',
                 ],
-                depth:
-                  '第 ⑥ 步是整个生命周期最「危险」的一步：**它可以把对象换掉**。`postProcessAfterInitialization` 的返回值会替代原对象进入缓存，于是「容器里的 Bean ≠ 你 new 出来的对象」。这解释了三件事：① 「为什么 `@Transactional` 生效」——因为注入到别处的已经是代理；② 「为什么自调用不生效」——因为 `this` 是原始对象，不是代理；③ 「为什么循环依赖需要三级缓存」——因为要在「属性填充」时就拿到「可能已被代理」的早期引用。**一句话：Spring 的很多「玄学」都源于「对象在初始化后被替换了」。**',
-                followup:
-                  '「`prototype` 的销毁回调为什么不执行」——因为容器**不持有** `prototype` 实例（每次 `getBean` 都新建，容器不知道你什么时候不用了），所以无法在关闭时统一销毁。若 `prototype` Bean 里有资源需要释放，必须由调用方自己负责（手动调 `destroy`、或用 `try-with-resources` 包装）。**这也是「优先用单例」的一条现实理由**：单例的生命周期由容器兜底，`prototype` 全靠自觉。',
+                term: {
+                  name: 'BeanDefinition（Bean 定义）',
+                  def: '容器对「怎么创建一个 Bean」的描述:类名、作用域、是否懒加载、构造参数、要注入的属性等。它不是对象,是造对象的说明书;所有 Bean 都是先有定义、后有实例。',
+                },
               },
               {
                 kind: 'diagram',
-                title: '生命周期的八个节点与它们的钩子',
-                body: [
-                  '这张流程图把「阶段」与「钩子」叠在一起看。注意 ④ 与 ⑥ 是同一个接口的两次回调——这是 BPP 的设计核心。',
-                ],
+                title: '一个 Bean 的八个节点，和能挂在节点上的钩子',
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '① 实例化：反射调构造器', note: '`InstantiationAwareBeanPostProcessor` 可在此短路返回代理' },
-                    { label: '② 属性填充：注入依赖', note: '`postProcessProperties` → 处理 `@Autowired` / `@Value`' },
-                    { label: '③ Aware 回调：注入容器能力', note: '`BeanNameAware` → `BeanFactoryAware` → `ApplicationContextAware`' },
-                    { label: '④ BPP 前置：`postProcessBeforeInitialization`', note: '`@PostConstruct` 在这一步执行' },
+                    { label: '① 实例化：反射调构造器', note: '造出一个「空壳」，字段全是默认值，依赖还是 null' },
+                    { label: '② 属性填充：注入依赖', note: '处理 `@Autowired` / `@Value`，由 BPP 家族的一员完成' },
+                    { label: '③ Aware 回调：把容器能力交给它', note: '比如把 beanName、容器本身传给 Bean' },
+                    { label: '④ BPP 前置：初始化之前', note: '`@PostConstruct` 在这一步执行' },
                     { label: '⑤ 初始化：`afterPropertiesSet` → `init-method`', note: '顺序固定，不可颠倒' },
-                    { label: '⑥ BPP 后置：`postProcessAfterInitialization`', note: '**AOP 代理在此生成，返回值可能替换原对象**' },
-                    { label: '⑦ 使用：单例进缓存 / prototype 交出去', note: '此后 Bean 就绪' },
-                    { label: '⑧ 销毁：`@PreDestroy` → `destroy()` → `destroy-method`', note: '仅单例有效' },
+                    { label: '⑥ BPP 后置：初始化之后', note: '[[AOP 代理在这一步生成，返回值会替换掉原对象]]' },
+                    { label: '⑦ 使用：单例进缓存，prototype 直接交出去', note: '到这里 Bean 才算可用' },
+                    { label: '⑧ 销毁：`@PreDestroy` → `destroy()` → `destroy-method`', note: '只有单例走这一步' },
                   ],
                   caption:
-                    '记住 ④ 与 ⑥ 的关系：**同一个 `BeanPostProcessor` 接口的两个方法，把「初始化」夹在中间**。所以任何「在 Bean 初始化前后要做的事」都可以塞进 BPP——`@PostConstruct`、`@Autowired`（在 ② 的 `postProcessProperties`）、AOP 代理，全都是 BPP 家族的实现。**理解「BPP 是万能挂钩」，就不需要死记每个功能由谁实现。**',
+                    '这张图只有一个地方需要真正理解:**④ 和 ⑥ 是同一个接口(BPP)的两个方法,它们把「初始化」夹在中间**。所以任何「在 Bean 初始化前后要做的事」都能塞进 BPP——`@PostConstruct`、`@Autowired`、AOP 代理,全都是 BPP 家族干的。[[记住「BPP 是万能挂钩」,就不用死记每个功能由谁实现]];反过来,看到一个陌生的扩展点,先问它挂在④还是⑥,基本就能推出它的能力边界。',
                 },
               },
               {
-                kind: 'diagram',
-                title: '扩展点的执行时机对照',
+                kind: 'principle',
+                title: '四个阶段各自在做什么',
                 body: [
-                  '面试常问「这个扩展点什么时候执行」。这张表按「作用于什么」分类，比按时间线列更容易记。',
+                  '八个节点听起来多,但按阶段归并只有四段。每一段结束时的状态不一样,做题时判断「此刻能不能拿到 X」全靠这个。',
                 ],
-                diagram: {
-                  type: 'matrix',
-                  head: ['扩展点', '作用对象', '执行时机', '典型实现'],
-                  cols: ['作用对象', '执行时机', '典型实现'],
-                  rows: [
-                    ['`BeanFactoryPostProcessor`', '`BeanDefinition`（图纸）', '所有 Bean 实例化**之前**', '`ConfigurationClassPostProcessor`'],
-                    ['`BeanDefinitionRegistryPostProcessor`', '注册表本身', 'BFPP 中**最优先**', '`ConfigurationClassPostProcessor`'],
-                    ['`InstantiationAwareBeanPostProcessor`', '实例化前后 + 属性填充', '② 之前 / ② 中', '`AutowiredAnnotationBeanPostProcessor`'],
-                    ['`BeanPostProcessor`', 'Bean 实例', '④ 与 ⑥（初始化前后）', '`CommonAnnotationBeanPostProcessor`'],
-                    ['`Aware` 系列', 'Bean 本身', '③（属性填充后）', '`ApplicationContextAwareProcessor`'],
-                    ['`InitializingBean`', 'Bean 本身', '⑤ 的第一步', '业务代码实现'],
-                    ['`SmartInitializingSingleton`', 'Bean 本身', '**所有单例创建完之后**', '需要「全体就绪」的逻辑'],
-                  ],
-                  caption:
-                    '最后一行值得单独记：`SmartInitializingSingleton` 在**所有单例都创建完成之后**才回调，是「我需要等其他 Bean 都就绪」的正确钩子（比 `ContextRefreshedEvent` 更早、且不受子容器影响）。很多人想「启动时预热缓存」，用 `@PostConstruct` 会踩坑——那时别的 Bean 可能还没造好；**用 `SmartInitializingSingleton` 才安全**。',
-                },
-              },
-              {
-                kind: 'question',
-                title: 'Bean 有哪些作用域？',
-                questionId: 'java-05-Q11',
-                intent:
-                  '六个作用域要能说清「生命周期归属」。最值钱的追问是「单例注入 prototype 会怎样」。',
-                points: [
-                  '**`singleton`（默认）**：每个容器一个实例，存于 `singletonObjects`。**创建时机**取决于是否懒加载',
-                  '**`prototype`**：每次 `getBean` 都新建，容器**不管理销毁**（不调销毁回调）',
-                  '**`request`**：每个 HTTP 请求一个实例（需 Web 环境，靠 `RequestContextHolder` 实现）',
-                  '**`session`**：每个 HTTP 会话一个实例',
-                  '**`application`**：整个 `ServletContext` 一个实例（注意不是「应用」级，是 ServletContext 级）',
-                  '**`websocket`**：每个 WebSocket 会话一个实例',
-                  '**指定方式**：`@Scope("prototype")` / `@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)`，或 XML 的 `scope` 属性',
-                  '**致命细节：单例注入 prototype 会「退化」**。因为单例只初始化一次，注入动作也只发生一次，`prototype` 就被「锁」在单例里，永远用同一个实例',
+                steps: [
+                  {
+                    title: '① 实例化：造出空壳',
+                    detail:
+                      '容器按配置单,用反射调构造器(或工厂方法)创建对象。**这一步结束时对象已经存在,但还不能用**——字段是默认值,依赖全是 null。所以「构造器里能不能用注入的依赖」这个问题的答案是**不能**,那时还没填。',
+                  },
+                  {
+                    title: '② 属性填充：把依赖塞进去',
+                    detail:
+                      '处理 `@Autowired` / `@Value`,由 `AutowiredAnnotationBeanPostProcessor` 完成。默认按**类型**找,同类型有多个候选时再按字段名兜底。这一步结束后,依赖才算齐。',
+                  },
+                  {
+                    title: '③ 初始化：四个钩子按固定顺序跑',
+                    detail:
+                      '先 Aware 回调(把容器能力交给 Bean),再 BPP 前置(执行 `@PostConstruct`),然后 `afterPropertiesSet()`,最后 `init-method`。[[这个顺序是固定的,也是最常被考的一条]]——记法是从「框架最内建」到「用户最外围」:`@PostConstruct` 是注解 → `afterPropertiesSet` 是实现接口 → `init-method` 是 XML 配置。',
+                  },
+                  {
+                    title: '④ 销毁：只有单例才走',
+                    detail:
+                      '顺序是 `@PreDestroy` → `destroy()` → `destroy-method`,和初始化镜像对称。**prototype 的 Bean 交出去之后容器就不管了**,销毁回调根本不会执行——这也是「用 prototype 省内存」这个说法站不住的原因。',
+                  },
                 ],
-                depth:
-                  '「单例注入 prototype 退化成单例」是这题的高频追问，三种解法要能说清：① **`ObjectProvider<T>` / `ObjectFactory<T>`**——注入的是「提供者」，每次 `getObject()` 才真正去容器取新实例（推荐，Spring 4.3+ 支持直接注入 `ObjectProvider`）；② **`@Lookup` 方法**——在单例里声明一个抽象方法，让容器用 CGLIB 生成子类实现「每次调用返回新 Bean」；③ **`@Scope(value="prototype", proxyMode=ScopedProxyMode.TARGET_CLASS)`**——给 `prototype` Bean 生成一个代理，注入的是代理，每次方法调用时再去取真实实例。**三种解法的本质都是「延迟到使用时才去容器取」**。',
-                followup:
-                  '「`request` 作用域是怎么实现的」——核心是 `RequestContextHolder`，它用 `ThreadLocal` 持有当前请求的 `RequestAttributes`。所以「同一个请求内多次 `getBean` 拿到同一实例」的前提是**同一个线程**——如果你在 `@Async` 方法里访问 `request` 作用域的 Bean，会抛 `IllegalStateException: No thread-bound request found`，因为子线程没有那个 `ThreadLocal`。这是异步场景的经典坑。',
+                takeaway:
+                  '一句话串完:**先造空壳、再填依赖、然后按「注解 → 接口 → 配置」的顺序初始化、最后单例才销毁**。所有「为什么这个注解没生效」的问题,基本都是在问「它需要在第几步之后」——而你自己 new 的对象,这几步一步都没走过。',
               },
               {
                 kind: 'compare',
-                title: '六种作用域的语义与代价',
-                head: ['作用域', '实例数量', '销毁回调', '典型用途'],
+                title: 'BFPP 与 BPP：改图纸和改成品的分工',
+                head: ['维度', 'BeanFactoryPostProcessor', 'BeanPostProcessor'],
                 rows: [
-                  ['`singleton`', '每容器 1 个', '**会执行**', '无状态 Service / 配置类 / 连接池'],
-                  ['`prototype`', '每次 getBean 1 个', '**不执行**', '有状态的短生命周期对象'],
-                  ['`request`', '每请求 1 个', '会执行（请求结束时）', '请求级上下文（用户、traceId）'],
-                  ['`session`', '每会话 1 个', '会执行（会话失效时）', '登录用户信息、购物车'],
-                  ['`application`', '每 ServletContext 1 个', '会执行', '全局配置、应用级缓存'],
-                  ['`websocket`', '每连接 1 个', '会执行', 'WS 会话状态'],
+                  ['手里拿到的是', '配置单（`BeanDefinition`）', '已经造好的对象'],
+                  ['执行时机', '所有 Bean 实例化**之前**', '**每个** Bean 初始化前后'],
+                  ['执行几次', '**一次**', '每个 Bean **两次**（前置 + 后置）'],
+                  ['能替换对象吗', '不能，只能改元信息', '**能**，返回值直接替换原对象'],
+                  ['能改作用域吗', '**能**', '不能'],
+                  ['能加 AOP 吗', '不能', '**能**'],
+                  ['典型实现', '`ConfigurationClassPostProcessor`', '`AutowiredAnnotationBeanPostProcessor`'],
                 ],
+                note:
+                  '第四、五、六行是判断依据:**只有 BPP 能替换对象,也只有 BFPP 能改作用域**。所以「我想把某个 Bean 改成 prototype」要去 BFPP;「我想给某个 Bean 套一层代理」要去 BPP。[[选错扩展点,是「扩展点不生效」最常见的原因]]。',
                 caption:
-                  '第二、三列是全表的关键：**只有 `singleton` 是「容器完整托管」的**，`prototype` 连销毁都不管，其余四种是「作用域代理 + 容器托管」。所以「用 `prototype` 省内存」是个错觉——它只是把「何时创建」的决定权交出去了，**用完不管，反而更容易泄漏**。真正该用 `prototype` 的场景是「有状态且生命短」，而不是「为了性能」。',
+                  '这张表不用背,它其实是「图纸 / 成品」一句话的展开:图纸阶段能改的只有纸上的字,成品阶段能改的是东西本身。看表时留意最后一行——`ConfigurationClassPostProcessor` 同时出现在 BFPP 的位置,它是解析 `@Configuration`、`@Bean`、`@ComponentScan` 的那个人,也就是说**你写的注解能生效,靠的是它**。',
               },
               {
-                kind: 'question',
-                title: '单例 Bean 是线程安全的吗？',
-                questionId: 'java-05-Q12',
-                intent:
-                  '标准答案分两半：**只保证创建线程安全，不保证使用线程安全**。然后给出「无状态设计」这个正解。',
-                points: [
-                  '**不一定安全**。Spring 只保证「**创建过程**」线程安全（单例缓存用 `ConcurrentHashMap` + 双重检查），不保证「**使用过程**」线程安全',
-                  '**为什么不安全**：单例意味着「所有请求共用同一个实例」。若 Bean 有**可变成员变量**（如把 `userInfo` 存进字段），并发请求会互相覆盖',
-                  '**为什么实际很少出问题**：Controller / Service 大多是**无状态**的——数据都走方法参数与局部变量，局部变量在各线程的栈帧里天然隔离',
-                  '**解法一（推荐）：无状态设计**。所有「随请求变化的数据」都当作方法参数传递，不放进字段',
-                  '**解法二：用 `ThreadLocal`** 保存请求级数据。注意线程池复用线程，**必须在 `finally` 里 `remove()`**，否则既泄漏又串数据',
-                  '**解法三：用并发工具**。需要共享可变状态时，用 `AtomicInteger`、`ConcurrentHashMap`、`LongAdder`，而不是裸字段',
-                  '**解法四：改作用域**。`prototype` / `request` 可以做到「每请求一实例」，但有创建开销，且 `prototype` 注入单例还会退化（见上题）',
+                kind: 'concept',
+                title: '`@Configuration` 为什么必须被增强',
+                body: [
+                  '这是个看起来很小、但追问率极高的点。场景:一个配置类里有两个 `@Bean` 方法,`a()` 里直接调 `b()`。',
+                  '如果这就是普通的 Java 方法调用,那 `b()` 每被调一次就 `new` 一个 B——**单例被破坏了**。可事实上 Spring 里拿到的还是同一个 B。为什么?',
+                  '因为 Spring 给 `@Configuration` 类**生成了一个子类**(用 CGLIB 这个字节码库),把 `@Bean` 方法重写了。重写后的逻辑是:先问容器「这个 Bean 有没有」,有就直接返回缓存里那个,没有才真正执行方法体。所以类内调用也走了容器,单例语义成立。',
+                  '这个模式叫 full 模式。如果换成 `@Component`,或者显式写 `@Configuration(proxyBeanMethods = false)`,就没有这层代理了,叫 lite 模式:类内调 `b()` 会真的执行方法体、真的 new 一个。**好处是启动更快**(省掉生成子类和代理的开销),代价是类内调用不再保证单例。',
+                  '由此得到两条实践纪律。**第一,`@Bean` 方法之间不要互相调用**:要依赖就写成方法参数 `@Bean A a(B b)`,Spring 会自动把 B 装进来——这种写法不依赖 CGLIB,在 lite 模式下也安全。**第二,配置类不要写成 `final`**,否则 CGLIB 没法继承,启动直接报错。',
                 ],
-                depth:
-                  '「Spring 只保证创建线程安全」这句话具体指什么？指「**同一个单例不会被创建两次**」。`DefaultSingletonBeanRegistry.getSingleton` 用的是「先查 `singletonObjects`（无锁快路径）→ 加锁 → 再查一次（双重检查）→ 创建并放入」的模式。所以并发 `getBean` 也只会造一个实例。但**创建完成之后**，这个实例被多个线程共享，Spring 完全不管——它没有、也无法知道你的字段该怎么同步。**这就是「框架能给你对象，但管不了你的对象是否可共享」**。',
-                followup:
-                  '「`@Controller` 里注入 `HttpServletRequest` 安全吗」——安全，但要注意机制：注入的其实是**作用域代理**（`request` 作用域的 `TARGET_CLASS` 代理），每次方法调用时才通过 `RequestContextHolder` 去当前线程取真实 request。所以它看起来像「单例里塞了请求对象」，实际是「每次访问时现取」。这也解释了为什么**不能在构造器里用 `HttpServletRequest`**——那时还没有请求上下文。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 有哪几种注入方式？为什么官方推荐构造器注入？',
-                questionId: 'java-05-Q13',
-                intent:
-                  '三种方式 + 四条理由。能补上「单构造器可省略 `@Autowired`」「Spring Boot 2.6+ 默认禁止循环依赖」就是加分。',
-                points: [
-                  '**构造器注入**：依赖作为构造参数传入。字段可 `final`，对象一出生依赖就齐全',
-                  '**Setter 注入**：通过 setter 方法注入，适合**可选依赖**（可以配置默认值）',
-                  '**字段注入**：`@Autowired` 直接标在字段上，最简洁但问题最多',
-                  '**理由一：依赖不可变**。`private final Foo foo` 保证对象状态一致，不会被后续误改',
-                  '**理由二：不会出现「半初始化对象」**。构造器注入失败就创建失败，不会有「依赖为 null 的 Bean」在容器里存活',
-                  '**理由三：单测友好**。直接 `new Service(mockRepo)`，不需要起容器、不需要反射',
-                  '**理由四：提前暴露循环依赖**。字段注入靠反射能绕过循环依赖（注入 null 后再补），于是问题被推迟到运行时；构造器注入直接启动失败',
-                  '**官方口径**：强制依赖用构造器，可选依赖用 Setter；**单构造器时 `@Autowired` 可以省略**（Spring 4.3+ 自动识别）',
-                ],
-                depth:
-                  '「字段注入靠反射绕过循环依赖」值得深挖：字段注入的 Bean 在「实例化」时不需要依赖（构造器无参），所以可以先造出空壳、放进三级缓存、再填充属性。而构造器注入必须在「实例化」时就拿到依赖——此时对方还没造出来，于是**无法提前暴露**，只能报 `BeanCurrentlyInCreationException`。这正好接上下一课的「三级缓存为什么解决不了构造器循环依赖」。**Spring Boot 2.6 起默认 `spring.main.allow-circular-references=false`**，就是把这个「被字段注入掩盖的问题」重新暴露出来。',
-                followup:
-                  '「构造器注入的 Bean 很多依赖怎么办」——若构造器有 8 个参数，说明这个类**职责太多**，是设计问题而不是注入方式问题。这也是构造器注入的一个隐性好处：**它让「依赖过多」变得刺眼**（字段注入时你根本不会去数）。重构方向是拆分职责，而不是退回字段注入。',
               },
               {
                 kind: 'diagram',
-                title: '构造器注入 vs 字段注入：差别在「什么时候拿到依赖」',
+                title: '同一个 `@Bean` 方法，两种模式下结果不同',
+                diagram: {
+                  type: 'flow',
+                  direction: 'v',
+                  items: [
+                    { label: '`@Configuration`（full，默认）', note: '类被 CGLIB 生成子类，`@Bean` 方法被重写' },
+                    { label: '配置类里调 `b()`', note: '重写后的方法先查容器：有就返回缓存实例' },
+                    { label: '结果：`a` 和 `b` 拿到同一个实例', note: '单例语义成立' },
+                    { label: '`@Component` 或 `proxyBeanMethods = false`（lite）', note: '没有代理，就是普通方法调用' },
+                    { label: '配置类里调 `b()`', note: '每次都真的 new 一个 B' },
+                    { label: '结果：出现了第二个实例', note: '但启动更快，省掉生成代理的开销' },
+                  ],
+                  caption:
+                    '看这张图时抓住一句话:**full 模式并没有让方法调用变聪明,它只是把「调用」换成了「先问容器」**。所以只要绕开方法调用(改用方法参数注入),就完全不需要这层代理——这也是 Spring 官方推荐「用参数注入而不是类内调用」的原因。另外注意 lite 模式不是错误配置,它是刻意提供的性能选项;[[判断要不要用,就看类内有没有 `@Bean` 互相调用]]。',
+                },
+              },
+              {
+                kind: 'concept',
+                title: '三种注入方式，和官方为什么推荐构造器',
                 body: [
-                  '两种方式的实质差别不是「写法」，而是「依赖到达的时刻」。这决定了能否 `final`、能否测试、能否暴露循环依赖。',
+                  '三种写法都常见:构造器注入(依赖作为构造参数)、Setter 注入(通过 setter 方法)、字段注入(`@Autowired` 直接标字段)。语法上都能跑通,差别在于**依赖是在哪一刻到达对象**。',
+                  '构造器注入的依赖在实例化时到齐,对象一出生就是完整的。这带来三个直接好处,也是官方推荐它的全部理由。**一是字段可以写成 `final`**,依赖不可变,不会被后续代码误改。**二是不存在「半初始化对象」**——构造器注入失败就是创建失败,不会有「依赖为 null 的 Bean」在容器里活着。**三是单测友好**,直接 `new Service(mockRepo)` 就行,不用起容器、不用反射。',
+                  '字段注入正好相反,它有三个短板:**字段不能 `final`**、**单测必须起容器或用反射塞值**、以及最隐蔽的一条——**它把循环依赖藏起来了**。',
+                  '最后这条值得展开。字段注入的 Bean 有无参构造,容器可以先把空壳造出来、放进缓存,再回头填属性;于是 A 依赖 B、B 依赖 A 也能"先各造一个空壳再互相塞",启动不报错。看起来问题被解决了,实际是**把设计上的循环依赖推迟到了运行时**。构造器注入没有这个空子:要造 A 就得先有 B,要造 B 就得先有 A,启动时立刻抛异常。这是 Spring Boot 2.6 起默认禁止循环依赖的原因——**让问题在最早、最便宜的时刻暴露**。',
+                  '还有一个副作用值得一提:构造器参数列表很长时,它会很刺眼。这恰恰是好事,它在提醒你这个类职责太多、该拆了。字段注入把这些依赖藏进字段里,类看起来"很简单",掩盖了同样的问题。',
                 ],
+              },
+              {
+                kind: 'diagram',
+                title: '构造器注入 vs 字段注入：差别在「依赖何时到达」',
                 diagram: {
                   type: 'split',
                   left: {
                     title: '✓ 构造器注入',
                     tone: 'good',
                     items: [
-                      '依赖在「实例化」时到齐，对象一出生就完整',
+                      '依赖在实例化时到齐，对象一出生就完整',
                       '字段可声明 `final`，状态不可变',
-                      '单测直接 `new Service(mockRepo)`，零容器',
-                      '循环依赖**启动即失败**，问题暴露在最早期',
-                      '单构造器时 `@Autowired` 可省略',
-                      '依赖过多时「参数列表很长」，刺眼 → 促使人重构',
+                      '单测直接 `new Service(mockRepo)`，不用起容器',
+                      '循环依赖**启动即失败**，问题暴露在最早处',
+                      '只有一个构造器时，`@Autowired` 可以省略',
+                      '依赖过多时参数列表很长 → 逼你重构',
                     ],
                   },
                   right: {
                     title: '✗ 字段注入',
                     tone: 'bad',
                     items: [
-                      '依赖在「属性填充」时才注入，中间存在「半初始化」窗口',
+                      '依赖在属性填充时才到，中间存在「半初始化」窗口',
                       '字段不能 `final`，运行期可被改动',
-                      '单测必须起容器或用反射注入',
-                      '循环依赖被反射「绕过」，问题推迟到运行时',
-                      '必须写 `@Autowired`，且无法标注可选性（除 `required=false`）',
-                      '依赖藏在字段里，类变得「看起来很简单」→ 掩盖职责过多',
+                      '单测必须起容器，或用反射硬塞',
+                      '循环依赖被反射绕过，问题推迟到运行时',
+                      '必须写 `@Autowired`，且难以标注「可选依赖」',
+                      '依赖藏在字段里，类看起来简单 → 掩盖职责过多',
                     ],
                   },
-                  caption:
-                    '注意右边第四条的「绕过」是怎么发生的：字段注入的 Bean 是**无参构造**，容器可以先把空壳造出来、放进三级缓存，再去填充属性——于是 A、B 互相依赖也能「先各造一个空壳再互相塞」。这个过程看似解决了问题，实际是**把「设计上的循环」藏起来了**。Spring Boot 2.6 默认禁止循环依赖，正是要把这个隐藏问题重新变成启动错误。',
                 },
-              },
-              {
-                kind: 'question',
-                title: '@Autowired 和 @Resource 的区别？',
-                questionId: 'java-05-Q14',
-                intent:
-                  '四行对照：来源、匹配策略、可用位置、特殊属性。最后补「多个同类型 Bean 怎么办」。',
-                points: [
-                  '**来源不同**：`@Autowired` 是 **Spring** 提供的；`@Resource` 是 **JDK 标准**（JSR-250，`javax.annotation` / `jakarta.annotation`）',
-                  '**匹配策略不同**：`@Autowired` 默认**按类型**（`byType`），多个候选时再按字段名兜底，可配 `@Qualifier` / `@Primary` 消歧；`@Resource` 默认**按名称**（`name` 属性 → 字段名），找不到再按类型',
-                  '**可用位置不同**：`@Autowired` 可用于**构造器、方法、字段、参数**；`@Resource` 只能用于**字段与 setter 方法**，不能标在构造器上',
-                  '**特殊属性**：`@Autowired(required=false)` 允许注入失败（留 null）；`@Resource` 没有 `required`',
-                  '**多个同类型 Bean 的三种解法**：① `@Primary` 标首选；② `@Qualifier("beanName")` 指定名称；③ 让**字段名与 Bean 名一致**（`@Autowired` 的兜底策略）',
-                  '**报错**：`NoUniqueBeanDefinitionException`（期望一个但找到多个）或 `NoSuchBeanDefinitionException`（一个都没找到）',
-                  '**实战建议**：统一用构造器 + `@Autowired`（或省略），少用 `@Resource`；需要按名称时优先 `@Qualifier` 而不是依赖字段名',
-                ],
-                depth:
-                  '「按名称兜底」这个行为容易被误解。`@Autowired` 在「类型匹配到多个候选」时，会拿**字段名/参数名**去和候选的 **beanName** 比对；若命中就选它，若都不命中才报错。所以「改字段名导致注入失败」是真实存在的故障——**这也是「依赖字段名兜底」不建议依赖的原因**：重构时改个变量名就炸。相比之下 `@Qualifier` 是显式的，改名不影响。**框架的「智能兜底」在重构友好性上往往是负资产。**',
-                followup:
-                  '「`@Resource` 是按名称，那 name 不写时怎么办」——`CommonAnnotationBeanPostProcessor` 会在 `name` 为空时用**字段名/方法名**作为 beanName 去查；查不到再退化为**按类型**匹配（此时若多个候选，同样报错）。所以它的实际策略是「**先名称、后类型**」，与 `@Autowired` 正好相反。这个顺序差异，在两个同类型 Bean 且字段名恰好等于其中一个 beanName 时，会导致两者注入**不同**的 Bean——这是很隐蔽的坑。',
-              },
-              {
-                kind: 'question',
-                title: '@Autowired 的实现原理是什么？',
-                questionId: 'java-05-Q15',
-                intent:
-                  '必须落到 `AutowiredAnnotationBeanPostProcessor` 与 `InjectionMetadata`，并解释「为什么不能用 static」「为什么构造器里拿不到字段依赖」。',
-                points: [
-                  '**处理者**：`AutowiredAnnotationBeanPostProcessor`（一个 `InstantiationAwareBeanPostProcessor`），在 `refresh()` 的 `registerBeanPostProcessors` 阶段被注册',
-                  '**第一步：扫描元数据**。容器为每个 Bean 类型构建 `InjectionMetadata`——找出所有 `@Autowired` 的**构造器、字段、方法**，并缓存（按 Class 缓存，避免重复反射）',
-                  '**第二步：选构造器**。若只有一个构造器或只有一个带 `@Autowired`，就用它；若有多个带 `@Autowired`，`required=true` 的只能有一个',
-                  '**第三步：属性填充时注入**。在 `populateBean` 阶段回调 `postProcessProperties`，通过反射把依赖写进字段（`field.set`）或调用 setter',
-                  '**第四步：解析依赖**。走 `DefaultListableBeanFactory.resolveDependency`——按类型找候选，多个时按 `@Qualifier` / `@Primary` / 字段名消歧',
-                  '**为什么不能用于 `static` 字段**：`static` 属于**类**而不属于实例，而 BPP 处理的是「实例的字段」。对一个 `static` 字段做 `field.set(beanInstance, value)` 虽然语法可行，但语义上不属于这个 Bean——Spring 直接忽略（不报错但注入不生效）',
-                  '**为什么构造器里拿不到字段注入的依赖**：构造器执行时还在「实例化」阶段，属性填充（②）尚未开始，字段当然是 null',
-                ],
-                depth:
-                  '`InjectionMetadata` 的设计值得注意：它按 **Class** 缓存（`injectionMetadataCache`），而不是按实例。因为「一个类有哪些 `@Autowired` 字段」是类级别的信息，同一个类的所有实例共享。这带来一个可观测结论：**`@Autowired` 字段的反射查找只发生一次**（首次创建该类实例时），之后都走缓存——所以字段注入的性能开销没有想象中那么大。**但它省下的性能，远不足以抵消它在可测试性与循环依赖上的代价。**',
-                followup:
-                  '「怎样在静态方法里用容器里的 Bean」——标准做法是实现 `ApplicationContextAware`，把 `ApplicationContext` 存到一个静态字段里，然后 `ctx.getBean(...)`。这本质是「依赖查找」，属于「不得已才用」的手段（工具类、遗留代码桥接）。更好的做法是把静态方法改成实例方法，让调用方注入依赖——**「静态持有容器」是 Spring 反模式里最常见的一个**。',
-              },
-              {
-                kind: 'question',
-                title: '@PostConstruct、afterPropertiesSet、init-method 的执行顺序？销毁呢？',
-                questionId: 'java-05-Q16',
-                intent:
-                  '顺序是硬知识：初始化 `@PostConstruct` → `afterPropertiesSet` → `init-method`；销毁 `@PreDestroy` → `destroy` → `destroy-method`。',
-                points: [
-                  '**初始化顺序（固定）**：`@PostConstruct` > `InitializingBean.afterPropertiesSet()` > `init-method`',
-                  '**销毁顺序（固定）**：`@PreDestroy` > `DisposableBean.destroy()` > `destroy-method`',
-                  '**为什么是这个顺序**：`@PostConstruct` 由 `CommonAnnotationBeanPostProcessor` 在 `postProcessBeforeInitialization` 里反射调用（最早）；`afterPropertiesSet` 是 `invokeInitMethods` 的第一步（容器内置逻辑）；`init-method` 是第二步（用户配置）——**「标准注解 → 框架接口 → 自定义配置」的由内到外顺序**',
-                  '**三者可以同时存在**，都会按序执行，互不排斥',
-                  '**实战建议**：业务代码统一用 `@PostConstruct` / `@PreDestroy`（JSR 标准，与容器耦合低，换框架也能用）；`InitializingBean` 只出现在框架开发里',
-                  '**注意 `prototype`**：初始化会执行，但**销毁不会**（容器不持有实例）',
-                  '**注意异常**：`@PostConstruct` 抛异常 → Bean 创建失败 → `BeanCreationException`，容器启动失败（单例场景）',
-                ],
-                depth:
-                  '为什么 `@PostConstruct` 在 `afterPropertiesSet` 之前？因为前者是「**BPP 的前置回调**」，后者是「**初始化方法本身**」——BPP 包在初始化方法外面，所以必然更早。理解这一层，就不用死记顺序：**BPP 前置 → 初始化方法（`afterPropertiesSet` 然后 `init-method`）→ BPP 后置**。同理销毁时，`@PreDestroy` 也是由 `CommonAnnotationBeanPostProcessor` 处理的（在 `DestructionAwareBeanPostProcessor` 回调里），所以早于 `destroy()`。**记住「BPP 永远在最外层」，顺序自然就出来了。**',
-                followup:
-                  '「`@Bean(initMethod="x")` 和 `@PostConstruct` 谁先」——`@PostConstruct` 先。因为 `initMethod` 对应的是 `init-method` 那一档（最后），而 `@PostConstruct` 是 BPP 前置。**三种方式并存时，`@PostConstruct` 永远第一个跑**。这也意味着：若初始化逻辑依赖「所有注入都完成」，`@PostConstruct` 是安全的（属性填充已经结束）；但若依赖「其他 Bean 也已就绪」，就要用 `SmartInitializingSingleton`。',
-              },
-              {
-                kind: 'question',
-                title: 'BeanPostProcessor 和 BeanFactoryPostProcessor 有什么区别？',
-                questionId: 'java-05-Q17',
-                intent:
-                  '一句话就能答完：**BFPP 改图纸，BPP 改成品**。再补上「子接口 `InstantiationAwareBeanPostProcessor` 多做了哪些事」。',
-                points: [
-                  '**`BeanFactoryPostProcessor`（BFPP）**：作用于 **`BeanDefinition`（图纸）**，在所有 Bean **实例化之前**执行，可修改元信息（作用域、属性值、是否懒加载）',
-                  '**BFPP 的典型实现**：`ConfigurationClassPostProcessor`（解析 `@Configuration` / `@Bean`）、`PropertySourcesPlaceholderConfigurer`（替换 `${}` 占位符）、`CustomEditorConfigurer`',
-                  '**`BeanPostProcessor`（BPP）**：作用于 **Bean 实例**，在**每个 Bean 的初始化前后**各回调一次',
-                  '**BPP 的典型实现**：`AutowiredAnnotationBeanPostProcessor`（`@Autowired`）、`CommonAnnotationBeanPostProcessor`（`@Resource` / `@PostConstruct`）、`AnnotationAwareAspectJAutoProxyCreator`（**AOP 代理**）',
-                  '**子接口 `InstantiationAwareBeanPostProcessor`** 额外提供三个钩子：`postProcessBeforeInstantiation`（实例化前可**短路返回代理**）、`postProcessAfterInstantiation`（实例化后是否继续填充）、`postProcessProperties`（属性填充，`@Autowired` 就在这里）',
-                  '**执行次数**：BFPP **只跑一次**（容器启动时）；BPP 对**每个 Bean** 都跑',
-                  '**顺序约束**：BFPP 先于 BPP；BPP 本身也是 Bean，但会在「普通 Bean 之前」被创建（`registerBeanPostProcessors` 阶段提前实例化）',
-                ],
-                depth:
-                  '「BPP 自己也会被 BPP 处理吗」——会有例外。容器在 `registerBeanPostProcessors` 阶段创建 BPP 实例时，**只应用「已注册的」BPP**，而当前正在注册的这个还不算。所以「BPP 处理自己」是不成立的自举。这个细节解释了「为什么在 BPP 里注入的依赖可能不全」——因为那时其他 BPP 可能还没就位。**写 BPP 时的纪律是：不要在 BPP 里依赖「其他 BPP 已经生效」这件事**，否则会得到难以复现的启动问题。',
-                followup:
-                  '「`postProcessBeforeInstantiation` 短路返回对象意味着什么」——意味着**跳过整个后续流程**（属性填充、初始化都不做），直接用你返回的对象。这是 `ProxyFactoryBean` 与某些 AOP 场景的实现方式。但代价很大：**返回的对象不经过 `@Autowired` 处理**，所以「短路代理」通常只用于「目标对象完全由自己构造」的场景。**这也是为什么 AOP 默认在 `postProcessAfterInitialization` 做代理，而不是在实例化前。**',
+                caption:
+                  '右边第四条说的「绕过」是这样发生的:字段注入的 Bean 有无参构造,容器能先造空壳、放进缓存,再回头填属性,于是 A、B 互相依赖也能启动。**这不是解决了问题,是把它藏了起来**——Spring Boot 2.6 默认禁止循环依赖,就是要把这个隐藏问题重新变成启动错误。[[所以「循环依赖三级缓存」那套机制的存在,本身就是在给字段注入擦屁股]]。',
               },
               {
                 kind: 'compare',
-                title: 'BFPP 与 BPP 的分工',
-                head: ['维度', 'BeanFactoryPostProcessor', 'BeanPostProcessor'],
+                title: '三对最容易混的注解：一句话分清',
+                head: ['这一对', '怎么区分', '什么时候用哪个'],
                 rows: [
-                  ['作用对象', '`BeanDefinition`（图纸）', 'Bean 实例（成品）'],
-                  ['执行时机', '所有 Bean 实例化**之前**', '**每个** Bean 初始化前后'],
-                  ['执行次数', '**一次**', '每 Bean **两次**（前置 + 后置）'],
-                  ['能否替换对象', '不能（只改元信息）', '**能**（返回值替代原对象）'],
-                  ['典型实现', '`ConfigurationClassPostProcessor`', '`AutowiredAnnotationBeanPostProcessor`'],
-                  ['能改作用域吗', '**能**（改 BeanDefinition）', '不能'],
-                  ['能加 AOP 吗', '不能', '**能**（`postProcessAfterInitialization`）'],
+                  ['`@Autowired` vs `@Resource`', 'Spring 的、默认**按类型**；JDK 标准的、默认**按名称**。多个候选时，前者要 `@Qualifier` / `@Primary`，后者改字段名即可', '自己项目里用 `@Autowired`；想少依赖 Spring 就用 `@Resource`'],
+                  ['`@Component` vs `@Bean`', '标**类**上、靠扫描、创建过程容器全管；标**方法**上、返回值当 Bean、创建过程你自己写', '自己的类用 `@Component`；第三方库的类（改不了源码）用 `@Bean`'],
+                  ['`@Value` vs `@ConfigurationProperties`', '逐字段注入、支持 SpEL；把一组前缀绑到类的字段上、支持松散绑定与校验', '一两个值用 `@Value`；一组配置（连接池、SDK 参数）用 `@ConfigurationProperties`'],
                 ],
+                note:
+                  '三对问题的结构完全一样:一个"轻"一个"重"。轻的适合少量、明确的场景;重的适合成组、需要校验的场景。**所以判断时不用背区别,只要问自己「我要配几个值、要不要校验」**。',
                 caption:
-                  '第四、六行是核心差异：**只有 BPP 能「替换对象」，也只有 BFPP 能「改作用域」**。所以「我想把某个 Bean 改成 `prototype`」要去 BFPP（或更早的 `BeanDefinitionRegistryPostProcessor`）；「我想给某个 Bean 加一层代理」要去 BPP。**选错扩展点，是「扩展点不生效」的最常见原因。**',
+                  '这三对是 Spring 面试的常客,但真正需要记住的只有三句:[[一个按类型一个按名字、一个标类一个标方法、一个字段一个前缀]]。剩下半句(什么时候用哪个)都是从「谁更省事」推出来的——不需要背。',
               },
               {
-                kind: 'question',
-                title: '@Component 和 @Bean 的区别？@Configuration 和 @Component 有什么区别？',
-                questionId: 'java-05-Q18',
-                intent:
-                  '两问合一。第二问的答案是「CGLIB 增强」，能说出 `lite` 模式与 `full` 模式的差别就是满分。',
-                points: [
-                  '**`@Component`**：标在**类**上，靠组件扫描（`@ComponentScan`）注册。**创建过程由 Spring 全权接管**（反射调构造器 + 属性填充），适用于自己的业务类',
-                  '**`@Bean`**：标在**方法**上，方法返回值作为 Bean。**创建过程由你控制**，适用于第三方库的类（改不了源码，如 `ObjectMapper`、`DataSource`、`SqlSessionFactory`）',
-                  '**`@Configuration` 与 `@Component` 的关键差异**：`@Configuration` 类会被 **CGLIB 增强**，类内 `@Bean` 方法互相调用会被拦截，**返回容器中的同一个实例**（保证单例语义）',
-                  '**`@Component` 里的 `@Bean` 是 `lite` 模式**：方法调用就是普通 Java 调用，直接 `new` 一个新产品，**单例被破坏**',
-                  '**判断规则**：`@Bean` 方法之间有依赖（一个方法调另一个），**必须**用 `@Configuration`；互不调用则 `@Component` 也行',
-                  '**`@Configuration` 的开关**：`@Configuration(proxyBeanMethods=false)` 可关闭 CGLIB 增强（`lite` 模式），启动更快，适合「`@Bean` 之间无调用」的场景——**Boot 内部大量使用这个优化**',
-                ],
-                depth:
-                  '为什么需要 CGLIB 增强？因为 Java 的方法调用是「静态绑定到 `this`」的：在 `@Configuration` 类里写 `@Bean A a() { return new A(b()); }`，若不增强，`b()` 就是普通方法调用，每次都 `new` 一个新的 `B`——与「`B` 是单例」的语义冲突。CGLIB 生成子类并重写 `b()`，让它先去容器查「有没有 `B`」，有就返回缓存的那个。**这就是「`@Configuration` 的类不能是 `final`」的原因**（CGLIB 靠继承）。',
-                followup:
-                  '「`@Configuration` 类被增强后，`this` 是什么」——是 CGLIB 子类实例，不是你写的那个类的实例。所以「在 `@Configuration` 里用 `this.xxx()`」与「直接 `xxx()`」在增强后行为一致（都被拦截），但**如果你把配置类注入到别处再调用，也会被拦截**——这正是「保证单例」的效果。反过来，`proxyBeanMethods=false` 时 `this` 就是原对象，调用不再拦截，性能更好但要自己保证不重复创建。',
-              },
-              {
-                kind: 'diagram',
-                title: '@Configuration 的 full 与 lite 模式',
+                kind: 'concept',
+                title: '单例 Bean 是线程安全的吗',
                 body: [
-                  '同一个 `@Bean` 方法，在两种模式下调用结果完全不同。这张图是本课最容易被追问的细节。',
+                  '答案是:**不一定,而且 Spring 从来没承诺过**。它只保证「创建」那一下是线程安全的——单例缓存用并发容器加双重检查,不会重复造出两个;但对象交给业务之后,怎么用是你的事。',
+                  '为什么会有风险:单例意味着所有请求共用同一个实例。只要 Bean 里有一个**可变的成员变量**(比如把当前登录用户存进字段),两个并发请求就会互相覆盖。',
+                  '为什么实际上很少出事:绝大多数 Controller / Service 是**无状态**的——随请求变化的数据都走方法参数和局部变量,而局部变量在各自线程的栈帧里,天然隔离。所谓"Spring 的 Bean 是线程安全的",准确说法是「大多数 Bean 碰巧没有共享可变状态」。',
+                  '三条对策,按优先级:首选**无状态设计**,把随请求变化的数据一路当参数传下去;确实需要"整个请求内共享"时用 `ThreadLocal`(记得在请求结束时清理);如果这个对象本质上就是有状态的,把它改成 `prototype`,让每个使用者持有自己的实例。',
                 ],
-                diagram: {
-                  type: 'flow',
-                  direction: 'v',
-                  items: [
-                    { label: '`@Configuration`（full 模式，默认）', note: '类被 CGLIB 增强，`@Bean` 方法被重写' },
-                    { label: '配置类里调 `b()`', note: '→ 拦截器先查容器：有 `B` 就返回缓存实例' },
-                    { label: '结果：`a` 与 `b` 里的依赖是同一实例', note: '**单例语义成立**' },
-                    { label: '`@Component` 或 `proxyBeanMethods=false`（lite 模式）', note: '无 CGLIB，普通方法调用' },
-                    { label: '配置类里调 `b()`', note: '→ 每次 `new B()`，产生多个实例' },
-                    { label: '结果：单例被破坏', note: '但启动更快（省掉 CGLIB 生成与代理开销）' },
-                  ],
-                  caption:
-                    '这张图解释了两条实践纪律：① **`@Bean` 方法之间不要互相调用**——要么用方法参数注入（`@Bean A a(B b)`，Spring 会自动装配），要么确保是 `@Configuration`。用方法参数是更好的写法，**它不依赖 CGLIB，也不怕 `proxyBeanMethods=false`**。② **配置类不要写成 `final`**，否则 CGLIB 无法继承，启动报错。',
-                },
               },
               {
                 kind: 'question',
-                title: 'Aware 接口有什么用？常见的有哪些？',
-                questionId: 'java-05-Q19',
+                title: 'Q10 · 说一下 Spring Bean 的生命周期（完整流程）',
+                questionId: 'java-05-Q10',
                 intent:
-                  '本质是「让 Bean 反向拿到容器能力」。要能说出「由谁在什么时候回调」，以及「为什么业务代码慎用」。',
+                  '这是 Spring 最高频的一题。能不能答好,取决于你是按「阶段」讲,还是背一串接口名。',
                 points: [
-                  '**作用**：让 Bean 在**初始化阶段**拿到容器内部的资源对象（容器把自己「感知」给 Bean）',
-                  '**常见 Aware**：`BeanNameAware`（自己的 beanName）、`BeanFactoryAware`（`BeanFactory`）、`ApplicationContextAware`（容器）、`EnvironmentAware`（配置与环境）、`ApplicationEventPublisherAware`（事件发布器）、`ResourceLoaderAware`（资源加载）、`EmbeddedValueResolverAware`（占位符解析）',
-                  '**回调时机**：`BeanNameAware` / `BeanClassLoaderAware` / `BeanFactoryAware` 由 `invokeAwareMethods` 在**属性填充后**直接调用；`ApplicationContextAware` 等由 `ApplicationContextAwareProcessor`（一个 BPP）在 **`postProcessBeforeInitialization`** 阶段调用',
-                  '**典型用途**：工具类静态持有 `ApplicationContext`（按需 `getBean`）、需要读 `Environment` 的组件、需要发布事件的组件',
-                  '**代价**：Aware 让代码与 Spring **强耦合**（直接依赖 `ApplicationContext` 类型），且「拿到容器」往往意味着想要「依赖查找」——这与 IoC 的初衷相悖',
-                  '**纪律**：业务代码优先用「注入具体依赖」而不是「注入容器再查找」；Aware 主要出现在**框架/基础设施代码**里',
+                  '先给主干：**实例化 → 属性填充 → 初始化 → 销毁**，四段一句话说完，再展开细节',
+                  '实例化：按 `BeanDefinition` 反射调构造器，造出「空壳」，**此时依赖还是 null**',
+                  '属性填充：处理 `@Autowired` / `@Value`，由 BPP 家族的一员完成',
+                  '初始化：`Aware` 回调 → BPP 前置（`@PostConstruct`）→ `afterPropertiesSet` → `init-method` → BPP 后置',
+                  '[[BPP 后置是 AOP 代理生成的时刻]]，也是「拿到的对象可能不是原对象」的原因',
+                  '销毁（仅单例）：`@PreDestroy` → `destroy()` → `destroy-method`',
                 ],
                 depth:
-                  '「Aware 回调为什么有两个不同的触发点」？因为 `BeanNameAware` / `BeanFactoryAware` 属于 `spring-beans` 层（`AbstractAutowireCapableBeanFactory.invokeAwareMethods` 硬编码调用），而 `ApplicationContextAware` 属于 `spring-context` 层——`spring-beans` 不能依赖 `spring-context`（模块依赖方向决定），所以只能由 context 层提供一个 BPP（`ApplicationContextAwareProcessor`）来实现。**这个细节正好印证了上一课讲的「模块依赖方向」——知道谁在哪一层，就能推出「这个能力由谁实现」。**',
+                  '拉开分档的地方是最后一句:把「初始化」讲成 BPP 的两个方法夹着三段回调,而不是并列列五个接口。能说清「BPP 是万能挂钩、@PostConstruct 和 AOP 代理都是它的实现」,说明你理解的是机制而不是清单。',
                 followup:
-                  '「`ApplicationContextAware` 拿到的是哪个容器」——当前这个 Bean 所属的容器。若存在父子容器（传统 SSM 里 Spring MVC 容器是 Spring 容器的子容器），拿到的可能是子容器，而子容器里看不到父容器的 Bean（反向可以）。这也是「`@Transactional` 在 Controller 层不生效」的历史原因之一——事务管理器 Bean 在父容器，子容器的代理找不到它。Boot 默认只有一个容器，所以这个问题基本消失。',
+                  '「为什么 AOP 代理要在初始化之后生成?」——因为代理要包住的正是已经初始化好的那个对象;而且代理本身也可能被后续的 BPP 继续处理,放在最后一步才能保证所有增强都已就位。',
               },
               {
-                kind: 'question',
-                title: 'Spring 容器中单例 Bean 和普通 new 出来的对象有什么区别？',
-                questionId: 'java-05-Q20',
-                intent:
-                  '核心是「归属」：生命周期归属容器、能力来自容器。最实用的一句是「自己 new 的 Service 里 `@Autowired` 全是 null」。',
-                points: [
-                  '**生命周期归属**：Bean 由容器创建、注入、初始化、销毁；`new` 出来的对象完全不归容器管',
-                  '**能力归属**：Bean 能享受依赖注入、AOP 增强（事务 / 缓存 / 异步）、事件监听、`@Value` 配置绑定；`new` 出来的对象**这些全都没有**',
-                  '**最典型的事故**：`new UserService()` 之后调它的方法，里面的 `@Autowired UserMapper` 是 **null**，`@Transactional` **不生效**——因为它压根不是容器里的那个代理对象',
-                  '**本质原因**：所有「容器能力」都建立在「对象由容器创建、并经过 BPP 处理」这个前提上。绕过容器创建，就等于绕过了所有增强',
-                  '**反过来也成立**：Bean 可以持有普通对象；普通对象也可以被手动注册进容器（`registerSingleton`）——但那样同样不会经过 BPP 处理',
-                  '**常见误用**：`new` 一个 `@Service` 来做单测、`new` 一个带 `@Transactional` 的类来复用逻辑、在静态工具类里 `new` 依赖',
-                ],
-                depth:
-                  '「怎么在 `new` 出来的对象里用容器能力」——正确做法不是「让 new 出来的对象变强」，而是**把它也交给容器**：① 把工具类声明成 `@Component`；② 若必须在非容器环境用（如 `main` 里的临时脚本），手动 `ctx.getBean()` 拿依赖再 `setter` 进去；③ 用 `@Configurable` + AspectJ 的编译期织入（让 `new` 出来的对象也能被注入，但需要额外配置，且只适合特殊场景）。**绝大多数情况下，正确答案是 ①——不要 new 一个有依赖的类。**',
-                followup:
-                  '「`@Async` 在 `new` 出来的对象里为什么也不生效」——同理，`@Async` 靠 `AsyncAnnotationBeanPostProcessor` 生成代理。`new` 的对象没经过它，自然是同步执行。**这三件事（`@Autowired` 为 null、`@Transactional` 不回滚、`@Async` 不同步）是同一个根因的三个表现**，面试里能一起说出来，比单独背三个「失效原因」有价值。',
-              },
-              {
-                kind: 'question',
-                title: '@Value 和 @ConfigurationProperties 有什么区别？',
-                questionId: 'java-05-Q21',
-                intent:
-                  '四行对照：粒度、松散绑定、校验、类型安全。最后给出「少量用 Value，一批用 ConfigurationProperties」的结论。',
-                points: [
-                  '**`@Value`**：**逐个字段**注入，支持 **SpEL**（`#{...}`）与占位符（`${...}`），适合**少量单个配置**',
-                  '**`@ConfigurationProperties`**：把**一组前缀**绑定到配置类的字段上，适合**批量配置**（如连接池、第三方 SDK 参数）',
-                  '**松散绑定**：`@ConfigurationProperties` 支持 `my-name` / `myName` / `MY_NAME` / `my.name` 多种写法映射到 `myName` 字段；`@Value` **只认精确的 key**',
-                  '**校验**：`@ConfigurationProperties` 可配 `@Validated` + JSR-303（`@NotNull`、`@Min`），启动时校验；`@Value` 不支持',
-                  '**IDE 支持**：`@ConfigurationProperties` 配合 `spring-boot-configuration-processor` 能生成元数据，IDE 里有**自动补全与文档提示**；`@Value` 没有',
-                  '**类型安全**：`@ConfigurationProperties` 支持复杂类型（`List`、`Map`、嵌套对象）；`@Value` 只能绑简单类型与数组（复杂类型要写 SpEL）',
-                  '**注册方式**：`@ConfigurationProperties` 需配合 `@EnableConfigurationProperties(Xxx.class)` 或 `@Component` + `@ConfigurationProperties`；`@Value` 直接可用',
-                ],
-                depth:
-                  '「松散绑定」的实际价值比想象中大：它让「环境变量的命名约束」不再痛苦。Linux 环境变量不允许 `.` 和 `-`，所以 `spring.datasource.url` 要写成 `SPRING_DATASOURCE_URL`——`@ConfigurationProperties` 能自动做这个映射，`@Value("${spring.datasource.url}")` 则会在容器环境里拿不到值（除非改写 key）。**这是「Boot 应用容器化」时最常见的一类配置故障**：本地跑得好，上了 K8s 全部 `null`。',
-                followup:
-                  '「配置刷新（Nacos / Spring Cloud Config）对两者有什么影响」——`@ConfigurationProperties` 天然支持**批量刷新**（`@RefreshScope` 或配置中心的 `ConfigurationPropertiesRebinder` 会重新绑定整个对象）；`@Value` 的刷新需要 Bean 重新创建（`@RefreshScope` 代理），且字段是 `final` 时无解。所以「需要动态刷新的配置」优先用 `@ConfigurationProperties`——**这也是它在大规模微服务里几乎完全取代 `@Value` 的原因**。',
-              },
-              {
-                kind: 'principle',
-                title: '把 Bean 这一课压成四个判断',
+                kind: 'concept',
+                title: '收口：四句话，一道自测',
                 body: [
-                  '12 道题的信息量不小，但它们都可以还原为对同一张生命周期图的四次提问。下面四条是「遇到新问题时的判断入口」。',
+                  '不看上面,试着把四句讲出来。讲得出,这一课就通了。',
+                  '**第一句**:容器做两件事——先把类读成配置单(`BeanDefinition`),再按单子造对象;BFPP 改单子,BPP 改成品。**第二句**:造对象分四段——实例化、填依赖、初始化、销毁;初始化的顺序固定为「注解 → 接口 → 配置」。**第三句**:`@Configuration` 之所以要被 CGLIB 增强,是因为类内 `@Bean` 互相调用时,只有重写方法才会先查容器,否则每次都会 new 一个新的。**第四句**:自己 new 出来的对象没走过这四段,所以注入是 null、事务不生效——[[它的注解一句都没错,错在它没经过容器的手]]。',
+                  '自测一道,就是开头那个场景:`new UserService()` 之后为什么 `@Transactional` 不生效?能答出「代理是在 BPP 后置那一步生成的,new 出来的对象没经过这一步」,说明你把生命周期和代理两件事接上了。答不上来,回去看那张八节点图,重点看第⑥步。',
+                  '这一课还有几道关联真题可以直接自评:`Bean 有哪些作用域`(java-05-Q11)、`Spring 有哪几种注入方式`(java-05-Q13)、`@Autowired 的实现原理`(java-05-Q15)。它们的答案都能从上面四句话推出来——推不出来再回来看图,别直接背。',
                 ],
-                steps: [
-                  {
-                    title: '① 「这个对象什么时候被创建、被谁创建」',
-                    detail:
-                      '作用域（`singleton` 预实例化 / `prototype` 每次新建）、懒加载（`@Lazy`）、`FactoryBean` 都会改变答案。**判断依据：看 `BeanDefinition` 的 `scope` 与 `lazyInit` 两个字段**，其他都是它们的组合。',
-                  },
-                  {
-                    title: '② 「这个依赖什么时候被注入」',
-                    detail:
-                      '构造器注入在「实例化」，字段/setter 在「属性填充」。于是「为什么构造器里 `@Autowired` 字段是 null」「为什么字段注入能绕过循环依赖」都有确定答案——**不是框架的怪癖，是时机决定的**。',
-                  },
-                  {
-                    title: '③ 「我拿到的是原对象还是代理」',
-                    detail:
-                      'AOP 代理在 `postProcessAfterInitialization` 生成。所以「注入到别处的」是代理，「`this` 调用的」是原对象。**所有「注解不生效」的问题，先问这一句。**',
-                  },
-                  {
-                    title: '④ 「这个钩子在哪一步生效」',
-                    detail:
-                      'BFPP 改图纸（最早）、BPP 改成品（每个 Bean 两次）、Aware 注入容器能力（属性填充后）、`@PostConstruct` 在 BPP 前置、`SmartInitializingSingleton` 在全部单例之后。**选错钩子是「扩展点不生效」的头号原因。**',
-                  },
-                ],
-                takeaway:
-                  '一句话：**Spring 的「魔法」全部可以还原为「时机」**。同一个注解在不同时机做不同的事，同一个接口在不同阶段被调用不同次。所以学 Bean 生命周期不是背八股，而是建立一个「时间轴」——**当你能把任何注解、任何扩展点、任何异常都定位到轴上某个位置时，这一课就真的掌握了**。',
               },
+            ],
+            outline: [
+              '容器做两件事：先读成 `BeanDefinition`（图纸），再造出 Bean（成品）',
+              'BFPP 改图纸、BPP 改成品；[[AOP 代理在 BPP 后置那一步生成]]',
+              '四段流程：实例化 → 填依赖 → 初始化 → 销毁，初始化顺序固定',
+              '构造器注入让依赖「一开始就齐」，字段注入会把循环依赖藏到运行时',
+              '单例 Bean 不承诺线程安全，无状态设计才是正解',
+            ],
+            pitfalls: [
+              '把初始化顺序说反——实际是 `@PostConstruct` → `afterPropertiesSet` → `init-method`，从「框架最内建」到「用户最外围」',
+              '以为 `@Transactional` 只靠注解生效——它依赖容器生成的代理，自己 new 出来的对象没有代理',
+              '以为单例 Bean 天生线程安全——Spring 只保证创建过程线程安全，使用过程要自己保证无状态',
             ],
           },
         },
@@ -1731,441 +1419,277 @@ export default {
         {
           id: 'transactions',
           title: '声明式事务：传播、隔离与失效',
-          kind: 'concept',
+          minutes: 55,
           sources: [{ topic: 'java-05', chapters: ['五、事务'] }],
           content: {
             intro:
-              '事务是 Spring 里「用起来最简单、出错最难查」的一块。`@Transactional` 一行注解就能工作，但失效的方式有十几种，而且大多**不报错**——数据就是没回滚，或者部分提交了。本课先把底层那条主线讲透：**事务不是注解的魔法，而是一个连接被绑定到 `ThreadLocal` 上**。抓住这条主线，七种传播行为的差别、`REQUIRES_NEW` 与 `NESTED` 的分野、自调用为什么失效、新线程为什么保不住事务，全都能自己推出来。最后给出失效清单的排查顺序与工程上「大事务」的治理手段。',
+              '加了 `@Transactional`,方法跑完了,没抛异常,日志一切正常——但数据就是没回滚。这种「静默失效」是 Spring 事务最费时间的地方,因为没有任何报错指向它。原因不在注解本身,而在两个前提:[[事务只在经过代理时开启,回滚只在异常穿出方法时发生]]。这两个前提不成立,注解就只是一行注释。抓住它们,七种传播行为的差别、`REQUIRES_NEW` 与 `NESTED` 的分野、自调用为什么失效、异步线程为什么保不住事务,都能自己推出来。',
             outline: [
-              '事务的本质：`TransactionSynchronizationManager` 用 `ThreadLocal` 把「数据源 → 连接」绑到当前线程',
-              '声明式事务的链路：切点匹配 → `TransactionInterceptor` → `getTransaction` → 目标方法 → 提交/回滚',
-              '七种传播行为的分野只有两条：**要不要新建**、**要不要挂起外层**',
-              '`REQUIRES_NEW` 是新连接新事务，`NESTED` 是同连接加保存点——回滚范围完全不同',
-              '失效的根因永远是两个：**调用没经过代理**，或**异常没到达事务管理器**',
+              '事务的本质:把「一条连接」绑到「当前线程」上,靠的是 `ThreadLocal`',
+              '声明式事务的链路:切点匹配 → 拦截器 → 取事务 → 目标方法 → 提交或回滚',
+              '七种传播行为只在回答两个问题:要不要新建、要不要挂起外层',
+              '`REQUIRES_NEW` 是新连接新事务,`NESTED` 是同连接加保存点,回滚范围完全不同',
+              '失效的根因只有两类:调用没经过代理,或异常没到达拦截器',
             ],
             pitfalls: [
-              '把 `NESTED` 当成「独立的子事务」：它共用外层连接，外层回滚时内层一起回滚',
-              '认为配了 `@Transactional` 就一定回滚：受检异常默认**不回滚**，异常被 `catch` 吞掉也**不回滚**',
-              '在事务方法里开新线程做写操作，以为还在同一个事务里——`ThreadLocal` 不会传递到子线程',
+              '把 `NESTED` 当成独立的子事务:它共用外层连接,外层回滚时内层一起回滚',
+              '认为配了注解就一定回滚:受检异常默认不回滚,异常被 `catch` 吞掉也不回滚',
+              '在事务方法里开新线程写库,以为还在同一个事务里——`ThreadLocal` 不会传到子线程',
             ],
             sections: [
               {
-                kind: 'concept',
-                title: '事务的本质：一个连接，绑在一个线程上',
+                kind: 'why',
+                title: '一个「什么都没发生」的故障现场',
                 body: [
-                  '先抛开 Spring，数据库事务在 JDBC 层面只有三件事：**同一个 `Connection`**、`setAutoCommit(false)`、最后 `commit()` 或 `rollback()`。所谓「事务」，就是「一串操作共用一条连接，且这条连接手动提交」。',
-                  'Spring 要解决的问题是：**怎么让 `UserDao.insert()`、`OrderDao.insert()` 这两次独立的方法调用，用的是同一条 `Connection`**？毕竟每次调 `dataSource.getConnection()` 都会拿到新连接。答案是把连接**绑到线程上**。',
-                  '`TransactionSynchronizationManager` 里有一个 `ThreadLocal<Map<Object, Object>> resources`，key 是 `DataSource`，value 是 `ConnectionHolder`（连接 + 引用计数）。`DataSourceUtils.getConnection(dataSource)` 的逻辑是：先看当前线程有没有绑定的连接，有就复用（引用计数 +1），没有才真正从池里取并绑定。**所以「同一事务」在物理上就是「同一线程 + 同一连接」**。这一句能推出后面所有结论：跨线程不共享事务、异步不共享事务、`REQUIRES_NEW` 必须挂起外层（否则两条连接会抢同一个 ThreadLocal 槽位）。',
+                  '这段代码的意图很清楚:每条订单一个事务,主表和明细要么一起成功、要么一起失败。上线三个月后才发现有问题——明细表里出现了一批「只有明细、没有主表记录」的孤儿数据,而对账程序每天都会报出来。',
                 ],
-                points: [
-                  '**三层抽象**：`PlatformTransactionManager`（管理器）、`TransactionDefinition`（传播/隔离/超时/只读）、`TransactionStatus`（当前事务状态）',
-                  '**`DataSourceTransactionManager`**：最常用，本质是「拿连接、关自动提交、执行、提交或回滚、还连接」',
-                  '**绑定位置**：`TransactionSynchronizationManager.resources` → `ThreadLocal` → `Map<DataSource, ConnectionHolder>`',
-                  '**嵌套调用的关键**：`ConnectionHolder` 带引用计数，内层 `getConnection` 只是 +1，不会真的开新连接',
-                  '**推论**：事务范围 = 线程范围。换线程就换事务，这不是缺陷，是机制决定的',
+                code: {
+                  language: 'java',
+                  code:
+                    "@Service\npublic class OrderImportService {\n\n    // 注意:外层没标 @Transactional\n    public void importAll(List<Order> list) {\n        for (Order o : list) {\n            this.saveOne(o);      // 走 this,不经过代理\n        }\n    }\n\n    @Transactional\n    public void saveOne(Order o) {\n        orderDao.insert(o);       // 写主表\n        itemDao.insert(o.items);  // 写明细\n    }\n}",
+                  caption: '设计意图是「每条订单一个事务」:主表和明细要么一起成功,要么一起失败。',
+                },
+                wrong: [
+                  '**猜法一:明细插入失败了,所以主表也回滚了?** 反过来——是明细插进去了、主表的那条不见了,孤儿数据比「一起失败」更糟。',
+                  '**猜法二:是不是 `itemDao.insert` 抛了异常但被框架吃掉了?** 没有,应用日志里能看到每一次插入都成功了,而且都是独立提交的。',
+                  '**猜法三:是不是引擎不支持事务?** 不是,同一张表在别的事务方法里回滚得好好的。',
                 ],
+                real:
+                  '原因只有一句:`this.saveOne(o)` 里的 `this` [[指向原始对象,不是那个被事务拦截器包起来的代理对象]]。调用没经过代理,拦截器没被触发,`saveOne` 上的注解**从头到尾没被读到**。于是它只是一段普通代码:两条 insert 各自拿着自己的连接、各自自动提交。主表那条成功了,明细那条失败时,前面那条已经落库,谁也撤不回来。',
+                reveal:
+                  '这里有个反直觉的细节值得记住:**如果外层自己就有事务,自调用反而不会丢数据**——因为内层虽然读不到自己的注解,但它借用的是外层已绑定的连接,于是自然地跟着外层一起提交或回滚。丢数据的场景恰恰是「外层没有事务」:此时内层本该自己开一个,却因为绕过代理没开成,退化成两条独立的自动提交。所以「自调用失效」不是「一定会出问题」,而是[[让内层的事务语义彻底消失——需要它独立时它不独立,需要它跟随它也未必跟随]]。下面先把底层机制讲清楚,再回来逐条对照失效清单。',
+              },
+              {
+                kind: 'analogy',
+                title: '类比:酒店的「签单挂账」',
+                text:
+                  '想象你住在一家老式酒店。吃饭不用当场付钱,只要报房号签单,退房时一起结——这就是一个事务:所有消费先挂在同一个房间的账上,最后要么全部结清,要么全部作废。要挂账必须走**前台**:前台有一本账本,记着你这个房间当前有哪些未结的单子(连接被绑到线程上,账本就是那个 `ThreadLocal`)。',
+                mapping: [
+                  { real: '报房号签单,不走前台', tech: '同类内 `this.method()` 调用,绕过代理' },
+                  { real: '前台那本账本', tech: '`TransactionSynchronizationManager` 里的 `ThreadLocal<Map<DataSource, ConnectionHolder>>`' },
+                  { real: '另开一个房间单独结账,原来的账先挂着', tech: '`REQUIRES_NEW`:挂起外层连接,新取一条连接' },
+                  { real: '在同一个账本上先划一道线,后面出问题就退到这条线', tech: '`NESTED`:同一连接上 `setSavepoint()`' },
+                  { real: '换个服务员来记,他不认识你的房号', tech: '换线程:新的 `ThreadLocal`,查不到绑定,只能自己开新连接' },
+                  { real: '服务员把投诉口头压下去了,没上报', tech: '业务代码 `catch` 掉异常,拦截器看到的是「正常返回」' },
+                ],
+                limit:
+                  '这个类比有一处会误导:现实里「不走前台」你还能现场付现金,也就是照样把事办了;但程序里绕过代理的后果不是「改成自动提交」那么简单——它可能仍然借用着外层已经打开的连接,于是变成一个「不知道自己在一个事务里」的写入者,行为取决于外层什么时候结束。所以不要把「绕过代理」理解成「独立完成」,**它更像是「搭了别人的车,却以为自己在开车」**。',
+              },
+              {
+                kind: 'concept',
+                title: '本质:一条连接,绑在一个线程上',
+                body: [
+                  '先抛开 Spring。数据库事务在 JDBC 层面只有三件事:**同一个 `Connection`**、`setAutoCommit(false)`、最后 `commit()` 或 `rollback()`。所谓「事务」,就是「一串操作共用一条连接,且这条连接手动提交」。',
+                  'Spring 要解决的问题是:`UserDao.insert()` 和 `OrderDao.insert()` 是两次独立的调用,怎么让它们用上**同一条**连接?毕竟每次 `dataSource.getConnection()` 都会拿到新的。答案是:把连接**绑到当前线程上**,谁在同一个线程里跑,谁就自动拿到同一条。',
+                  '`TransactionSynchronizationManager` 内部有一个 `ThreadLocal<Map<Object, Object>>`,key 是数据源,value 是「连接 + 引用计数」。取连接时先看当前线程有没有绑定:有就复用并把计数 +1,没有才真的从池里借一条。内层方法调用时计数变成 2,结束时只减 1 不真关闭——这就是「嵌套调用还共用一个事务」的全部秘密。',
+                  '所以整件事只有三层抽象,记住它们的**分工**就够了:一个管理器负责「开、提交、回滚」,一个配置对象装着传播、隔离、超时、只读,一个状态对象记录「当前事务是否已完成、是否被标记为只回滚」。再往下的文字都是这三层的展开。',
+                ],
+                term: {
+                  name: 'ThreadLocal 绑定',
+                  def: '事务上下文存在当前线程上。换个线程就查不到,这不是缺陷,而是「事务范围 = 线程范围」的直接结果。',
+                },
               },
               {
                 kind: 'diagram',
-                title: '@Transactional 从注解到 commit 的完整链路',
+                title: '从注解到 commit:六段链路',
                 body: [
-                  '把一次「带事务的方法调用」拆成六段。注意第 ② 段和第 ⑥ 段：它们才是「事务」真正发生的地方，`@Transactional` 只是让这两段被自动插入。',
+                  '一次带事务的方法调用被拆成六段。真正让事务「发生」的只有第 ⑤ 段和第 ⑥ 段——注解的作用仅仅是让这两段被自动插在方法前后。',
                 ],
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '① 启动期：注册基础设施', note: '`@EnableTransactionManagement` → `InfrastructureAdvisorAutoProxyCreator` + `BeanFactoryTransactionAttributeSourceAdvisor`' },
-                    { label: '② 解析注解：生成事务属性', note: '`AnnotationTransactionAttributeSource` 把 `@Transactional` 读成 `TransactionAttribute`（传播、隔离、`rollbackFor`）' },
-                    { label: '③ 生成代理：Bean 被包一层', note: '`postProcessAfterInitialization` 阶段生成 JDK / CGLIB 代理（与 AOP 同一套机制）' },
-                    { label: '④ 调用进入：`TransactionInterceptor.invoke`', note: '按「类级 → 方法级」优先级取事务属性' },
-                    { label: '⑤ 开启事务：`getTransaction(txAttr)`', note: '按传播行为决定「新建 / 加入 / 挂起」→ 绑定连接到 `ThreadLocal`' },
-                    { label: '⑥ 执行与收尾：提交或回滚', note: '正常返回 → `commitTransactionAfterReturning`；抛异常 → `rollbackOn` 判断后回滚' },
+                    { label: '① 启动期:注册基础设施', note: '`@EnableTransactionManagement` 注册一个后置处理器和一个切面顾问' },
+                    { label: '② 解析注解:生成事务属性', note: '把注解读成对象:传播、隔离、超时、只读、`rollbackFor`' },
+                    { label: '③ 生成代理:Bean 被包一层', note: '在初始化后阶段生成 JDK 或 CGLIB 代理,与 AOP 同一套机制' },
+                    { label: '④ 调用进入:拦截器 `invoke`', note: '按「类级 → 方法级」优先级取属性,方法级覆盖类级' },
+                    { label: '⑤ 开启事务:取连接并绑定', note: '按传播行为决定新建、加入还是挂起,然后把连接绑到 `ThreadLocal`' },
+                    { label: '⑥ 执行与收尾:提交或回滚', note: '正常返回走提交;抛异常先问一句「这个异常该回滚吗」,再决定' },
                   ],
                   caption:
-                    '第 ⑥ 段的判断是失效问题的高发区：`completeTransactionAfterThrowing` 会先问 `txInfo.transactionAttribute.rollbackOn(ex)`——**只有它返回 `true` 才回滚**。默认实现是「`RuntimeException` 或 `Error` 才回滚」，所以一个受检异常（比如 `IOException`）抛出来，事务会**正常提交**。另一条路径是「异常被业务代码 `catch` 掉了」——此时拦截器看到的是「方法正常返回」，直接走 commit 分支。**这两条是「数据没回滚」的头号原因，比自调用更常见**。',
+                    '第 ⑥ 段的那个「问一句」就是失效问题的高发区:拦截器会调用 `rollbackOn(ex)`,**只有返回 true 才回滚**,默认实现只认 `RuntimeException` 和 `Error`。所以一个 `IOException` 抛出去,事务会**正常提交**。另一条路径更隐蔽:异常被业务代码 `catch` 掉了,拦截器看到的是「方法正常返回」,直接走提交分支。**这两条加起来,比自调用更常见**。',
                 },
               },
               {
                 kind: 'concept',
-                title: '七种传播行为：只有两个问题要回答',
+                title: '七种传播行为:其实只回答两个问题',
                 body: [
-                  '传播行为（Propagation）解决的问题是：**当一个「已经处在事务中」的线程，调用另一个「也声明了事务」的方法时，后者该怎么办**。七种配置看起来多，其实每个都在回答两个问题：**要不要新建事务**、**要不要挂起外层事务**。',
-                  '按答案分组就非常清晰。**加入型**：`REQUIRED`（有则加入、无则新建，默认值）、`SUPPORTS`（有则加入、无则以非事务执行）、`MANDATORY`（有则加入、无则抛异常）——这三个都**不新建**、**不挂起**。**独立型**：`REQUIRES_NEW`（总是新建，挂起外层）、`NOT_SUPPORTED`（以非事务执行，挂起外层）、`NEVER`（以非事务执行，有事务则抛异常）——这三个都**要挂起**。**特殊型**：`NESTED`（有则建保存点，无则等同 `REQUIRED`）。',
-                  '「挂起」这个动作值得单独理解：`AbstractPlatformTransactionManager.suspend()` 会把当前线程绑定的 `ConnectionHolder` **从 `ThreadLocal` 里摘下来**，存进 `SuspendedResourcesHolder`，等内层结束后再 `resume()` 挂回去。**为什么要摘**？因为 `ThreadLocal` 里一个 `DataSource` 只有一个槽位，如果外层连接还在，内层 `getConnection` 就会直接复用它——那样就不是新事务了。所以「独立事务」的前提是「先把外层的连接藏起来」。',
-                ],
-                points: [
-                  '**`REQUIRED`（默认）**：有则加入，无则新建。95% 的场景用它',
-                  '**`SUPPORTS`**：有则加入，无则以非事务执行。适合「有没有事务都能跑」的查询',
-                  '**`MANDATORY`**：有则加入，无则**抛异常**。用于「强制要求调用方开事务」的内部方法',
-                  '**`REQUIRES_NEW`**：**总是新建独立事务，挂起外层**。适合「日志、审计」这类「外层失败也要留下记录」',
-                  '**`NOT_SUPPORTED`**：以非事务执行，挂起外层。适合「耗时长的只读操作，别占着事务」',
-                  '**`NEVER`**：以非事务执行，若当前有事务则**抛异常**。用于「绝对不能在事务里跑」的操作',
-                  '**`NESTED`**：有则建**保存点**（同一连接），无则等同 `REQUIRED`。适合「子步骤失败可容忍，外层仍要继续」',
+                  '传播行为解决的是一个很具体的场景:**一个已经处在事务里的线程,调用另一个也声明了事务的方法时,后者该怎么办**。七种配置看起来多,但每一种都在回答两个问题——要不要新建事务、要不要挂起外层。',
+                  '按答案分组就清楚了。**加入型**有三种:有事务就加入,没有就新建(默认值)、就非事务执行、就抛异常——差别只在「当前没有事务时怎么办」,都不新建、都不挂起。**独立型**也有三种:总是新建、总是非事务、有事务就报错——前两个都要把外层挂起,因为连接必须腾出来。**剩下一个**是保存点型:不新建连接,只在外层连接上划一道可回退的线。',
+                  '「挂起」这个动作值得单独理解:它把当前线程绑定的连接**从 `ThreadLocal` 里摘下来**存到一边,等内层结束后再挂回去。**为什么要摘?** 因为一个线程的位置上只能放一个连接,不摘掉内层就拿不到「自己的」连接,也就谈不上独立事务。挂起和恢复是一对,少一步内层就会复用外层,`REQUIRES_NEW` 立刻退化成 `REQUIRED`。',
+                  '记法上不需要背七行。先问「新建吗」,再问「挂起吗」,两个答案是就定位了:都否则是加入型三个之一(再看无事务时的行为),都是则是 `REQUIRES_NEW`。',
                 ],
               },
               {
                 kind: 'diagram',
                 title: '七种传播行为全景',
                 body: [
-                  '按「是否新建 / 是否挂起 / 外层回滚时内层如何」三个维度排一张表，这是面试时最稳的记法。',
+                  '按「当前有事务时怎么办 / 是否挂起 / 外层回滚时内层如何」三个维度排开。倒数第二列是区分 `REQUIRES_NEW` 与 `NESTED` 的唯一标准。',
                 ],
                 diagram: {
                   type: 'matrix',
                   head: ['传播行为', '当前有事务时', '是否挂起外层', '外层回滚时内层', '典型用途'],
                   cols: ['当前有事务时', '是否挂起外层', '外层回滚时内层', '典型用途'],
                   rows: [
-                    ['`REQUIRED`', '**加入**同一个事务', '否', '一起回滚', '默认；绝大多数业务'],
-                    ['`SUPPORTS`', '加入；无事务则以非事务跑', '否', '一起回滚', '兼容性查询'],
-                    ['`MANDATORY`', '加入；无事务则**抛异常**', '否', '一起回滚', '强制要求上层开事务'],
-                    ['`REQUIRES_NEW`', '**新建**独立事务', '**是**', '内层已提交的不受影响', '审计日志、独立流水'],
-                    ['`NOT_SUPPORTED`', '**挂起事务**，非事务执行', '**是**', '内层无事务，不受影响', '长耗时只读、批量查询'],
-                    ['`NEVER`', '有事务则**抛异常**', '—', '抛异常，不执行', '禁止事务包裹的操作'],
-                    ['`NESTED`', '同一连接建**保存点**', '否', '内层先回滚到保存点，外层再回滚', '子步骤可容忍失败'],
+                    ['`REQUIRED`', '加入同一个事务', '否', '一起回滚', '默认;绝大多数业务'],
+                    ['`SUPPORTS`', '加入;无事务则非事务跑', '否', '一起回滚', '有没有事务都能跑的查询'],
+                    ['`MANDATORY`', '加入;无事务则抛异常', '否', '一起回滚', '强制要求上层开事务'],
+                    ['`REQUIRES_NEW`', '新建独立事务', '是', '内层已提交的不受影响', '审计日志、独立流水'],
+                    ['`NOT_SUPPORTED`', '挂起事务,非事务执行', '是', '内层无事务,不受影响', '长耗时只读、批量查询'],
+                    ['`NEVER`', '有事务则抛异常', '—', '抛异常,不执行', '绝对不能在事务里跑的操作'],
+                    ['`NESTED`', '同一连接建保存点', '否', '先回滚到保存点,外层再回滚', '子步骤可容忍失败'],
                   ],
                   caption:
-                    '倒数第二列（「外层回滚时内层」）是区分 `REQUIRES_NEW` 与 `NESTED` 的唯一标准：**前者内层已提交的数据会保留，后者全都会被外层回滚掉**。第四列（是否挂起）则解释了「为什么 `REQUIRES_NEW` 一定要挂起」——不挂起就没有独立连接可用。注意 `NESTED` 的「是否挂起」是「否」：它复用外层连接，只是打个保存点。',
+                    '倒数第二列解释了「为什么 `REQUIRES_NEW` 一定要挂起」——不挂起就没有独立连接可用。而 `NESTED` 的「是否挂起」写的是**否**:它复用外层连接,只是划一道保存点。这两行看起来都在讲「子事务」,实际差别是连接数量:**一个新借一条,一个始终只有一条**。连接数量的差别又会传导到「连接池够不够用」——嵌套多层 `REQUIRES_NEW` 是把连接池按层数消耗的。',
                 },
               },
               {
                 kind: 'diagram',
-                title: 'REQUIRES_NEW 的挂起与恢复',
+                title: '`REQUIRES_NEW` 的挂起与恢复',
                 body: [
-                  '这张时序图把「挂起」画出来。看清第 4、7 步：外层的连接被摘下又挂回——这是「独立事务」能成立的唯一办法。',
+                  '把「挂起」画出来。看清第 4、7 步:外层的连接被摘下又挂回——这是「独立事务」能成立的唯一办法。',
                 ],
                 diagram: {
                   type: 'sequence',
                   actors: ['调用方', '拦截器', '外层事务', '内层事务'],
                   messages: [
-                    { from: '调用方', to: '拦截器', text: '调用外层方法（无事务）' },
-                    { from: '拦截器', to: '外层事务', text: '`REQUIRED` → 新建，绑定 Connection#1 到 ThreadLocal' },
-                    { from: '外层事务', to: '拦截器', text: '调用内层方法（`REQUIRES_NEW`）' },
-                    { from: '拦截器', to: '外层事务', text: '`suspend()`：把 Connection#1 从 ThreadLocal 摘下' },
-                    { from: '拦截器', to: '内层事务', text: '新取 Connection#2，`setAutoCommit(false)`' },
-                    { from: '内层事务', to: '拦截器', text: '内层提交 → 数据已落库（不可撤回）', reply: true },
-                    { from: '拦截器', to: '外层事务', text: '`resume()`：把 Connection#1 挂回 ThreadLocal' },
-                    { from: '外层事务', to: '调用方', text: '外层抛异常 → Connection#1 回滚', reply: true },
+                    { from: '调用方', to: '拦截器', text: '调用外层方法(当前无事务)' },
+                    { from: '拦截器', to: '外层事务', text: '`REQUIRED` → 新建,连接 #1 绑定到 `ThreadLocal`' },
+                    { from: '外层事务', to: '拦截器', text: '调用内层方法(声明 `REQUIRES_NEW`)' },
+                    { from: '拦截器', to: '外层事务', text: '`suspend()`:把连接 #1 从 `ThreadLocal` 摘下' },
+                    { from: '拦截器', to: '内层事务', text: '新借连接 #2,关掉自动提交' },
+                    { from: '内层事务', to: '拦截器', text: '内层提交 → 数据已落库,不可撤回', reply: true },
+                    { from: '拦截器', to: '外层事务', text: '`resume()`:把连接 #1 挂回' },
+                    { from: '外层事务', to: '调用方', text: '外层抛异常 → 连接 #1 回滚', reply: true },
                   ],
                   caption:
-                    '第 6 步是整个机制的核心：**内层提交后，外层再怎么回滚都撤不回来**——因为它用的是另一条连接、另一个事务。这正是「审计日志必须用 `REQUIRES_NEW`」的原因。若把内层改成 `NESTED`：第 4、5 步都不会发生（不挂起、不新建连接），而是在 Connection#1 上 `setSavepoint()`；内层失败时 `rollback(savepoint)`，外层捕获后仍可继续提交。**代价是 `NESTED` 依赖驱动支持保存点**（JDBC 3.0+，主流 MySQL/PostgreSQL 都支持，但某些连接池配置下会失效）。',
+                    '第 6 步是整个机制的核心:**内层提交后,外层再怎么回滚都撤不回来**,因为它用的是另一条连接、另一个事务。这正是审计日志必须用 `REQUIRES_NEW` 的原因。若把内层改成 `NESTED`:第 4、5 步都不发生,而是在连接 #1 上划保存点;内层失败时回退到这个保存点,外层捕获后仍可继续提交。代价是 `NESTED` 依赖驱动支持保存点,某些连接池配置下会静默失效。',
                 },
               },
               {
                 kind: 'diagram',
-                title: '隔离级别：Spring 的五个选项与数据库的四个',
+                title: '隔离级别:五个选项里的那个「DEFAULT」',
                 body: [
-                  'Spring 把隔离级别做成枚举 `Isolation`，共五个值——比数据库多出的那一个是 `DEFAULT`。这一节要讲清「为什么要多这一个」以及「配了到底谁生效」。',
+                  'Spring 把隔离级别做成枚举,共五个值——比数据库多出的那个是 `DEFAULT`。要讲清的是「为什么要多这一个」以及「配了到底谁生效」。',
                 ],
                 diagram: {
                   type: 'matrix',
                   head: ['隔离级别', '脏读', '不可重复读', '幻读', '说明'],
                   cols: ['脏读', '不可重复读', '幻读', '说明'],
                   rows: [
-                    ['`DEFAULT`', '看数据库', '看数据库', '看数据库', '**Spring 特有**：不设置，用数据库默认值'],
-                    ['`READ_UNCOMMITTED`', '**可能**', '可能', '可能', '几乎不用，连脏读都不防'],
-                    ['`READ_COMMITTED`', '不可能', '**可能**', '可能', 'Oracle / PostgreSQL 默认'],
-                    ['`REPEATABLE_READ`', '不可能', '不可能', '**可能**（InnoDB 靠间隙锁大部分防住）', '**MySQL InnoDB 默认**'],
-                    ['`SERIALIZABLE`', '不可能', '不可能', '不可能', '串行化，性能代价最大'],
+                    ['`DEFAULT`', '看数据库', '看数据库', '看数据库', 'Spring 特有:什么都不设'],
+                    ['`READ_UNCOMMITTED`', '可能', '可能', '可能', '几乎不用,连脏读都不防'],
+                    ['`READ_COMMITTED`', '不可能', '可能', '可能', 'Oracle、PostgreSQL 的默认值'],
+                    ['`REPEATABLE_READ`', '不可能', '不可能', '可能', 'MySQL InnoDB 的默认值'],
+                    ['`SERIALIZABLE`', '不可能', '不可能', '不可能', '串行化,性能代价最大'],
                   ],
                   caption:
-                    '两个必须说清的点：**① `DEFAULT` 不是「某个级别」，而是「不下发 `SET TRANSACTION ISOLATION LEVEL`」**——所以最终生效的是数据库的默认值，而这在不同库上完全不同（MySQL 是 `REPEATABLE_READ`，Oracle 是 `READ_COMMITTED`）。这解释了「同一个 Spring 配置，换库后行为变了」。**② Spring 只负责把级别传给 JDBC**，真正的隔离靠数据库实现；如果存储引擎不支持事务（如 MyISAM），配什么都没用。',
+                    '两点必须说清:**① `DEFAULT` 不是一个级别,而是「不下发任何设置语句」**——最终生效的是数据库自己的默认值,而各家完全不同。这解释了「同一份 Spring 配置,换了数据库行为就变了」。**② Spring 只负责把级别传给 JDBC**,真正的隔离由数据库实现;存储引擎不支持事务(比如 MyISAM),配什么都没用。另外注意 `REPEATABLE_READ` 那格的「可能」是打了折扣的:InnoDB 用间隙锁把大部分幻读挡住了,但没挡全。',
                 },
               },
               {
                 kind: 'principle',
-                title: '回滚规则：为什么受检异常默认不回滚',
+                title: '回滚规则:受检异常为什么默认不回滚',
                 body: [
-                  '`@Transactional` 的默认回滚规则是：**`RuntimeException` 及其子类、`Error` → 回滚；受检异常（`Exception` 的非运行时子类）→ 不回滚**。这个默认值经常被当成「Spring 的坑」，但它有明确的历史来源。',
-                  '这套约定继承自 **EJB 的事务规范**：受检异常被视为「**可预期的业务结果**」——比如「余额不足」「用户名已存在」，这类情况调用方应该捕获并处理，业务上并不认为这次操作「失败到需要撤销」，所以不回滚；而运行时异常被视为「**程序错误**」（空指针、数组越界、SQL 语法错），属于不可预期的故障，必须整体撤销。Spring 沿用了这套语义。',
-                  '实践上的结论很简单：**几乎总是应该显式写 `@Transactional(rollbackFor = Exception.class)`**。因为现代 Java 代码里大量用受检异常表达「失败」，而且很少有人真的去区分「可预期 / 不可预期」。另外要注意 `noRollbackFor` 的存在——有些异常你确实希望「记下但不回滚」（如「重复提交」），可以显式排除。',
+                  '默认规则只有一句:**运行时异常和 `Error` 回滚,受检异常不回滚**。这条常被当成「Spring 的坑」,但它有明确的历史来源,而且理解来源比记住结论有用——因为来源解释了「什么时候该改、什么时候不该改」。',
                 ],
                 steps: [
                   {
-                    title: '① 默认规则：只回滚「非受检」',
+                    title: '① 判定入口只有一个方法',
                     detail:
-                      '判定入口是 `TransactionAttribute.rollbackOn(ex)`。`DefaultTransactionAttribute` 的实现只判断 `RuntimeException` 与 `Error`——即 `instanceof RuntimeException || instanceof Error`。受检异常（`Exception` 的非运行时子类）一律返回 `false`，于是 `TransactionInterceptor` 走 `commitTransactionAfterReturning`。',
+                      '拦截器决定提交还是回滚,靠的是问一句 `rollbackOn(ex)`,默认实现只判断「是不是运行时异常或 `Error`」。所以任何「为什么不回滚」的讨论,最终都落到「这个异常有没有到达这一句」。',
                   },
                   {
-                    title: '② 为什么这么设计：继承 EJB 的语义',
+                    title: '② 这个约定继承自 EJB',
                     detail:
-                      'EJB 事务规范把受检异常定义为「**可预期的业务结果**」（余额不足、用户名已存在），调用方应当捕获并处理，业务上不认为需要撤销；把运行时异常定义为「**程序错误**」（空指针、数组越界、SQL 语法错），属于不可预期故障，必须整体撤销。Spring 原样沿用了这套约定。',
+                      'EJB 事务规范把受检异常定义为「可预期的业务结果」——余额不足、用户名已存在,调用方本来就该捕获处理,业务上不认为这次操作失败到需要撤销;而运行时异常代表「程序错误」(空指针、SQL 语法错),属于不可预期故障,必须整体撤销。Spring 原样沿用了这套语义。',
                   },
                   {
-                    title: '③ 实践结论：显式写 rollbackFor',
+                    title: '③ 实践结论:显式写 `rollbackFor`',
                     detail:
-                      '现代 Java 代码大量用受检异常表达「失败」，且很少有人真去区分「可预期 / 不可预期」。所以规范是 `@Transactional(rollbackFor = Exception.class)` 一网打尽，再用 `noRollbackFor` 排除个别（如「重复提交」）。别依赖默认值。',
+                      '现代 Java 代码大量用受检异常表达「失败」,也很少有人真去区分「可预期 / 不可预期」。所以规范写法是 `@Transactional(rollbackFor = Exception.class)` 一网打尽,再用 `noRollbackFor` 排除个别情况(比如「重复提交」这种「失败但不算错误」)。',
                   },
                   {
-                    title: '④ 更隐蔽的坑：异常被吞掉',
+                    title: '④ 比这更隐蔽的,是异常被吃掉',
                     detail:
-                      '如果业务代码 `try-catch` 后没有重新抛出，拦截器看到的是「方法正常返回」，直接走 commit 分支——**此时配什么 `rollbackFor` 都无效**。这是「数据没回滚」的头号原因，比自调用更常见。',
+                      '如果业务代码 `try-catch` 之后没有重新抛出,拦截器看到的是「方法正常返回」,直接走提交——[[此时配什么 `rollbackFor` 都无效]]。这是「数据没回滚」的头号原因,也比自调用更常见,因为它看起来太正常了,代码审查时几乎不会引起注意。',
                   },
                   {
                     title: '⑤ 不想抛异常时怎么主动回滚',
                     detail:
-                      '用 `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`，然后正常返回。事务会回滚，上层仍能拿到返回值——适合「校验不通过要回滚，但要返回友好提示」的场景。',
+                      '拿当前事务状态把它标记成「只回滚」,然后正常返回:事务会回滚,上层仍能拿到返回值。适合「校验不通过要撤销,但要返回友好提示」的场景。比「抛一个假异常」干净,也不依赖异常类型。',
                   },
                 ],
               },
               {
                 kind: 'diagram',
-                title: '自调用失效的三种解法',
+                title: '自调用失效:四种解法与取舍',
                 body: [
-                  '自调用是事务失效里最常见的一种。三种解法各有取舍，按「推荐度」从左到右排。',
+                  '自调用是失效清单里最常见的一条。四种解法按「推荐度」排开,左边不是技术更高级,而是它顺带改善了结构。',
                 ],
                 diagram: {
                   type: 'split',
                   left: {
-                    title: '✓ 推荐：拆到另一个 Bean',
+                    title: '✓ 推荐:拆到另一个 Bean',
                     tone: 'good',
                     items: [
                       '把需要独立事务的方法移到新的 `XxxTxService`',
-                      '通过注入调用 → **天然经过代理**，无技巧',
-                      '顺带改善设计：事务边界变清晰',
-                      '缺点：类变多，需要团队接受这个拆分',
-                      '这是唯一「既解决问题又改善结构」的方案',
+                      '通过注入调用 → 天然经过代理,不需要任何技巧',
+                      '顺带改善设计:事务边界变清晰',
+                      '缺点:类变多,需要团队接受这个拆分',
                     ],
                   },
                   right: {
-                    title: '△ 应急：注入自身 / AopContext',
+                    title: '△ 应急:绕开代理的三种手法',
                     tone: 'warn',
                     items: [
-                      '`@Autowired @Lazy private XxxService self;` → `self.method()`',
-                      '`@EnableAspectJAutoProxy(exposeProxy = true)` + `AopContext.currentProxy()`',
-                      '注入自身会引入循环依赖，必须配 `@Lazy`',
-                      '`currentProxy()` 依赖 `ThreadLocal`，**异步线程里拿不到**',
-                      '`TransactionTemplate` 编程式：最稳，但代码变长',
+                      '注入自身:标 `@Lazy` 避免循环依赖,再 `self.method()`',
+                      '`AopContext.currentProxy()`:需开启暴露代理,依赖 `ThreadLocal`,异步线程里拿不到',
+                      '`TransactionTemplate` 包住内层:不依赖代理,最稳的兜底',
+                      '共同缺点:把「这里需要独立事务」藏在了技巧里',
                     ],
                   },
                   caption:
-                    '左侧之所以「推荐」，不是因为技术上更高级，而是因为**它把「需要独立事务」这件事显式化了**。自调用的本质问题是「我把两个不同事务语义的操作写在了一个类里」——注入自身只是绕过限制，职责边界仍然混乱。另外补充第四种方案：直接用 `TransactionTemplate` 包住内层逻辑，**它完全不依赖代理**，所以在异步线程、非 Spring 管理对象里也能用，是「兜底」的最佳选择。',
+                    '左侧推荐的理由不是「技术上更好」,而是它把「需要独立事务」这件事**显式化了**。自调用的本质问题是「我把两个不同事务语义的操作写在了一个类里」——注入自身只是绕过限制,职责边界仍然混乱。右边第四种(`TransactionTemplate`)是唯一可以直接用在异步线程、非 Spring 管理对象里的方案,因为它是编程式开启,**根本不需要代理**。',
                 },
               },
               {
                 kind: 'concept',
-                title: '工程边界：大事务、异步线程与只读事务',
+                title: '工程边界:大事务与异步线程',
                 body: [
-                  '**大事务**指「持续时间长」或「涉及数据量大」的事务。危害是连锁的：连接被长时间占用（连接池耗尽，整个服务开始排队）、行锁/间隙锁持有时间长（并发下降、死锁概率上升）、undo log 持续膨胀（回滚段压力）、主从延迟（大事务在从库重放慢）、回滚成本极高（几分钟的写入要全部撤销）。',
-                  '**治理手段**按性价比排序：① **把 RPC / HTTP 调用移出事务**（最有效，往往是耗时主因）；② **拆批提交**（每 500 条一个事务，用 `TransactionTemplate` 在循环里控制）；③ **`readOnly = true`**（让驱动与 ORM 跳过脏检查、某些库可路由到从库）；④ **缩短锁范围**（先查询再按主键更新，避免大范围 `update ... where`）；⑤ **非核心逻辑用 `REQUIRES_NEW` 或异步**。',
-                  '**异步线程与事务**是另一个高频坑：`@Async` 方法、`new Thread`、线程池提交的任务，**都拿不到调用方的事务**。因为事务上下文在 `ThreadLocal` 里，而 `ThreadLocal` 不跨线程传递。所以「主线程事务回滚了，子线程写的日志还在」是必然结果。正确做法是用 `TransactionSynchronizationManager.registerSynchronization(...)` 的 `afterCommit` 回调——**只有主事务真正提交成功之后**才去发消息、发通知、写异步日志。这个模式是「本地消息表 / 事务消息」的手写版本。',
+                  '**大事务**指「持续时间长」或「涉及数据量大」。危害是连锁的:连接被长时间占用(连接池耗尽,整个服务开始排队)、行锁和间隙锁持有时间长(并发下降、死锁概率上升)、undo 日志膨胀、主从延迟(大事务在从库重放慢)、回滚成本极高。它最典型的表现是[[接口变慢但 CPU 不高]]——因为瓶颈在等连接,不在算。',
+                  '治理按性价比排序:**首先把 RPC 和 HTTP 调用移出事务**(往往就是耗时主因,而且网络抖动会直接把事务拖成几秒)、**其次分批提交**(每 500 条一个事务,用编程式模板在循环里控制)、**再次给只读场景加只读标记**(让 ORM 跳过脏检查,某些库还能路由到从库)、最后缩短锁范围(先查再按主键更新,避免大范围更新)。',
+                  '**异步线程与事务**是另一个高频坑:`@Async`、`new Thread`、线程池提交的任务,**都拿不到调用方的事务**。因为上下文在线程本地变量里,而它不跨线程传递。于是子线程取连接时查不到绑定,只能自己新借一条、自己提交——主线程回滚了,子线程写的还在。',
+                  '所以「`@Async` 加 `REQUIRES_NEW` 就能保证一致」是彻底的误解:两个完全独立的事务之间没有任何原子性,只是把「不同步」包装得更像「同步」。正确做法是把「提交之后再执行」变成显式契约——注册一个提交后回调,或者用本地消息表把「写库」和「发消息」放进同一个事务。',
                 ],
-                points: [
-                  '**大事务五宗罪**：连接占用、锁持有久、undo 膨胀、主从延迟、回滚昂贵',
-                  '**首要治理**：把网络调用（RPC / HTTP / 缓存）移出事务边界',
-                  '**分批提交**：`TransactionTemplate` 在循环里控制，每批一个事务',
-                  '**`readOnly = true`**：不是「禁止写」，而是「给驱动/ORM 一个优化提示」',
-                  '**异步不共享事务**：`ThreadLocal` 不跨线程；用 `afterCommit` 回调保证「提交后再执行」',
-                  '**`@Async` + `REQUIRES_NEW` 也不等于「子事务」**：两者完全独立，没有原子性',
+              },
+              {
+                kind: 'concept',
+                title: '收口:失效清单压成两类,再自述一遍',
+                body: [
+                  '把散落的十条失效原因按根因归并,剩下的只有两类。**第一类:调用没经过代理**——自调用、方法不是 `public`、方法是 `final`、类根本不是 Bean、被别的对象 `new` 出来、异步线程里调用。这一类全部表现为「注解没被读到」,所以配什么属性都没用。',
+                  '**第二类:异常没到达拦截器**——被 `catch` 吞掉、抛出的是受检异常、传播行为本身就把方法放在了事务之外(`NOT_SUPPORTED`、`NEVER`)。这一类全部表现为「拦截器认为成功」,所以必然提交。',
+                  '还有一类容易被忽略但机制不同的:**事务根本没起作用**——存储引擎不支持事务、多数据源没指定用哪个管理器。这一类连「失效」都算不上,是配置层面就没接上。',
+                  '能用三句话讲清这一课,就算过了:「事务是一条连接绑在一个线程上,所以叫它必须经过代理、必须同一个线程」;「七种传播只回答要不要新建、要不要挂起,`REQUIRES_NEW` 借新连接所以提交后撤不回,`NESTED` 加保存点所以外层回滚它也跟着走」;「默认只回滚运行时异常,所以要么显式写 `rollbackFor`,要么保证异常真的抛出去——被 `catch` 掉是最常见的原因」。',
+                  '自测一道:一个方法标了 `@Transactional(rollbackFor = Exception.class)`,内部 `try-catch` 住了一个 SQL 异常、打日志后正常返回,数据会回滚吗?答案是不会——`rollbackFor` 只在「异常到达判定」时才被用上,而它没到达。',
                 ],
               },
               {
                 kind: 'question',
-                title: '说说 Spring 事务的实现原理（声明式 @Transactional 是怎么工作的）',
+                title: 'Q36 · 说说 Spring 事务的实现原理（声明式 @Transactional 是怎么工作的）',
                 questionId: 'java-05-Q36',
-                intent:
-                  '核心题。要能串起「AOP 代理 → 拦截器 → 事务管理器 → ThreadLocal 连接」，缺任何一环都不完整。',
+                intent: '考的是「能不能把注解拆成一条可执行的链路」,而不是背注解有哪些属性。答得好的人会主动说出「代理 + 拦截器 + 管理器 + 线程绑定」这四个零件,并指出哪一段最容易断。',
                 points: [
-                  '**本质**：`@Transactional` 是**基于 AOP 的声明式事务**——它没有创造新机制，只是把「开启/提交/回滚」这三段代码用拦截器自动插入',
-                  '**启动期**：`@EnableTransactionManagement` 注册 `InfrastructureAdvisorAutoProxyCreator`（一个 BPP）与 `BeanFactoryTransactionAttributeSourceAdvisor`',
-                  '**属性解析**：`AnnotationTransactionAttributeSource` 把 `@Transactional` 解析成 `TransactionAttribute`（传播、隔离、超时、`readOnly`、`rollbackFor`）',
-                  '**代理生成**：在 `postProcessAfterInitialization` 阶段，若 Bean 的方法匹配事务切点，就生成 JDK / CGLIB 代理',
-                  '**调用拦截**：`TransactionInterceptor.invoke` → `createTransactionIfNecessary` → `tm.getTransaction(txAttr)`',
-                  '**事务管理器**：`DataSourceTransactionManager.doBegin` 取连接、`setAutoCommit(false)`、把 `ConnectionHolder` 绑到 `ThreadLocal`',
-                  '**收尾**：正常返回 → `commitTransactionAfterReturning`；抛异常 → `rollbackOn(ex)` 判定 → `rollback` 或仍然 `commit`',
-                  '**一句话**：**`@Transactional` = 事务切点 + `TransactionInterceptor` + `PlatformTransactionManager` + `ThreadLocal` 绑定**',
+                  '**定性**:`@Transactional` 是基于 AOP 的声明式事务,没有创造新机制,只是把「开启 / 提交 / 回滚」这三段代码用拦截器自动插在方法前后',
+                  '**启动期**:注册一个后置处理器和一个切面顾问,前者负责给 Bean 生成代理,后者负责判断「这个方法要不要被拦」',
+                  '**属性解析**:把注解读成一个属性对象,装着传播、隔离、超时、只读、回滚规则;类级和方法级并存时方法级优先',
+                  '**调用拦截**:进入拦截器后先按传播行为取事务——新建就借连接、关自动提交、绑到线程;加入就直接复用外层连接',
+                  '**收尾**:正常返回走提交;抛异常先问 `rollbackOn`,返回 true 才回滚,否则仍然提交(这是受检异常不回滚的落点)',
+                  '**一句话**:注解 + 切点匹配 + 拦截器 + 事务管理器 + 线程本地绑定,五个零件缺一不可;所以「绕过代理」和「吞掉异常」是最容易断的两处',
                 ],
                 depth:
-                  '「为什么事务能跨多个 DAO 生效」这个问题能检验是否真懂：`UserDao` 与 `OrderDao` 是两个 Bean，各自动 `getConnection`，但它们最终都调 `DataSourceUtils.getConnection(dataSource)`——这个方法先查 `TransactionSynchronizationManager.getResource(dataSource)`，发现当前线程已绑定连接就直接返回，**引用计数 +1**。所以「同一事务」不是因为「DAO 之间传了连接」，而是因为「它们共享同一个线程，而线程上绑了连接」。理解这一点，紧接着就能推出「跨线程必然失效」——`ThreadLocal` 不跟着线程池任务走。',
-                followup:
-                  '「`@Transactional` 和 `synchronized` 能一起用吗」——可以但极少有意义，而且有坑：`synchronized` 锁的是方法体，事务的 `commit` 发生在**方法返回之后**（由拦截器执行），所以「锁已释放、事务还没提交」这个窗口里，其他线程能读到旧数据并基于它做判断。正确做法是用数据库锁（`select ... for update`）或乐观锁，而不是 JVM 锁。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 事务的 7 种传播行为？常用的有哪些？',
-                questionId: 'java-05-Q37',
-                intent:
-                  '考分类能力。逐条背七个定义是及格，能按「是否新建 / 是否挂起」分组才是好的。',
-                points: [
-                  '**`REQUIRED`（默认）**：有则加入，无则新建。最常用，95% 的业务方法都用它',
-                  '**`SUPPORTS`**：有则加入，无则以非事务执行。适合「有事务更好、没有也能跑」的查询',
-                  '**`MANDATORY`**：有则加入，无则抛 `IllegalTransactionStateException`。强制上层开事务',
-                  '**`REQUIRES_NEW`**：总是新建独立事务，**挂起外层**。用于审计日志、独立流水',
-                  '**`NOT_SUPPORTED`**：以非事务执行，**挂起外层**。用于长耗时只读、避免占用连接',
-                  '**`NEVER`**：以非事务执行，若当前有事务则抛异常。用于「绝对不能在事务里执行」的操作',
-                  '**`NESTED`**：有事务则建**保存点**（同一连接），无则等同 `REQUIRED`。用于「子步骤可容忍失败」',
-                  '**分组记忆**：不新建不挂起（`REQUIRED`/`SUPPORTS`/`MANDATORY`）、要挂起（`REQUIRES_NEW`/`NOT_SUPPORTED`/`NEVER`）、特殊情况（`NESTED`）',
-                ],
-                depth:
-                  '「挂起」的实现在 `AbstractPlatformTransactionManager.suspend()`：它调 `doSuspend(transaction)`，`DataSourceTransactionManager` 的实现是——把 `ConnectionHolder` 的引用计数清零、从 `TransactionSynchronizationManager` 解绑、同时清掉 `synchronizedWithTransaction` 标记、清理 `TransactionSynchronization` 列表（存进 `SuspendedResourcesHolder` 以便恢复）。**注意它还清掉了同步回调列表**，所以「外层注册的 `afterCommit` 不会在内层的提交时被误触发」——这是一个很容易忽略但很关键的正确性细节。',
-                followup:
-                  '「`REQUIRED` 下内层抛异常，外层 `catch` 住了，能提交吗」——**不能正常提交，会抛 `UnexpectedRollbackException`**。因为内层与外层是同一个事务，内层抛异常时已把事务标记为 `rollbackOnly`；外层 `catch` 后想提交，`commit` 时发现标记就直接抛异常。这是「以为能吞掉异常继续提交」的经典翻车点——**单个物理事务只能有一个最终结局**。',
-              },
-              {
-                kind: 'question',
-                title: 'REQUIRES_NEW 和 NESTED 有什么区别？',
-                questionId: 'java-05-Q38',
-                intent:
-                  '必须落到「连接」这个物理层面。说「一个是新事务、一个是子事务」太虚，要说清连接与保存点。',
-                points: [
-                  '**连接不同**：`REQUIRES_NEW` **新取一条连接**（外层连接被 `suspend` 挂起）；`NESTED` **共用外层连接**',
-                  '**提交独立**：`REQUIRES_NEW` 是**真提交**，一旦提交不可撤回；`NESTED` 只是释放保存点，**最终提交权在外层**',
-                  '**回滚范围**：`REQUIRES_NEW` 内层失败只回滚内层，外层可以继续；`NESTED` 内层失败回滚到保存点，外层也仍可继续',
-                  '**外层回滚时**：`REQUIRES_NEW` 内层**已提交的数据保留**；`NESTED` 内层**跟着一起回滚**',
-                  '**依赖条件**：`REQUIRES_NEW` 需要连接池有可用连接（**嵌套多层可能耗尽连接**）；`NESTED` 需要驱动支持保存点（JDBC 3.0+）',
-                  '**异常处理**：`NESTED` 内层抛异常后，外层必须 `catch` 住才能继续，否则异常一路传到外层拦截器 → 整体回滚',
-                  '**选型**：「外层失败也要留下记录」→ `REQUIRES_NEW`；「子步骤失败可容忍、外层继续」→ `NESTED`',
-                ],
-                depth:
-                  '一个实战级细节：`REQUIRES_NEW` 最容易出的问题是「**连接池耗尽**」。假设连接池 10 条，一个请求进来开了 1 个事务，方法里循环调用 10 次 `REQUIRES_NEW` 的服务——同一时刻需要 10+1 条连接，如果并发几个这样的请求，连接池立刻打满，所有请求开始等待，**表现为「接口卡死但 CPU 不高」**。而 `NESTED` 全程只用 1 条连接，不会有这个问题。所以「性能更好的子事务」应该优先考虑 `NESTED`，只有在「必须真独立」时才用 `REQUIRES_NEW`。',
-                followup:
-                  '「`NESTED` 内层回滚后，外层继续执行并提交，内层的修改会怎样」——内层的修改被 `rollback to savepoint` 撤销了，外层的修改正常提交。**但如果内层做了 DDL**（`create table` 之类），MySQL 会隐式提交，保存点失效，此时 `NESTED` 的语义会被破坏。这是「事务里不要做 DDL」的又一条理由。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 事务的隔离级别有哪些？和数据库的关系？',
-                questionId: 'java-05-Q39',
-                intent:
-                  '考「Spring 只是传递者」这个认知。`DEFAULT` 的含义与「换库行为变了」是加分点。',
-                points: [
-                  '**Spring 五个值**：`DEFAULT`、`READ_UNCOMMITTED`、`READ_COMMITTED`、`REPEATABLE_READ`、`SERIALIZABLE`',
-                  '**`DEFAULT` 的含义**：不下发 `SET TRANSACTION ISOLATION LEVEL`，**用数据库的默认值**——不是某个固定级别',
-                  '**典型默认值**：MySQL InnoDB 是 `REPEATABLE_READ`；Oracle / PostgreSQL 是 `READ_COMMITTED`',
-                  '**三种读问题的对照**：脏读（读到未提交）、不可重复读（同一行两次读不同）、幻读（同一范围两次读行数不同）',
-                  '**Spring 的角色**：只是把隔离级别通过 JDBC 传给数据库，**真正的隔离由数据库实现**',
-                  '**失效场景**：存储引擎不支持事务（MyISAM）、连接池或中间件强制改写、某些只读路由',
-                  '**实践建议**：绝大多数场景用 `DEFAULT`；确实需要「读已提交」时才显式配 `READ_COMMITTED`',
-                ],
-                depth:
-                  '一个高频追问：**「MySQL 的 `REPEATABLE_READ` 到底能不能防幻读」**——快照读（普通 `select`）靠 MVCC 能防住；当前读（`select ... for update`、`update`、`delete`）靠**间隙锁（Gap Lock）+ Next-Key Lock** 防住。所以「InnoDB 在 RR 下基本没有幻读」，但它不是 SQL 标准里的严格 RR（标准 RR 允许幻读）。这也解释了「为什么同样配 `REPEATABLE_READ`，MySQL 和别的库表现不同」——**隔离级别的实现在各库之间并不统一**。面试里能点出「MVCC 管快照读、间隙锁管当前读」，就是满分答案。',
-                followup:
-                  '「隔离级别能通过 `@Transactional` 精确控制吗」——只能「声明」，不能保证「生效」。因为最终 SQL 是数据库执行的，如果数据库不支持该级别（如某些库不支持 `READ_UNCOMMITTED`），JDBC 驱动会降级或忽略。要验证是否真的生效，得查数据库侧（MySQL 用 `select @@transaction_isolation` 看会话级别，或开 general log 看是否下发了 `SET TRANSACTION`）。',
-              },
-              {
-                kind: 'question',
-                title: '@Transactional 在哪些情况下会失效？（高频清单）',
-                questionId: 'java-05-Q40',
-                intent:
-                  '清单题，但要有归类。按「没走代理」「没触发回滚」两大类组织，比罗列十条更好记。',
-                points: [
-                  '**① 自调用**：同类内 `this.method()`，`this` 是原始对象，不经过代理（最常见）',
-                  '**② 非 `public` 方法**：Spring 5.x 及之前只支持 `public`；Spring 6.0 起放宽到 `protected` / 包可见，**`private` 仍不支持**',
-                  '**③ `final` 方法 / `final` 类**：CGLIB 靠继承，`final` 无法覆写（Boot 2.0+ 默认 CGLIB，所以这条很现实）',
-                  '**④ 类不是 Spring Bean**：`new` 出来的对象没有代理，注解形同注释',
-                  '**⑤ 异常被 `catch` 吞掉**：拦截器看到「正常返回」→ **直接提交**，配 `rollbackFor` 也没用',
-                  '**⑥ 异常类型不匹配**：受检异常默认不回滚（`IOException` 抛出去，事务提交）',
-                  '**⑦ 存储引擎不支持事务**：MySQL 的 MyISAM 表，配什么都没用',
-                  '**⑧ 多数据源未指定事务管理器**：`@Transactional(transactionManager = "orderTxManager")`，否则用错管理器',
-                  '**⑨ 异步 / 新线程里执行**：事务上下文在 `ThreadLocal`，不跨线程',
-                  '**⑩ 传播行为配置不当**：`NOT_SUPPORTED` / `NEVER` 会主动让方法不在事务里跑',
-                ],
-                depth:
-                  '排查顺序建议固定下来，这样面试时能给出「方法论」而不只是清单：**第一步看「Bean 是不是代理」**（`AopUtils.isAopProxy(bean)` 或打印 `bean.getClass()`，出现 `$Proxy` / `$$EnhancerBySpringCGLIB` 才是代理）；**第二步看「方法签名是否符合」**（`public`、非 `final`、非 `static`）；**第三步看「调用路径是否经过代理」**（断点打在拦截器里，看有没有进来）；**第四步看「异常是否到达拦截器」**（有没有被吞、类型是否匹配 `rollbackOn`）。这四步能覆盖 95% 的现场问题，比背十条清单有用得多。',
-                followup:
-                  '「`@Transactional` 加在接口上生效吗」——**取决于代理方式**。JDK 代理时，注解在接口方法上能被读到（因为 `AnnotationTransactionAttributeSource` 会查接口），可以生效；CGLIB 代理时注解在实现类上才可靠。**官方推荐写在实现类（或实现方法）上**，因为「接口上的注解在 CGLIB 模式下可能被忽略」，而且接口不应耦合事务这类实现细节。',
-              },
-              {
-                kind: 'question',
-                title: '自调用导致事务失效，怎么解决？（配代码）',
-                questionId: 'java-05-Q41',
-                intent:
-                  '要有可落地的代码。至少给出「拆 Bean」与「注入自身」两种，并能说清各自代价。',
-                points: [
-                  '**根因**：`this` 指向原始对象，不是代理，拦截器链根本没进入',
-                  '**方案一（推荐）：拆到另一个 Bean**——把需要独立事务的方法移到 `XxxTxService`，通过注入调用，天然走代理',
-                  '**方案二：注入自身**——`@Autowired @Lazy private XxxService self;` 然后 `self.method()`；`@Lazy` 用于避免循环依赖报错',
-                  '**方案三：`AopContext.currentProxy()`**——需 `@EnableAspectJAutoProxy(exposeProxy = true)`；依赖 `ThreadLocal`，**异步线程里失效**',
-                  '**方案四：`TransactionTemplate`**——编程式，**完全不依赖代理**，异步线程/非 Spring 对象里也能用，是最稳的兜底',
-                  '**代码要点**：无论哪种方案，**内层方法必须真的声明了 `@Transactional`**（或由 `TransactionTemplate` 显式开启）',
-                  '**副作用提醒**：`@Around` 型切面（如日志、监控）同样会因自调用失效，所以修好事务后可能「顺手修好了别的」',
-                ],
-                depth:
-                  '代码上最容易写错的是「注入自身」的写法：若直接 `@Autowired private XxxService self;`，在**构造器注入 + 无 `@Lazy`** 的情况下会触发循环依赖（自己依赖自己），Spring Boot 2.6+ 默认禁止时直接启动失败。所以必须 `@Lazy`（注入延迟代理），或者改成字段注入（字段注入虽不推荐，但循环依赖场景下反而「能用」——这也侧面印证了字段注入掩盖问题）。另一个细节：`self.method()` 走的是代理，所以**代理上的 `@Order`、其他切面也会一起生效**，如果原本只想让事务生效，可能会意外触发日志切面。',
-                followup:
-                  '「`AopContext.currentProxy()` 为什么会抛 `Cannot find current proxy`」——因为 `exposeProxy` 没开（默认 `false`），或当前线程不是「从代理进入」的线程。开了之后，`JdkDynamicAopProxy.invoke` 会 `AopContext.setCurrentProxy(proxy)`，`finally` 里清理。所以：**必须在代理调用链内部使用**，且异步线程里必然拿不到。',
-              },
-              {
-                kind: 'question',
-                title: '声明式事务和编程式事务怎么选？',
-                questionId: 'java-05-Q42',
-                intent:
-                  '考取舍判断。要能说出「声明式的三个局限」和「编程式的适用场景」，而不是「声明式更好」。',
-                points: [
-                  '**声明式**：`@Transactional`，AOP 实现。优点：零侵入、声明清晰、统一管理；缺点：粒度只能是**方法级**、自调用失效、无法在方法内控制提交时机',
-                  '**编程式**：`TransactionTemplate`（推荐）或直接 `PlatformTransactionManager`。优点：粒度精确、可多次提交、不依赖代理；缺点：代码侵入、样板代码多',
-                  '**选声明式的场景**：标准 CRUD、服务层方法边界与事务边界重合、团队约定统一',
-                  '**选编程式的场景**：循环内**分批提交**、需要在方法中途决定是否提交、**异步线程**里要事务、非 Spring 管理的对象',
-                  '**`TransactionTemplate` 的用法要点**：`execute(status -> { ...; return x; })`，**异常自动回滚**，返回 `null` 也不会回滚（只有异常才回滚）',
-                  '**混合使用**：主体用声明式，个别「分批 / 特殊控制」的方法内用 `TransactionTemplate`，这是最常见的工程实践',
-                  '**注意**：`TransactionTemplate` 默认传播行为也是 `REQUIRED`，如果所在方法已有事务，它会**加入**而非新建——需要独立事务时要显式改传播行为',
-                ],
-                depth:
-                  '为什么 `TransactionTemplate` 在异步线程里能工作？因为它的实现是「直接调 `transactionManager.getTransaction()`」，完全不依赖「当前线程有没有代理」——它自己就是那个「开启事务的人」。这也是「`@Async` 方法里想有事务，必须用编程式」的原因：`@Async` 的执行线程上没有外层事务上下文，声明式依然能创建新事务（因为拦截器就在那个线程上执行），所以**准确说法是「`@Async` 里声明式可用，但无法与调用方共享事务」**——这一点很容易说错，值得区分清楚。',
-                followup:
-                  '「`TransactionTemplate` 里返回 `null` 会回滚吗」——不会。它只根据「有没有抛出异常」决定回滚，返回值不影响。想主动回滚要 `status.setRollbackOnly()`，或者抛一个异常。这个细节在「校验不通过要回滚但要返回友好结果」的场景里很实用：`setRollbackOnly()` 后正常返回，事务回滚，上层拿到返回值。',
-              },
-              {
-                kind: 'question',
-                title: '什么是大事务？有什么问题？怎么优化？',
-                questionId: 'java-05-Q43',
-                intent:
-                  '要有「危害链条」和「优化优先级」。只说「事务太长不好」是空的，要说清坏了什么。',
-                points: [
-                  '**定义**：事务持续时间长（含 RPC / 循环 / 大批量 SQL）或涉及数据量大（几万行写入）',
-                  '**危害一：连接被长期占用** → 连接池耗尽 → 其他请求排队 → **表现为「接口变慢但 CPU 不高」**',
-                  '**危害二：锁持有时间长** → 行锁/间隙锁阻塞并发、死锁概率上升',
-                  '**危害三：undo log 膨胀** → 回滚段压力、可能撑爆表空间；回滚本身也极慢',
-                  '**危害四：主从延迟** → 大事务在从库重放耗时长，读写分离场景读到旧数据',
-                  '**优化一（最有效）：把网络调用移出事务**——RPC / HTTP / 远程缓存都不该在事务里',
-                  '**优化二：分批提交**——用 `TransactionTemplate` 每 N 条一个事务；注意「部分成功」的业务可接受性',
-                  '**优化三：缩小锁范围**——先查询再按主键更新、加 `limit`、避免全表 `update`',
-                  '**优化四：非核心逻辑异步化**——`afterCommit` 回调发消息、写日志用 `REQUIRES_NEW` 或异步',
-                  '**优化五：只读场景加 `readOnly = true`**，让 ORM 跳过脏检查，必要时走从库',
-                ],
-                depth:
-                  '一个常被忽略的「隐性大事务」：**`for` 循环里逐条 `insert` 十万行**。这不仅是「事务大」，还是「网络往返多」——每次 `insert` 一次 RTT，十万次就是十万次往返。正确做法是 `batch`（JDBC `addBatch` / MyBatis `foreach` 批量插入，或 `rewriteBatchedStatements=true`），把网络开销从「次数」降为「批次」，再用分批事务控制每批规模（一般 500~1000 条）。**注意批量插入本身也可能撑爆 `max_allowed_packet`**，需要配合调参。',
-                followup:
-                  '「分批提交后，中间失败怎么办」——这已经不是「事务」能解决的问题了，而是「补偿/幂等」问题。常见做法：① 每批记录「已处理偏移量」，失败后从断点续跑；② 每批操作设计成**幂等**（用唯一键 `insert ignore` 或 `on duplicate key update`）；③ 极端场景用「本地消息表 + 定时补偿」。**面试里能说到「分批提交把原子性换成了最终一致性」，就是理解到位了**。',
-              },
-              {
-                kind: 'question',
-                title: 'rollbackFor 相关的细节：默认回滚规则是什么？为什么受检异常默认不回滚？',
-                questionId: 'java-05-Q44',
-                intent:
-                  '考「默认值 + 历史来源 + 实践建议」。能说出 EJB 沿革是加分项。',
-                points: [
-                  '**默认规则**：`RuntimeException` 及其子类、`Error` → **回滚**；受检异常（`Exception` 的非运行时子类）→ **不回滚**',
-                  '**判定入口**：`DefaultTransactionAttribute.rollbackOn(ex)`，`TransactionInterceptor` 用它决定 commit 还是 rollback',
-                  '**历史来源**：继承 EJB 事务规范——受检异常代表「可预期的业务结果」，调用方应处理，不该撤销；运行时异常代表「程序错误」，必须撤销',
-                  '**实践建议**：几乎总是显式写 `@Transactional(rollbackFor = Exception.class)`，不要依赖默认',
-                  '**`noRollbackFor`**：显式排除某些异常（如「重复提交」这类「失败但不算错误」的情况）',
-                  '**更隐蔽的坑**：异常被 `catch` 吞掉 → 拦截器看到正常返回 → **提交**，此时 `rollbackFor` 完全无效',
-                  '**另一种主动回滚**：`TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`（不想抛异常时用）',
-                ],
-                depth:
-                  '一个精度很高的追问：**「回滚了，但为什么异常还是被吞了」**——因为 `@Transactional` 只负责「事务边界」，不负责「异常传播」。如果内层 `try-catch` 后没有重新抛出，拦截器根本不知道有异常，自然提交；如果内层抛了但外层 `catch` 了，且传播行为是 `REQUIRED`，那外层拿着 `rollbackOnly` 标记去 commit 会抛 `UnexpectedRollbackException`——**这个异常往往在「业务看似成功」之后才出现**，极难排查。所以规范是：**要么不 catch，要么 catch 后 `throw`，要么 `setRollbackOnly()`**。',
-                followup:
-                  '「`rollbackFor` 能配多个类吗」——可以，`@Transactional(rollbackFor = {IOException.class, SQLException.class})`。但更常见的是「配 `Exception.class` 一网打尽」+ 用 `noRollbackFor` 排除个别。另外注意：`rollbackForClassName` 用字符串形式（老版本或不方便引类时用），但拼错类名不会报错，只会在运行时静默失效——**这也是一个隐蔽的坑**。',
-              },
-              {
-                kind: 'question',
-                title: '事务方法里起了新线程操作数据库，事务还能保证吗？',
-                questionId: 'java-05-Q45',
-                intent:
-                  '考「ThreadLocal 不跨线程」这条主线。答对不难，难在给出正确的替代方案。',
-                points: [
-                  '**不能保证**。事务上下文在 `TransactionSynchronizationManager` 的 `ThreadLocal` 里，**不跨线程传递**',
-                  '**新线程的实际行为**：`DataSourceUtils.getConnection` 在子线程查不到绑定 → 从池里**新取一条连接** → 独立自动提交',
-                  '**后果**：主线程回滚了，子线程写的已经落库；反之主线程提交了，子线程可能还没开始写，中间宕机就丢了',
-                  '**`@Async` 同理**：它只是「用线程池执行」，本质还是换线程，一样不共享事务',
-                  '**错误方案**：`@Async` + `REQUIRES_NEW` —— 两个完全独立的事务，**没有任何原子性**',
-                  '**正确方案一**：`TransactionSynchronizationManager.registerSynchronization(...)` 的 `afterCommit()`，**主事务提交成功后**再异步执行',
-                  '**正确方案二**：用「本地消息表」——在同一事务里写业务表和消息表，再由独立线程扫描发送，保证最终一致',
-                  '**正确方案三**：用 MQ 事务消息（RocketMQ）或 CDC（Canal），把「写库」与「发消息」解耦',
-                ],
-                depth:
-                  '`afterCommit` 的实现原理值得知道：`TransactionSynchronizationManager` 维护一个 `ThreadLocal<List<TransactionSynchronization>> synchronizations`，`AbstractPlatformTransactionManager.commit` 在真正提交后会调 `triggerAfterCommit()`——**此时事务已提交、连接可能已归还**。所以 `afterCommit` 里**不能再做数据库写操作**（需要新开事务或直接用编程式），只适合「发消息、发通知、写日志到别的存储」。另外它是在**原线程同步执行**的，若要做耗时操作，应在回调里再提交给线程池。',
-                followup:
-                  '「用 `InheritableThreadLocal` 能把事务传过去吗」——技术上可以改造，但**极其危险且没人这么做**：事务的「原子性」依赖「一个连接被一个线程独占」，跨线程共用连接会有并发写同一条连接的问题（JDBC 连接不是线程安全的），轻则数据错乱，重则连接状态崩溃。**所以「跨线程事务」不是「想不到」，而是「物理上不该做」**——要跨线程保证一致性，只能用分布式事务或最终一致方案。',
+                  '拉开分档:普通答法能列出链路;好答法会主动区分「Spring 做的事」和「数据库做的事」——隔离级别、锁、MVCC 全是数据库的,Spring 只负责传参;[[最好的答法会点出「事务范围 = 线程范围」这个推论]],并用它解释自调用和异步两个坑其实是同一个原因。',
+                followup: '追问:你说事务范围等于线程范围,那如果一个请求里用了线程池并行查三张表,这三段查询还在一个事务里吗?',
               },
             ],
           },
@@ -2181,555 +1705,426 @@ export default {
       lessons: [
         {
           id: 'spring-mvc',
-          title: 'Spring MVC：请求的一生',
-          kind: 'concept',
+          title: 'Spring MVC：一次请求的完整旅程',
+          minutes: 50,
           sources: [{ topic: 'java-05', chapters: ['六、Spring MVC'] }],
           content: {
             intro:
-              'Spring MVC 的面试题几乎都能挂到同一张图上：**一个 HTTP 请求从进 Tomcat 到写出响应，经过了哪些组件**。三个关键节点是 `DispatcherServlet` 拿到「handler + 拦截器链」、`HandlerAdapter` 负责「怎么调用」、返回值处理器负责「怎么变成响应」。抓住「映射与适配为什么要分开」，各组件职责、参数解析、`@Controller` 与 `@RestController` 的差别就都清楚了。本课还会讲透三个高频对比：Filter 与 Interceptor 的位置差异、三条参数绑定路径、请求与响应两端的 `HttpMessageConverter` 选择逻辑。',
+              '同一个项目里三个接口,报三种错:一个 `415 Unsupported Media Type`,一个 `406 Not Acceptable`,还有一个日期字段返回成了 `[2026,10,27,16,13,30]`。看起来是三件不相干的事,其实是[[同一个组件在三个位置各做了一次判断]]。Spring MVC 的所有面试题都挂在一张图上:一次 HTTP 请求从进 Tomcat 到写出响应,经过了哪些组件、每段由谁负责。抓住「谁来找、谁去调、谁来转换」这三个分工,组件的职责、参数绑定的三条路、过滤器和拦截器的差别,都能顺着推出来。',
             outline: [
-              '`DispatcherServlet.doDispatch` 的八个步骤：拿 handler → 找 adapter → preHandle → 调用 → postHandle → 异常解析 → 渲染 → afterCompletion',
-              '「映射」与「适配」必须分开：handler 有三种形态，调用方式各不相同',
-              'Filter 在 `DispatcherServlet` 之前（Servlet 规范），Interceptor 在它之后（Spring MVC）',
-              '`@RequestBody` 走 `HttpMessageConverter`，`@RequestParam` 走 `getParameter`——两条完全不同的取值路径',
-              '`preHandle` 返回 `false` 会中断链，且**不渲染响应**，必须自己写输出',
+              '`doDispatch` 的八个步骤:找 handler → 找 adapter → 前置拦截 → 调用 → 后置拦截 → 异常解析 → 渲染 → 收尾',
+              '「映射」与「适配」必须分开:能被调用的东西有三种形态,调用方式各不相同',
+              'Filter 在 `DispatcherServlet` 外面,Interceptor 在里面——位置决定了它能拿到什么',
+              '`@RequestParam` 读 query、`@PathVariable` 读 URI 模板、`@RequestBody` 读原始请求体:三条路读的是 HTTP 的三个不同部分',
+              '`preHandle` 返回 `false` 会中断链且**不渲染响应**,必须自己写输出',
             ],
             pitfalls: [
-              '把 `postHandle` 说成「一定执行」：`preHandle` 返回 `false` 或抛异常时，`postHandle` 不会执行',
-              '认为 `@RestController` 是独立注解：它是 `@Controller` + `@ResponseBody` 的组合注解',
-              '在 Filter 里抛异常却指望 `@ControllerAdvice` 捕获：Filter 在 `DispatcherServlet` 之外，异常进不了 Spring MVC 的解析链',
+              '把 `postHandle` 说成一定执行:`preHandle` 返回 `false` 或抛异常时,它一次都不会跑',
+              '认为 `@RestController` 是独立注解:它是 `@Controller` 与 `@ResponseBody` 的组合',
+              '在 Filter 里抛异常却指望全局异常处理器捕获:它在 `DispatcherServlet` 之外,进不了 Spring MVC 的解析链',
             ],
             sections: [
               {
-                kind: 'concept',
-                title: '为什么需要「映射」和「适配」两个组件',
+                kind: 'why',
+                title: '三个错误,一个原因',
                 body: [
-                  '先想一个设计问题：一个请求进来，Spring 怎么知道该调哪个方法？直觉答案是「查一个表：URL → 方法」。但现实里「能被调用的东西」有三种完全不同的形态：**`@RequestMapping` 标注的方法**（靠反射调用，要解析参数、处理返回值）、**实现了 `Controller` 接口的类**（调 `handleRequest`，签名固定）、**`HttpRequestHandler` 实现类**（自己写 `response`，无返回值）。',
-                  '如果让 `DispatcherServlet` 直接处理这三种形态，它内部就会长出一堆 `if-else`，而且每加一种新形态都要改它。所以 Spring 拆成两个角色：**`HandlerMapping` 只负责「找出谁来处理」**，**`HandlerAdapter` 只负责「怎么调用它」**。前者输出一个 `HandlerExecutionChain`（handler + 拦截器），后者提供统一的 `handle(request, response, handler)` 接口。`DispatcherServlet` 只跟这两个接口打交道，永远不知道具体是哪种 handler。',
-                  '这个拆分带来一个很实用的能力：**新增一种 handler 类型，只需要加一个 `HandlerMapping` + 一个 `HandlerAdapter`，`DispatcherServlet` 一行都不用改**。这就是「映射」与「适配」分开的全部理由——也是「为什么面试官爱问这两个组件的区别」的原因：它考的是你能不能看出「职责单一」在这里解决的是什么问题。',
+                  '三个接口,三种故障,同时出现在一次联调里。新人第一反应是「JSON 配置坏了」,逐个去查依赖版本,查了一下午。',
                 ],
-                points: [
-                  '**`HandlerMapping`**：请求 → `HandlerExecutionChain`（handler + 匹配的拦截器列表）。常用 `RequestMappingHandlerMapping`',
-                  '**`HandlerAdapter`**：判断「我能不能调这个 handler」+ 真正执行。常用 `RequestMappingHandlerAdapter`',
-                  '**为什么分开**：handler 有多种形态，调用方式各异；拆开后新增类型无需改核心调度器',
-                  '**`HandlerExecutionChain`**：不只装 handler，还装了「该请求命中的拦截器」——所以拦截器是**跟着 handler 走的**，不是全局固定的',
-                  '**九大组件**：`HandlerMapping`、`HandlerAdapter`、`HandlerExceptionResolver`、`ViewResolver`、`LocaleResolver`、`ThemeResolver`、`MultipartResolver`、`FlashMapManager`、`RequestToViewNameTranslator`',
+                code: {
+                  language: 'java',
+                  code:
+                    "// A:前端发 JSON,后端却用 @RequestParam 接\n@PostMapping(\"/user\")\npublic Result create(@RequestParam String name) { ... }\n// → 415 Unsupported Media Type\n\n// B:同一个接口,前端带 Accept: application/xml\n@GetMapping(\"/user/{id}\")\npublic User get(@PathVariable Long id) { ... }\n// → 406 Not Acceptable\n\n// C:日期字段返回成了数组\npublic class User { private LocalDateTime createdAt; }\n// → \"createdAt\": [2026, 10, 27, 16, 13, 30]",
+                  caption: '三个错误码看起来毫无关系:一个是「我读不懂你发的」,一个是「我写不出你要的」,一个是「我写出来了但格式不对」。',
+                },
+                wrong: [
+                  '**猜法一:JSON 依赖版本冲突?** 不是。同一个项目里别的接口返回 JSON 完全正常,依赖没问题。',
+                  '**猜法二:是不是老版本的坑,升级 Spring 就好?** 不是。三个现象在最新版本上完全一样,因为它们不是 bug,是设计。',
+                  '**猜法三:三个独立的配置问题,分别修?** 可以修好,但下次换个人写还会再犯——因为没找到共同的那一个点。',
+                ],
+                real:
+                  '三个现象确实来自同一个组件:`HttpMessageConverter`。它负责「请求体 ↔ 对象」的双向转换,判断逻辑只有两条——**读的时候看 `Content-Type`,写的时候看 `Accept`**。A 是「发来的 `Content-Type` 是 JSON,但没有任何一个参数解析器认它」;B 是「你要 XML,但没有任何一个转换器能写出 XML」;C 是「能写 JSON,但负责写 JSON 的那个转换器没配置日期格式」。',
+                reveal:
+                  '一个组件、两条判断、三个出口,足以解释一整类「莫名其妙的状态码」。这也是本课的思路:[[不要按错误码去背解决方案,要按「这段由谁负责」去找位置]]。下面把请求的完整旅程走一遍,每经过一个组件就问一句「它负责什么、它依赖什么做判断」——走完之后,上面三个故障各自落在哪一步,你自己就能指出来。',
+              },
+              {
+                kind: 'analogy',
+                title: '类比:餐厅的领位员与点菜员',
+                text:
+                  '一家餐厅有三种桌型:中餐圆桌、日式吧台、自助餐台。客人进门,先由**领位员**决定坐哪桌——他只做一件事,看人数和预订情况,把人带到位置(以及这一桌对应的服务员)。接下来由**点菜员**负责真正下单,但三种桌型的下单方式完全不同:圆桌要报菜名、吧台要写小票、自助餐台根本不用点。',
+                mapping: [
+                  { real: '领位员只负责「带到位」,不管怎么点菜', tech: '`HandlerMapping`:输入请求,输出「谁来处理 + 该走的拦截器」' },
+                  { real: '点菜员按桌型决定怎么下单', tech: '`HandlerAdapter`:先问「我能处理这种 handler 吗」,再执行' },
+                  { real: '三种桌型', tech: '三种 handler 形态:注解方法、`Controller` 接口实现、静态资源处理器' },
+                  { real: '领位时顺手记下这桌配哪个服务员', tech: '返回的链条里不只有 handler,还带着「这个路径命中的拦截器」' },
+                  { real: '新加一种桌型,只需多配一个点菜员', tech: '新增 handler 类型只需加一对 Mapping + Adapter,核心调度器一行不改' },
+                ],
+                limit:
+                  '有一处不像:餐厅里客人是「先领位、再点菜」的先后关系,两个角色不会互相打听;但程序里 Adapter 必须先问一句「我能不能处理这个 handler」,而且**这个判断是逐个试出来的**——找不到任何一个 Adapter 认领,请求就直接失败了。所以真实的关系更像「一排点菜员轮流看一眼这桌,谁说自己会谁上」,而不是「领位员指定某个人」。',
+              },
+              {
+                kind: 'concept',
+                title: '为什么「找」和「调」必须是两个组件',
+                body: [
+                  '先想一个设计问题:请求进来,怎么知道该调哪个方法?直觉答案是「查一张表:URL → 方法」。但现实里「能被调用的东西」有三种完全不同的形态:标了路径注解的普通方法(靠反射调用,要先解析参数、再处理返回值)、实现了控制器接口的类(签名固定,直接调)、以及处理静态资源的处理器。',
+                  '如果让核心调度器直接处理这三种形态,它内部就会长出一堆分支判断,而且每加一种新形态都要改它。所以职责被切成两半:**一个只负责「找出谁来处理」,一个只负责「怎么调用它」**。前者输出的是一个「执行链」对象,后者先判断自己能不能处理,再真正执行。',
+                  '这个拆分带来一个很实用的能力:[[新增一种处理类型,只需要加一对「找 + 调」的实现,核心调度器一行都不用改]]。面试官爱问这两个组件的区别,考的就是你能不能看出「职责单一」在这里到底解决了什么问题——不是「代码好看」,而是「扩展时不改核心」。',
+                  '还有一处容易被忽略的细节:那个返回的「执行链」里不只装了 handler,还装了「这次请求命中的拦截器列表」。也就是说**拦截器不是全局固定的,而是跟着路径走的**——同一次请求,`/admin/**` 和 `/api/**` 命中的拦截器可以完全不同。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: 'doDispatch：一次请求的八个步骤',
+                title: '一次请求的八个步骤',
                 body: [
-                  '把 `DispatcherServlet.doDispatch` 的主体逻辑画成一条线。注意第 3、5、8 步是三个不同的扩展点，执行顺序与方向都不同。',
+                  '核心调度方法的主体逻辑是一条直线。注意第 ③、⑤、⑧ 步是三个扩展点,它们的**执行方向各不相同**。',
                 ],
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '① `getHandler(request)`', note: '遍历所有 HandlerMapping，返回 `HandlerExecutionChain`（handler + 拦截器）' },
-                    { label: '② `getHandlerAdapter(handler)`', note: '遍历所有 Adapter，找到 `supports(handler)` 为真的那个' },
-                    { label: '③ `applyPreHandle`', note: '拦截器 `preHandle` **正序**执行；任一返回 `false` 则跳到第 ⑧ 步' },
-                    { label: '④ `adapter.handle(...)`', note: '内部完成：参数解析 → 反射调用 → 返回值处理（`@ResponseBody` 在这里写响应）' },
-                    { label: '⑤ `applyPostHandle`', note: '拦截器 `postHandle` **逆序**执行；**只有正常返回才会走到这里**' },
-                    { label: '⑥ `processDispatchResult`', note: '若有异常 → 交给 `HandlerExceptionResolver` 链处理' },
-                    { label: '⑦ `render(mv)`', note: '`ViewResolver` 把逻辑视图名解析成 `View` → `view.render` 写响应；`@ResponseBody` 时 `mv` 为 `null`，跳过此步' },
-                    { label: '⑧ `triggerAfterCompletion`', note: '拦截器 `afterCompletion` **逆序**执行；**无论成功、失败、还是 preHandle 返回 false 都会执行**' },
+                    { label: '① 找 handler', note: '遍历所有映射器,返回「handler + 该路径命中的拦截器」' },
+                    { label: '② 找 adapter', note: '遍历所有适配器,找到第一个说自己能处理这个 handler 的' },
+                    { label: '③ 前置拦截', note: '`preHandle` **正序**执行;任一返回 `false` 就跳到第 ⑧ 步' },
+                    { label: '④ 执行', note: '内部三件事:参数解析 → 反射调用 → 返回值处理(写响应就在这一步)' },
+                    { label: '⑤ 后置拦截', note: '`postHandle` **逆序**执行;**只有正常返回才走到这里**' },
+                    { label: '⑥ 异常解析', note: '有异常就交给异常解析器链,由它决定写什么响应' },
+                    { label: '⑦ 渲染视图', note: '把逻辑视图名解析成视图并输出;返回体已写过的这时直接跳过' },
+                    { label: '⑧ 收尾', note: '`afterCompletion` **逆序**执行;无论成败都会执行' },
                   ],
                   caption:
-                    '第 ③ 与第 ⑤ 步的方向相反，这是最容易记错的一点：**`preHandle` 正序（外层先进），`postHandle` 与 `afterCompletion` 逆序（内层先出）**。这个设计与 AOP 的拦截器链完全同构——本质是「栈」。另外注意第 ④ 步：`@ResponseBody` 的响应**在 `adapter.handle` 内部就写完了**，所以第 ⑦ 步的渲染会被跳过（`mv == null`）。这也解释了「为什么返回 `ResponseEntity` 时不会去找视图」。',
+                    '第 ③ 与第 ⑤ 步方向相反,这是最容易记错的一点:**前置正序(外层先进),后置和收尾逆序(内层先出)**——它和 AOP 的拦截器链完全同构,本质是「栈」。另外第 ④ 步值得单独记:**写响应体在这步内部就已经完成了**,所以第 ⑦ 步会被跳过。这解释了「为什么返回响应对象时不会去找视图」——不是找不到,是根本不需要。',
                 },
               },
               {
                 kind: 'diagram',
-                title: '一次典型请求的时序',
+                title: '常用组件与默认实现对照',
                 body: [
-                  '把八个步骤压成时序图，重点看「拦截器三个方法」分别插在什么位置。',
-                ],
-                diagram: {
-                  type: 'sequence',
-                  actors: ['客户端', '调度器', '适配器', 'Controller'],
-                  messages: [
-                    { from: '客户端', to: '调度器', text: 'GET /users/1' },
-                    { from: '调度器', to: '调度器', text: '`getHandler` + `getHandlerAdapter`' },
-                    { from: '调度器', to: '适配器', text: '`preHandle` 正序（鉴权、日志）' },
-                    { from: '调度器', to: '适配器', text: '`handle(...)`' },
-                    { from: '适配器', to: 'Controller', text: '参数解析完成，反射调用方法' },
-                    { from: 'Controller', to: '适配器', text: '返回对象（`@ResponseBody`）', reply: true },
-                    { from: '适配器', to: '客户端', text: '`HttpMessageConverter` 序列化为 JSON 写入响应', reply: true },
-                    { from: '调度器', to: '适配器', text: '`postHandle` 逆序 → `afterCompletion` 逆序' },
-                  ],
-                  caption:
-                    '第 3 步的标签写的是 `preHandle`，但它实际由 `HandlerExecutionChain.applyPreHandle` 逐个调用——**拦截器不是独立组件，而是挂在 handler 的执行链上**。这就是「为什么拦截器能拿到 `HandlerMethod`」（参数里有 `Object handler`）而 Filter 拿不到。第 7 步说明了「响应在 `handle` 内部就已写出」，所以后面的 `postHandle` 已经**改不了响应体**了——想改响应只能在 `ResponseBodyAdvice` 或 Filter 里包装 `HttpServletResponse`。',
-                },
-              },
-              {
-                kind: 'diagram',
-                title: '常用组件与实现类对照',
-                body: [
-                  '面试时说得出类名，比说「Spring 有拦截器机制」可信得多。这张表把三类组件与它们的默认实现钉在一起。',
+                  '面试时说得出类名,比说「Spring 有拦截器机制」可信得多。这张表把六个组件的职责、默认实现、以及它依赖什么做判断钉在一起。',
                 ],
                 diagram: {
                   type: 'matrix',
-                  head: ['组件', '职责', '常用实现', '关键配置'],
-                  cols: ['职责', '常用实现', '关键配置'],
+                  head: ['组件', '职责', '常用实现', '关键判断依据'],
+                  cols: ['职责', '常用实现', '关键判断依据'],
                   rows: [
-                    ['`HandlerMapping`', '请求 → handler + 拦截器链', '`RequestMappingHandlerMapping`', '`@RequestMapping` 的 URL/method/headers'],
-                    ['`HandlerAdapter`', '判断能否调用 + 执行', '`RequestMappingHandlerAdapter`', '参数解析器、返回值处理器列表'],
-                    ['`HandlerExceptionResolver`', '异常 → 响应', '`ExceptionHandlerExceptionResolver`', '`@ExceptionHandler` / `@ControllerAdvice`'],
-                    ['`ViewResolver`', '逻辑视图名 → `View`', '`InternalResourceViewResolver`、`ContentNegotiatingViewResolver`', '`prefix` / `suffix`'],
-                    ['`HttpMessageConverter`', '请求体 ↔ 对象', '`MappingJackson2HttpMessageConverter`', '`Content-Type` / `Accept`'],
-                    ['`HandlerMethodArgumentResolver`', '参数 → 方法入参', '`RequestParamMethodArgumentResolver` 等 26+ 个', '由注解决定用哪个'],
+                    ['`HandlerMapping`', '请求 → handler + 拦截器', '`RequestMappingHandlerMapping`', '路径、方法、`consumes` / `produces`'],
+                    ['`HandlerAdapter`', '判断能否调用 + 执行', '`RequestMappingHandlerAdapter`', 'handler 的类型'],
+                    ['`HandlerExceptionResolver`', '异常 → 响应', '`ExceptionHandlerExceptionResolver`', '异常类型最精确优先'],
+                    ['`ViewResolver`', '逻辑视图名 → 视图', '`InternalResourceViewResolver`', '前缀后缀拼接'],
+                    ['`HttpMessageConverter`', '请求体 ↔ 对象', '`MappingJackson2HttpMessageConverter`', '读看 `Content-Type`,写看 `Accept`'],
+                    ['`HandlerMethodArgumentResolver`', '参数 → 方法入参', '`RequestParamMethodArgumentResolver` 等', '参数上标的注解'],
                   ],
                   caption:
-                    '第二行与第六行是「最常被问到但最容易被忽略」的一对：**`HandlerAdapter` 本身几乎不做事**，真正干活的是它内部持有的参数解析器与返回值处理器列表。所以「`@RequestParam` 是怎么取到值的」这个问题的答案不在 `HandlerAdapter` 里，而在 `RequestParamMethodArgumentResolver` 里。记住这个分层，顺着问下去就不会卡住。',
+                    '第二行和第六行是「最常被问到、最容易被答空」的一对:**适配器本身几乎不做事**,真正干活的是它内部持有的两串列表——一串参数解析器、一串返回值处理器。所以「`@RequestParam` 是怎么取到值的」这个问题的答案不在适配器里,而在某个具体的参数解析器里。记住这个分层,追问下去就不会卡住:先定位到组件,再定位到它内部的那一串。',
                 },
               },
               {
                 kind: 'diagram',
-                title: 'Filter 与 Interceptor：两道关卡的物理位置',
+                title: 'Filter 与 Interceptor:两道关卡的物理位置',
                 body: [
-                  '这两个东西最容易被混为一谈，但它们的「位置」完全不同——位置决定了它们能做什么。',
+                  '这两个东西最容易被混为一谈,但它们的「位置」完全不同——而位置决定了它们能拿到什么、能做什么。',
                 ],
                 diagram: {
                   type: 'layers',
                   items: [
-                    { label: 'Servlet 容器（Tomcat）', note: '解析 HTTP、管理 `ServletContext`', tone: 'muted' },
-                    { label: 'Filter 链', note: 'Servlet 规范；在 `DispatcherServlet` **之前**；拿不到 handler', tone: 'warn' },
-                    { label: '`DispatcherServlet`', note: 'Spring MVC 入口；从这里开始才有「handler」这个概念', tone: 'primary' },
-                    { label: 'Interceptor 链', note: 'Spring MVC 组件；在 handler **之前/之后**；能拿到 `HandlerMethod`', tone: 'good' },
+                    { label: 'Servlet 容器(Tomcat)', note: '解析 HTTP、管理上下文', tone: 'muted' },
+                    { label: 'Filter 链', note: 'Servlet 规范;在调度器**外面**;拿不到 handler', tone: 'warn' },
+                    { label: '核心调度器', note: 'Spring MVC 的入口;从这里开始才有「handler」这个概念', tone: 'primary' },
+                    { label: 'Interceptor 链', note: 'Spring MVC 组件;在 handler **前后**;能拿到方法对象', tone: 'good' },
                     { label: 'Controller 方法', note: '业务代码', tone: 'good' },
                   ],
                   caption:
-                    '**关键分界线是 `DispatcherServlet`**：Filter 在它外面，所以「不知道这次请求最终会调哪个方法」；Interceptor 在它里面，所以能拿到 `HandlerMethod`（可以读方法上的注解，实现「方法级权限」「防重复提交」这类细粒度逻辑）。这也解释了「为什么 Filter 里抛异常 `@ControllerAdvice` 抓不到」——异常发生在 `DispatcherServlet` 之外，Spring MVC 的解析链根本没机会介入。',
+                    '**关键分界线是那个调度器**:过滤器在它外面,所以「不知道这次请求最终会调哪个方法」;拦截器在它里面,所以能拿到方法对象、能读方法上的注解——「方法级权限」「防重复提交」这类细粒度逻辑只能放在拦截器里。同一件事反过来看也成立:[[过滤器里抛的异常,全局异常处理器抓不到]],因为异常发生在调度器之外,Spring MVC 的解析链根本没机会介入。要统一处理,要么在过滤器内部自己写响应,要么交给容器的错误页端点。',
                 },
               },
               {
                 kind: 'principle',
-                title: '参数绑定的三条路：Query、URI、Body',
+                title: '参数绑定的三条路:读的是 HTTP 的三个不同部分',
                 body: [
-                  '`@RequestParam`、`@PathVariable`、`@RequestBody` 的区别不是「随便选一个」，而是**它们读的是 HTTP 请求里完全不同的三个部分**。',
-                  '**`@PathVariable`** 读的是 **URI 模板**：`@GetMapping("/users/{id}")` 里的 `{id}`，由 `RequestMappingHandlerMapping` 在匹配 URL 时就把值提取出来了，存在 `HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE` 里。所以它要求 URL 必须匹配模板，值一定存在。',
-                  '**`@RequestParam`** 读的是 **query string 或 form body**：底层就是 `request.getParameter(name)`。对 `application/x-www-form-urlencoded` 的 POST，Servlet 容器会把 body 解析成 parameter，所以 `@RequestParam` 也能取到（**这与 `@RequestBody` 冲突**——因为 `getParameter` 已经把 body 读完了，`@RequestBody` 再读就是空）。',
-                  '**`@RequestBody`** 读的是 **原始请求体**：由 `HttpMessageConverter` 从 `InputStream` 反序列化。所以它只能有一个（body 只能读一次），且必须配 `Content-Type`（否则 415）。**这是三条路里唯一「依赖 `Content-Type`」的一条**，也是「为什么表单和 JSON 不能混用两个注解」的根源。',
+                  '这三个注解的区别不是「随便选一个」,而是**它们各自读 HTTP 请求里完全不同的部分**。想清楚「数据在哪儿」,选哪个就是自然的结论。',
                 ],
                 steps: [
                   {
-                    title: '① `@PathVariable`：读 URI 模板',
+                    title: '① 读 URI 模板:值在路径里',
                     detail:
-                      '`@GetMapping("/users/{id}")` 里的 `{id}`，由 `RequestMappingHandlerMapping` 在匹配 URL 时就把值提取出来，存在 `HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE` 里。所以它要求 URL 必须匹配模板，值一定存在，且**完全不受 `Content-Type` 影响**。',
+                      '路径上的 `{id}` 在「匹配 URL」时就被提取出来了,存在请求属性里。所以它一定存在、一定非空,也不需要任何转换——它的代价是只能表达「资源标识」这类信息。',
                   },
                   {
-                    title: '② `@RequestParam`：读 query string 或 form body',
+                    title: '② 读 query string 或表单体:值在参数表里',
                     detail:
-                      '底层就是 `request.getParameter(name)`。对 `application/x-www-form-urlencoded` 的 POST，Servlet 容器会把 body 解析成 parameter，所以 `@RequestParam` 也能取到。但它只认这两处——**JSON body 不会被解析成 parameter**。',
+                      '底层就是容器的取参数方法。对表单类型的 POST,容器会把请求体解析成参数表,所以表单也能读到——这是「表单和 JSON 表现不同」的根源。可以设 `required = false` 和默认值。',
                   },
                   {
-                    title: '③ `@RequestBody`：读原始请求体',
+                    title: '③ 读原始请求体:值在流里',
                     detail:
-                      '由 `HttpMessageConverter` 从 `InputStream` 反序列化。因此它**只能有一个**（body 只能读一次），且**必须配 `Content-Type`**（否则 415）。这是三条路里唯一依赖 `Content-Type` 的一条。',
+                      '由消息转换器从输入流反序列化。因为流只能读一次,**一个方法只能有一个这样的参数**,而且必须靠 `Content-Type` 才知道用什么格式解析——不匹配就是 415。',
                   },
                   {
-                    title: '④ 冲突点：两者不能同时用于表单',
+                    title: '④ 冲突点:表单场景两者不能混用',
                     detail:
-                      '表单提交时，`@RequestParam` 背后的 `getParameter` 已经把 body 读完了，`@RequestBody` 再去读就是空串。**这正是「前端传 JSON、后端用 `@RequestParam` 收到 `null`」的根因**——两条路径读的根本不是同一块数据。',
+                      '表单提交时,取参数那一步已经把请求体读完了,再去读流只能得到空串。[[「前端传了 JSON、后端收到 null」几乎都是这个原因]]——不是数据没到,是读的位置不对。',
                   },
                   {
-                    title: '⑤ 其余两个常用注解',
+                    title: '⑤ 对象绑定是第五条路',
                     detail:
-                      '`@ModelAttribute` 把多个参数绑成一个对象（表单场景的推荐写法），支持 `user.name` 这样的嵌套属性；`@RequestHeader` / `@CookieValue` 分别读 header 与 cookie，底层是 `getHeader` / `getCookies`。',
+                      '把多个参数按名字装配成一个对象,适合表单场景,还支持嵌套属性。它不是「另一种取值方式」,而是「批量使用第 ② 条路」。选型口诀:资源标识用路径、过滤分页用参数、复杂对象用请求体。',
                   },
                 ],
               },
               {
                 kind: 'concept',
-                title: 'HttpMessageConverter：谁决定用 Jackson 还是 String',
+                title: '消息转换器:谁决定用 JSON 还是纯文本',
                 body: [
-                  '`@ResponseBody` 只是「标记」，真正把对象变成 JSON 的是 `HttpMessageConverter`。它的接口只有四个方法：`canRead(clazz, mediaType)`、`read(...)`、`canWrite(clazz, mediaType)`、`write(...)`。',
-                  '**读（请求 → 对象）时的选择逻辑**：`RequestResponseBodyMethodProcessor.readWithMessageConverters` 里，先取 `Content-Type`，然后**按注册顺序遍历**所有 converter，找第一个 `canRead(参数类型, contentType)` 为真的。所以顺序很重要——`MappingJackson2HttpMessageConverter` 能处理 `application/json`，`StringHttpMessageConverter` 能处理 `text/plain`，`ByteArrayHttpMessageConverter` 能处理一切（`canRead` 对 `byte[]` 恒真），所以它排在后面。',
-                  '**写（对象 → 响应）时的选择逻辑**：先看 `Accept` 头（可能多个，按 `q` 权重排序），再遍历 converter 找 `canWrite(返回类型, mediaType)`。**如果 `Accept` 没写或为 `*/*`，就用第一个能写的**——这解释了「不传 `Accept` 时为什么默认返回 JSON」（Jackson 的 converter 注册在前面）。',
-                  '三个高频故障可以据此直接定位：**415**（`Content-Type` 不被任何 converter 支持）、**406**（`Accept` 与所有 `canWrite` 都不匹配）、**日期变时间戳**（Jackson 没注册 `JavaTimeModule`，或者用了 `Date` 而非 `LocalDateTime`）。',
-                ],
-                points: [
-                  '**四个方法**：`canRead` / `read` / `canWrite` / `write`——判断与执行分离',
-                  '**读看 `Content-Type`**，**写看 `Accept`**；`Accept` 缺省时取第一个能写的',
-                  '**常用实现**：`MappingJackson2HttpMessageConverter`（JSON）、`StringHttpMessageConverter`（文本）、`FormHttpMessageConverter`（表单）、`ByteArrayHttpMessageConverter`（二进制）',
-                  '**415** = `Content-Type` 无匹配；**406** = `Accept` 无匹配',
-                  '**扩展方式**：`WebMvcConfigurer.extendMessageConverters` 或直接注册 `HttpMessageConverter` Bean',
-                  '**注意**：`@ResponseBody` + `String` 返回值默认走 `StringHttpMessageConverter`（`text/plain`），不是 JSON——想返回 JSON 字符串要显式设 `produces`',
-                ],
-              },
-              {
-                kind: 'concept',
-                title: '统一异常处理与跨域：两个「必须全局做」的事',
-                body: [
-                  '**异常处理**有三层机制，按优先级从高到低：① `@ExceptionHandler`（同一个 Controller 内，最精确）；② `@ControllerAdvice` + `@ExceptionHandler`（全局，可按包/注解限定范围）；③ `HandlerExceptionResolver` 链（`ExceptionHandlerExceptionResolver` → `ResponseStatusExceptionResolver` → `DefaultHandlerExceptionResolver`）。所以「全局兜底」的标准写法是 `@RestControllerAdvice` 加一个 `@ExceptionHandler(Exception.class)`。',
-                  '两个必须知道的边界：**一是 Filter 里抛的异常进不了 `@ControllerAdvice`**（不在 `DispatcherServlet` 内），要么在 Filter 内自己 `try-catch` 写响应，要么交给 `ErrorController`（`/error` 端点）；**二是 `@ExceptionHandler` 的匹配是「最精确优先」**，如果同时有 `@ExceptionHandler(RuntimeException.class)` 和 `@ExceptionHandler(NullPointerException.class)`，NPE 会走后者。',
-                  '**跨域**的本质是浏览器的同源策略（协议 + 域名 + 端口三者全同）。服务端能做的只是「告诉浏览器我允许」，共五种方案：`@CrossOrigin`（单接口/单类）、`WebMvcConfigurer.addCorsMappings`（全局）、`CorsFilter`（**Filter 层，能覆盖 Filter 阶段的跨域**）、Nginx 反代（同源化，最彻底）、网关统一处理（微服务场景）。一个高频坑：`allowCredentials(true)` 时 `allowedOrigins` **不能写 `*`**，必须用 `allowedOriginPatterns` 或具体域名。',
-                ],
-                points: [
-                  '**三层异常机制**：`@ExceptionHandler`（类内）> `@ControllerAdvice`（全局）> `HandlerExceptionResolver` 链',
-                  '**`@RestControllerAdvice`** = `@ControllerAdvice` + `@ResponseBody`（返回对象自动序列化）',
-                  '**匹配规则**：最精确的异常类型优先；`@ExceptionHandler` 里可以声明 `HttpServletRequest` 等参数',
-                  '**Filter 的异常抓不到**：不在 `DispatcherServlet` 内 → 用 `ErrorController` 或在 Filter 内处理',
-                  '**跨域五方案**：`@CrossOrigin` / `addCorsMappings` / `CorsFilter` / Nginx / 网关',
-                  '**凭证坑**：`allowCredentials(true)` + `allowedOrigins("*")` 会被浏览器拒绝，必须用具体域名或 `allowedOriginPatterns`',
-                  '**预检请求**：非简单请求会先发 `OPTIONS`，需确保 `OPTIONS` 不被鉴权拦截（否则预检失败）',
+                  '`@ResponseBody` 只是**标记**,真正把对象变成 JSON 的是消息转换器。这也是 `@RestController` 的全部秘密:它就是 `@Controller` 加 `@ResponseBody` 两个注解叠在一起,没有任何额外逻辑——[[所以「两者有什么区别」这题,答案在注解组合,不在功能差异]]。去掉它,方法返回的字符串会被当成「视图名」交给 `ViewResolver` 解析,这才是「明明返回了数据,浏览器却报 404」的真实原因。它的接口只有四个方法:两个判断(能不能读、能不能写)、两个执行(读、写)。判断与执行分离,这个形状本身就是线索——所有「该用哪个」的问题,答案都在那两个判断方法里。',
+                  '**读的方向**:先取请求的 `Content-Type`,然后**按注册顺序**遍历所有转换器,找第一个说自己能读的。所以顺序会影响结果,而「顺序」是可以配置的。',
+                  '**写的方向**:先看 `Accept`(可能多个,按权重排序),再遍历找能写的。**如果没写 `Accept` 或写成通配,就用第一个能写的**——这解释了「不传 `Accept` 时为什么默认返回 JSON」:JSON 转换器排在前面。',
+                  '三个高频故障由此可以直接定位:**415** 是没有转换器认这个 `Content-Type`,**406** 是没有转换器能写出你要的类型,**日期变成数组或时间戳**是负责 JSON 的那个转换器里没注册时间模块。它们共用一个组件,所以也共用一个排查思路:[[先问「这一步是谁在做判断」,再看它的判断依据是什么]]。',
+                  '还有一处容易踩:返回纯字符串时走的是文本转换器,`Content-Type` 是 `text/plain`,不是 JSON——想返回「一段 JSON 文本」得显式声明响应类型,否则前端拿到的是一串没被解析的字符。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: 'preHandle 返回 false 之后，谁还执行',
+                title: '前置拦截返回 false 之后,谁还会执行',
                 body: [
-                  '这是拦截器最细的一题。把三种结局（正常、返回 `false`、抛异常）分开看，`postHandle` 与 `afterCompletion` 的表现完全不同。',
+                  '这是拦截器最细的一题。把「返回 false」和「抛异常」两种结局并排放,后置拦截与收尾的表现完全不同。',
                 ],
                 diagram: {
                   type: 'split',
                   left: {
-                    title: 'preHandle 返回 false',
+                    title: '返回 false:静默中断',
                     tone: 'warn',
                     items: [
-                      '**当前**拦截器之后的所有拦截器 `preHandle` 不执行',
-                      '**Controller 方法不执行**',
-                      '**`postHandle` 不执行**（一个都不会）',
-                      '**`afterCompletion` 会执行**——但只对「已成功执行过 `preHandle` 的拦截器」，且**逆序**',
-                      '**不渲染视图**：`DispatcherServlet` 直接返回，响应体是你自己写的内容',
-                      '所以返回 `false` **必须自己写响应**，否则前端拿到空 200',
+                      '当前拦截器之后的**前置拦截不再执行**',
+                      'Controller 方法不执行',
+                      '**后置拦截一次都不执行**',
+                      '收尾方法**会执行**,但只对已成功通过前置的拦截器,且逆序',
+                      '**不渲染任何东西**:调度器直接返回,响应体是空的',
+                      '所以返回 false **必须自己写输出**,否则前端拿到空 200',
                     ],
                   },
                   right: {
-                    title: 'preHandle 抛异常',
+                    title: '抛异常:走统一出口',
                     tone: 'bad',
                     items: [
-                      '**同一层**的后续拦截器不再执行',
-                      '**Controller 与 `postHandle` 都不执行**',
-                      '异常交给 `HandlerExceptionResolver` 处理',
-                      '**`afterCompletion` 仍会执行**（对已成功的拦截器，逆序），异常也会传进去',
-                      '与返回 `false` 的差别：异常会走全局异常处理，`false` 不会',
-                      '**实践建议**：需要「拒绝并返回统一错误格式」时，抛业务异常比返回 `false` 更好',
+                      '同一层的后续拦截器不再执行',
+                      'Controller 与后置拦截都不执行',
+                      '异常交给全局异常解析链处理',
+                      '收尾方法仍会执行,逆序,异常对象也会传进去',
+                      '与返回 false 的唯一差别:**异常会走统一异常处理**',
+                      '实践建议:要「拒绝并返回统一错误格式」,抛异常比返回 false 更好',
                     ],
                   },
                   caption:
-                    '记住一句话就能覆盖全部：**`afterCompletion` 是「清理」语义，所以只要 `preHandle` 成功过就必须执行**——它对应 `ThreadLocal` 清理、MDC 清理、计时结束这类操作，漏掉就会污染后续请求（尤其在线程池复用线程的场景）。而 `postHandle` 是「成功路径上的后处理」，只在正常返回时执行。这也解释了为什么「耗时统计」应该放在 `afterCompletion` 而不是 `postHandle` 里——否则异常请求的耗时全丢。',
+                    '一句话能覆盖全部:**收尾方法是「清理」语义,只要前置成功过就必须执行**——它对应线程本地变量清理、日志上下文清理、计时结束这类操作,漏掉就会污染后续请求(线程池复用线程的场景尤其明显)。后置拦截则是「成功路径上的后处理」,只在正常返回时执行。这也解释了为什么[[耗时统计应该放在收尾而不是后置]]:放在后置里,所有异常请求的耗时全丢。',
                 },
               },
               {
+                kind: 'concept',
+                title: '两件必须全局做的事:异常与跨域',
+                body: [
+                  '**异常处理**有三层,优先级从高到低:类内的异常处理方法最精确;全局通知类覆盖所有控制器,还能按包或注解限定范围;最外层是一条解析器链,处理前两层接不住的情况。日常做法是定义业务异常基类(带 code 和 message),在全局处理器里按类型映射成统一响应体,并在响应体里带上链路标识。',
+                  '两条边界比机制本身更值得记。**第一,过滤器里的异常进不了全局处理器**——位置决定的,上面那张分层图已经解释过。**第二,路径没有任何匹配时的 404 也不归它管**,那属于容器错误页或默认解析器的职责,想自定义成统一格式得另找入口。',
+                  '**跨域**的本质是浏览器的同源策略:协议、域名、端口三者全同才算同源,不同源时**请求其实已经到达服务端了**,只是浏览器拦下了响应。所以服务端能做的只有一件事:在响应头里明确告诉浏览器「我允许」。',
+                  '方案按位置排:注解最细,适合调试;全局配置最常用;过滤器层能覆盖到「全局配置覆盖不到的那一段」;反向代理或同源部署最彻底,因为它让跨域这件事根本不发生;微服务场景则统一在网关处理。',
+                  '两个坑必须知道:带凭证时允许的来源**不能写通配**,否则浏览器会直接拒绝;非简单请求会先发一次 `OPTIONS` 预检,如果鉴权把 `OPTIONS` 也拦了,预检就失败——表现是「接口明明能通,浏览器里全是跨域错误」。',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '收口:一张图串起来,再自述一遍',
+                body: [
+                  '把整条链路用一句话讲完:请求进容器 → 过过滤器 → 进调度器 → **找谁来处理** → **找谁去调用** → 前置拦截 → 解析参数、反射调用、处理返回值(写响应就在这里) → 后置拦截 → 异常解析或渲染 → 收尾清理。',
+                  '三个最容易考的「差别」全部落在这条线上的位置上:**适配器和映射器的差别**,是「找」与「调」的切分;**过滤器和拦截器的差别**,是调度器内外的位置差别;**三个参数注解的差别**,是它们各自从 HTTP 的哪一段取值。',
+                  '能说清下面三句,这一课就算过了:「映射器只管找、适配器只管调,分开是为了新增处理类型时不用改核心调度器」;「前置正序、后置和收尾逆序,收尾只要前置成功过就一定执行,所以清理放这里;返回 false 不会自动写响应」;「读请求看 `Content-Type`、写响应看 `Accept`,415 和 406 就是这两条判断各自失败」。',
+                  '自测一道:一个接口用表单提交,后端同时标了读参数和读请求体,为什么读请求体拿到的是空?如果答得出「表单已经被容器解析成参数表,流已经读完了」,说明后面那几道题都能自己推。',
+                ],
+              },
+              {
                 kind: 'question',
-                title: '说一下 Spring MVC 的请求处理流程（DispatcherServlet 工作流程）',
+                title: 'Q46 · 说一下 Spring MVC 的请求处理流程（DispatcherServlet 工作流程）',
                 questionId: 'java-05-Q46',
-                intent:
-                  '最核心的一题。要求按 `doDispatch` 的步骤讲，并说清三个扩展点（preHandle / postHandle / afterCompletion）的位置与方向。',
+                intent: '考的是「能不能按执行顺序把八个步骤说全,并指出每一步的失败分支」。只背八个动词不够,要能说出「哪一步不出错、哪一步会跳走」。',
                 points: [
-                  '**① `getHandler`**：遍历 `HandlerMapping`（`RequestMappingHandlerMapping` 优先），返回 `HandlerExecutionChain`（handler + 命中的拦截器）',
-                  '**② `getHandlerAdapter`**：遍历 `HandlerAdapter`，找 `supports(handler)` 为真的那个（`@RequestMapping` 方法用 `RequestMappingHandlerAdapter`）',
-                  '**③ `applyPreHandle`**：拦截器 `preHandle` **正序**；任一返回 `false` → 跳 `triggerAfterCompletion` 并返回',
-                  '**④ `adapter.handle`**：参数解析（`HandlerMethodArgumentResolver`）→ 反射调用 → 返回值处理（`HandlerMethodReturnValueHandler`）；`@ResponseBody` 在此写响应',
-                  '**⑤ `applyPostHandle`**：`postHandle` **逆序**；仅在正常返回时执行',
-                  '**⑥ `processDispatchResult`**：有异常 → `HandlerExceptionResolver` 链；否则渲染视图',
-                  '**⑦ `render`**：`ViewResolver` 解析逻辑视图名 → `View.render`；`@ResponseBody` 时 `mv` 为 `null` 直接跳过',
-                  '**⑧ `triggerAfterCompletion`**：`afterCompletion` **逆序**，无论成功失败都执行（对已过 `preHandle` 的拦截器）',
+                  '**① 找 handler**:遍历映射器,返回「handler + 该路径命中的拦截器链」——注意拦截器是按路径装配的,不是全局固定的',
+                  '**② 找 adapter**:遍历适配器,找第一个「能处理这个 handler」的;找不到就说明没有对应的处理类型',
+                  '**③ 前置拦截**:正序执行,任一返回 `false` 就跳到收尾,且**不渲染响应**',
+                  '**④ 执行**:适配器内部三件事——解析参数、反射调用、处理返回值;写响应体在这一步就完成了',
+                  '**⑤ 后置拦截**:逆序执行,**只有正常返回才会到这里**',
+                  '**⑥ 异常解析**:有异常就交给解析器链,由它决定响应内容;没有异常则进入渲染',
+                  '**⑦ 渲染**:把逻辑视图名解析成视图并输出;响应体已写过的直接跳过',
+                  '**⑧ 收尾**:逆序执行,无论成败都执行;清理逻辑放这里才不会漏',
                 ],
                 depth:
-                  '面试官最爱追问「`@ResponseBody` 时视图渲染去哪了」——答案是**根本没有视图**。`RequestResponseBodyMethodProcessor.handleReturnValue` 会把返回值交给 `HttpMessageConverter` 直接写进 `response`，然后把 `mavContainer.setRequestHandled(true)`。`DispatcherServlet` 判断 `mv != null` 才 `render`，所以这条路径上 `ViewResolver` 完全不参与。**这也是「为什么 `@RestController` 配 `ViewResolver` 没意义」的原因**——两条路径互斥。',
-                followup:
-                  '「`HandlerExecutionChain` 里的拦截器是怎么算出来的」——由 `HandlerMapping` 在返回 handler 时一并装配：`AbstractHandlerMapping.getHandlerExecutionChain` 会取出所有注册的 `HandlerInterceptor`，按 `includePatterns` / `excludePatterns` 过滤，再排序（`Ordered` / `@Order`）。**所以「拦截器是按路径配置的」，不是全局无差别生效**——`addPathPatterns` / `excludePathPatterns` 就是在这个阶段作用的。',
-              },
-              {
-                kind: 'question',
-                title: 'HandlerMapping 和 HandlerAdapter 分别是干什么的？',
-                questionId: 'java-05-Q47',
-                intent:
-                  '考「为什么拆分」。答「一个找、一个调」只是表面，要说清 handler 有多种形态这个根因。',
-                points: [
-                  '**`HandlerMapping`**：输入 `request`，输出 `HandlerExecutionChain`。**只负责找，不负责调**',
-                  '**`HandlerAdapter`**：先 `supports(handler)` 判断能否处理，再 `handle(...)` 执行。**只负责调，不负责找**',
-                  '**拆分的根因**：handler 有三种形态——`@RequestMapping` 方法、`Controller` 接口实现、`HttpRequestHandler`，调用方式完全不同',
-                  '**拆分的收益**：新增 handler 类型只需加一对 Mapping + Adapter，`DispatcherServlet` 不用改',
-                  '**`HandlerExecutionChain` 的额外价值**：顺带装配「该请求命中的拦截器」，所以拦截器是**按路径**配置的',
-                  '**常见实现配对**：`RequestMappingHandlerMapping` ↔ `RequestMappingHandlerAdapter`、`BeanNameUrlHandlerMapping` ↔ `SimpleControllerHandlerAdapter`',
-                  '**一个实践推论**：`@RequestMapping` 的匹配规则（URL 模板、method、`consumes`/`produces`）全在 Mapping 里，而参数解析、返回值处理全在 Adapter 里',
-                ],
-                depth:
-                  '一个进阶问法：「`RequestMappingHandlerAdapter` 怎么知道用哪个参数解析器」——它持有一个 `HandlerMethodArgumentResolverComposite`，里面按顺序放了 26+ 个解析器（`RequestParamMethodArgumentResolver`、`PathVariableMethodArgumentResolver`、`RequestResponseBodyMethodProcessor` 等）。调用 `getMethodArgumentValues` 时**按顺序问每个解析器 `supportsParameter(parameter)`**，第一个返回 `true` 的负责解析。**所以「同一个参数上写两个注解」时，谁生效取决于解析器顺序**——这是「注解叠加」类问题的通用解释。',
-                followup:
-                  '「能不能自定义一个 HandlerMapping」——可以，实现 `HandlerMapping` 接口并注册成 Bean（或通过 `WebMvcRegistrations`）。典型场景是「自定义注解路由」「多版本 API（`/v1/`、`/v2/` 走不同处理器）」。注意自定义的 Mapping 要设 `order`，否则可能抢在 `RequestMappingHandlerMapping` 前面或后面，导致匹配不符合预期。',
-              },
-              {
-                kind: 'question',
-                title: '@Controller 和 @RestController 的区别？',
-                questionId: 'java-05-Q48',
-                intent:
-                  '基础题，但要答出「组合注解 + 两条响应路径」这层，而不是只背「一个加 @ResponseBody」。',
-                points: [
-                  '**定义关系**：`@RestController` = `@Controller` + `@ResponseBody`（Spring 4.0 引入的组合注解）',
-                  '**`@Controller`**：返回值默认视为**逻辑视图名**，交给 `ViewResolver` 找模板（JSP / Thymeleaf / FreeMarker）',
-                  '**`@RestController`**：返回值交给 `HttpMessageConverter` 序列化后写入响应体，**不经过 ViewResolver**',
-                  '**方法级差异**：`@Controller` 类里可以给某个方法单独加 `@ResponseBody`，实现「页面和接口混写」',
-                  '**路径冲突**：两者本身不冲突，但同一路径不能既返回视图又返回 JSON',
-                  '**实践结论**：纯后端 API 用 `@RestController`；需要服务端渲染页面时用 `@Controller`；**现代前后端分离项目基本只用前者**',
-                  '**一个坑**：`@RestController` 返回 `String` 时是**纯文本**（`StringHttpMessageConverter`），不是 JSON 字符串',
-                ],
-                depth:
-                  '「返回 `String` 为什么不是 JSON」这个追问很能区分水平：`@ResponseBody` 的返回值处理走 `RequestResponseBodyMethodProcessor`，它按「返回值类型 + `Accept`」选 converter。`String` 类型会优先匹配 `StringHttpMessageConverter`（它 `canWrite(String.class, ...)` 恒真），所以结果是 `text/plain`，前端拿到 `"hello"` 而不是 `"\"hello\""`。**想返回 JSON 字符串要么返回对象，要么显式 `produces = MediaType.APPLICATION_JSON_VALUE`**。',
-                followup:
-                  '「`@Controller` 上能加 `@ResponseBody` 吗」——能，效果等价于 `@RestController`（类级 `@ResponseBody` 对该类所有方法生效）。但更常见的写法是反过来：用 `@RestController`，个别方法需要视图时返回 `ModelAndView`（此时 `@ResponseBody` 就不适用了，因为返回值不是「数据」而是「视图描述」——实际上 `ModelAndView` 会被特殊处理，绕过 converter）。',
-              },
-              {
-                kind: 'question',
-                title: '拦截器（Interceptor）和过滤器（Filter）的区别？',
-                questionId: 'java-05-Q49',
-                intent:
-                  '必须落到「位置」这个物理差异，并由它推出「能拿到 handler 与否」「异常能否被全局处理」两个可观测区别。',
-                points: [
-                  '**规范不同**：Filter 是 **Servlet 规范**（`javax.servlet.Filter`）；Interceptor 是 **Spring MVC 组件**（`HandlerInterceptor`）',
-                  '**位置不同**：Filter 在 `DispatcherServlet` **之前**；Interceptor 在 `DispatcherServlet` **之后**、handler **之前/之后**',
-                  '**能拿到什么**：Filter 只有 `ServletRequest`；Interceptor 能拿到 `Object handler`（可转成 `HandlerMethod` 读方法注解）',
-                  '**执行次数**：Filter 一次；Interceptor 有三个方法，`preHandle` 可多次参与不同阶段',
-                  '**依赖注入**：Filter 若是 `@Component` 也能注入 Bean，但要注意「注册了两次」的坑（`@Component` + `FilterRegistrationBean`）',
-                  '**异常处理**：Filter 抛异常**进不了** `@ControllerAdvice`；Interceptor 抛异常可以',
-                  '**典型用途**：Filter 做编码、CORS、XSS 过滤、全链路 traceId；Interceptor 做方法级权限、登录校验、防重复提交、耗时统计',
-                ],
-                depth:
-                  '「`@Component` 标注的 Filter 为什么会执行两次」这是一个高频实战坑：Spring Boot 会把 `Filter` 类型的 Bean **自动注册**到 Servlet 容器，如果你又用 `FilterRegistrationBean` 显式注册一次，就会有两个实例。表现是「日志打印两次」「鉴权执行两次」。**解法**：要么不用 `@Component`，只用 `FilterRegistrationBean`；要么在 Bean 上排除自动注册（Spring Boot 的 `FilterRegistrationBean` 会自动去重，但手写 `ServletContext.addFilter` 不会）。',
-                followup:
-                  '「拦截器能拿到请求体吗」——**不能直接拿**。因为请求体是流，读一次就没了，而 `HandlerAdapter` 后面还要读。想拿只能包装 `HttpServletRequestWrapper` 缓存 body（在 Filter 里做），然后拦截器从 wrapper 取。**这也是「日志切面打印请求体」需要在 Filter 层做的原因**。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring MVC 怎么做统一异常处理？',
-                questionId: 'java-05-Q50',
-                intent:
-                  '要能说出三层机制与优先级，并且知道 Filter 异常这个边界。',
-                points: [
-                  '**第一层：`@ExceptionHandler`**——同一个 Controller 内，最精确，适合「这个接口特有的异常」',
-                  '**第二层：`@ControllerAdvice` + `@ExceptionHandler`**——全局；可用 `basePackages` / `annotations` 限定范围',
-                  '**第三层：`HandlerExceptionResolver` 链**——`ExceptionHandlerExceptionResolver`（处理 `@ExceptionHandler`）→ `ResponseStatusExceptionResolver`（`@ResponseStatus`）→ `DefaultHandlerExceptionResolver`（Spring 内置异常）',
-                  '**`@RestControllerAdvice`** = `@ControllerAdvice` + `@ResponseBody`，返回对象自动序列化（推荐）',
-                  '**匹配规则**：异常类型「最精确优先」；也可按 `@ExceptionHandler` 方法参数（如 `HttpServletRequest`）注入上下文',
-                  '**边界一**：Filter 里抛的异常**进不了** `@ControllerAdvice`——用 `ErrorController` 或在 Filter 内 `try-catch`',
-                  '**边界二**：`@ExceptionHandler` 无法处理「404 无匹配 handler」的情况（那是 `DefaultHandlerExceptionResolver` / `ErrorController` 的职责）',
-                  '**规范做法**：定义业务异常基类（含 code / message），全局处理器按类型映射到统一响应体（`code` / `message` / `traceId`）',
-                ],
-                depth:
-                  '一个容易忽略的一致性细节：`@RestControllerAdvice` 里返回的对象同样走 `HttpMessageConverter`，所以**如果你在异常处理器里返回 `ResponseEntity<Result>`，状态码与 body 都能精确控制**；如果只返回 `Result` 对象，状态码恒为 200（业务错误码在 body 里）——这两种风格各有拥趸，但**必须在项目内统一**，否则前端要写两套判断逻辑。',
-                followup:
-                  '「`@ExceptionHandler` 里再抛异常会怎样」——会继续沿 `HandlerExceptionResolver` 链往下走（下一个 resolver 处理），如果都不处理就交给容器（`/error`）。**所以不要在异常处理器里抛异常**，很难调试。另一个细节：`@ExceptionHandler` 方法里如果要回滚事务，必须在 Controller 层之外（Service 层）已经抛出，因为事务边界在 Service——Controller 层捕获时事务早已结束。',
-              },
-              {
-                kind: 'question',
-                title: '什么是跨域？Spring Boot 中有哪几种解决方案？',
-                questionId: 'java-05-Q51',
-                intent:
-                  '要先说清「这是浏览器行为，不是服务端限制」，再列方案，最后说清 `allowCredentials` 那个坑。',
-                points: [
-                  '**本质**：浏览器的**同源策略**（协议 + 域名 + 端口三者全同）；不同源时浏览器会拦截响应，**请求其实已经到达服务端**',
-                  '**简单请求**：`GET` / `POST`（`Content-Type` 为三种之一）直接发，靠响应头 `Access-Control-Allow-Origin` 判断',
-                  '**预检请求**：其他情况先发 `OPTIONS`，服务端要正确响应 `Access-Control-Allow-Methods` / `-Headers`',
-                  '**方案一：`@CrossOrigin`**——单方法或单类，最细粒度，适合调试',
-                  '**方案二：`WebMvcConfigurer.addCorsMappings`**——全局，最常用',
-                  '**方案三：`CorsFilter`**——Filter 层，能覆盖 Filter 阶段的跨域（`addCorsMappings` 覆盖不到）',
-                  '**方案四：Nginx 反代 / 同源部署**——把前端与接口放同一域名，**最彻底**，无浏览器限制',
-                  '**方案五：网关统一处理**——微服务场景在 Gateway / 网关层配 CORS',
-                  '**必须知道的坑**：`allowCredentials(true)` 时 `allowedOrigins` **不能为 `*`**，要用具体域名或 `allowedOriginPatterns`',
-                ],
-                depth:
-                  '「为什么 `allowCredentials(true)` 不能配 `*`」——因为带凭证的请求（Cookie、`Authorization`）若允许任意源，等于「任何网站都能以你的身份调接口」，这是严重的安全漏洞。所以 CORS 规范明确禁止这个组合，Spring 会直接抛 `IllegalArgumentException`。**替代方案是 `allowedOriginPatterns` + 动态校验 `Origin` 头**（白名单），而不是无条件放开。',
-                followup:
-                  '「跨域配置生效了但还是报错」的排查顺序：① 看预检 `OPTIONS` 是否返回 200（常被鉴权拦截器拦住）；② 看响应头有没有 `Access-Control-Allow-Origin`（可能被 Filter 覆盖或网关剥离）；③ 看 `allowCredentials` 与 `Origin` 是否匹配；④ 若用了 Spring Security，需要在 `http.cors()` 里启用——**Security 的 Filter 在 CORS 之前，会先拦下预检请求**。',
-              },
-              {
-                kind: 'question',
-                title: '@RequestParam、@PathVariable、@RequestBody 的区别？',
-                questionId: 'java-05-Q52',
-                intent:
-                  '考「数据在 HTTP 请求的哪个部位」。说清三条取值路径，并点出「表单场景下 RequestParam 与 RequestBody 冲突」。',
-                points: [
-                  '**`@PathVariable`**：URI 模板变量（`/users/{id}`）；由 `HandlerMapping` 匹配 URL 时提取；值一定存在',
-                  '**`@RequestParam`**：query string 或 form body；底层 `request.getParameter`；可设 `required = false` / `defaultValue`',
-                  '**`@RequestBody`**：原始请求体；由 `HttpMessageConverter` 反序列化；**一个方法只能有一个**',
-                  '**关键差异：依赖 `Content-Type` 吗**——`@RequestBody` 必须匹配（否则 415）；`@PathVariable` 完全无关；`@RequestParam` 对 form 类型依赖',
-                  '**冲突场景**：`application/x-www-form-urlencoded` 时容器已把 body 解析成 parameter，`@RequestBody` 再读就是空',
-                  '**`@ModelAttribute`**：把多个参数绑成一个对象（表单场景的推荐写法），支持 `user.name` 这样的嵌套属性',
-                  '**选择建议**：RESTful 资源标识用 `@PathVariable`，过滤/分页用 `@RequestParam`，复杂对象用 `@RequestBody`',
-                ],
-                depth:
-                  '一个高频追问：「`@RequestParam` 能取到 JSON body 里的字段吗」——**不能**。`getParameter` 只认 query string 和 `application/x-www-form-urlencoded` 的 body，JSON body 不会被解析成 parameter（Servlet 容器不解析 JSON）。所以「前端用 `axios.post` 传 JSON，后端用 `@RequestParam` 收」必然拿到 `null`——这是联调时最常见的低级错误，且双方都觉得自己没错。',
-                followup:
-                  '「`@RequestBody` 能配多个对象吗」——不能，body 只能读一次。若需要「一个请求体拆成两个对象」，要么定义一个新的 DTO 合并字段，要么用 `@RequestBody Map<String, Object>` 自己拆（不推荐，丢失类型安全）。另外 `@RequestBody` 与 `@RequestParam` 同时存在是合法的（一个读 body、一个读 query），只是表单场景下会冲突。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot 中 HTTP 消息转换（HttpMessageConverter）是怎么工作的？',
-                questionId: 'java-05-Q53',
-                intent:
-                  '考「converter 选择逻辑」。读看 `Content-Type`、写看 `Accept` 这条是核心，415/406 的归因是加分。',
-                points: [
-                  '**接口四方法**：`canRead(clazz, mediaType)` / `read(...)` / `canWrite(clazz, mediaType)` / `write(...)`',
-                  '**读（请求 → 对象）**：取 `Content-Type` → **按注册顺序**遍历 → 第一个 `canRead` 为真的执行 `read`',
-                  '**写（对象 → 响应）**：取 `Accept`（按 `q` 权重排序）→ 遍历找 `canWrite` → 执行 `write`；`Accept` 缺省时取第一个能写的',
-                  '**常用实现**：`MappingJackson2HttpMessageConverter`（JSON）、`StringHttpMessageConverter`（`text/plain`）、`FormHttpMessageConverter`、`ByteArrayHttpMessageConverter`（`byte[]`，恒真，排最后）',
-                  '**415** = `Content-Type` 无任何 converter 支持；**406** = `Accept` 与所有 `canWrite` 都不匹配',
-                  '**注册顺序决定默认行为**：Jackson 排在前面，所以「不传 `Accept`」时默认返回 JSON',
-                  '**扩展方式**：`WebMvcConfigurer.extendMessageConverters`（可调整顺序）或注册 `HttpMessageConverter` Bean',
-                  '**典型问题**：`LocalDateTime` 变数组/时间戳 → 缺 `JavaTimeModule` 或未配 `@JsonFormat`',
-                ],
-                depth:
-                  '一个能体现深度的问题：「为什么 `byte[]` 返回值不会走 Jackson」——因为 `ByteArrayHttpMessageConverter` 的 `canWrite` 对 `byte[]` 恒真且 `supports` 所有 media type，而它在默认列表里排在 Jackson **之前**（`WebMvcConfigurationSupport.addDefaultHttpMessageConverters` 的顺序是 ByteArray → String → Resource → ... → Jackson）。所以「返回 `byte[]` 就是原始字节」，这既是「文件下载」的实现基础，也是「返回 `byte[]` 被当成 JSON 失败」的原因。',
-                followup:
-                  '「怎么让某个接口强制返回 JSON 不管 `Accept`」——用 `produces = MediaType.APPLICATION_JSON_VALUE`，它会写进 `RequestMapping` 的 `produces` 条件，从而限制可选的 media type（也会参与请求匹配）。另一种方式是给方法加 `@ResponseBody` 并返回对象，同时前端不传奇怪的 `Accept`。**注意 `produces` 也会影响请求匹配**，写错会导致 404 而不是 406。',
-              },
-              {
-                kind: 'question',
-                title: '拦截器 preHandle 返回 false 会怎样？三个方法的执行时机和例外情况？',
-                questionId: 'java-05-Q54',
-                intent:
-                  '最细的一题。要能画出「三种结局下三方法各自执行与否」，并知道「返回 false 不渲染响应」这个坑。',
-                points: [
-                  '**正常流程**：`preHandle`（正序，返回 `true`）→ Controller → `postHandle`（逆序）→ 视图渲染 → `afterCompletion`（逆序）',
-                  '**`preHandle` 返回 `false`**：当前拦截器之后的 `preHandle` 不执行、Controller 不执行、**`postHandle` 全部不执行**',
-                  '**但 `afterCompletion` 会执行**——**只对「已成功执行过 `preHandle` 的拦截器」，且逆序**',
-                  '**响应不会渲染**：`DispatcherServlet` 直接返回，**不写任何内容**——所以返回 `false` 必须自己 `response.getWriter().write(...)`',
-                  '**`preHandle` 抛异常**：与返回 `false` 类似，但异常会进 `HandlerExceptionResolver`（可被 `@ControllerAdvice` 捕获）',
-                  '**`postHandle` 抛异常**：Controller 已执行完，异常同样交给解析器；此时 `afterCompletion` 仍执行',
-                  '**`afterCompletion` 抛异常**：会被记录但不影响已写出的响应（此时 `response` 可能已提交）',
-                  '**记忆口诀**：`afterCompletion` 是「清理」语义——**只要 `preHandle` 成功过就必须执行**，所以耗时统计、`ThreadLocal` 清理放这里最安全',
-                ],
-                depth:
-                  '「为什么 `postHandle` 在 `preHandle` 返回 `false` 时不执行」——因为 `postHandle` 的语义是「Controller 执行之后的后处理」。`DispatcherServlet` 的代码是 `if (!mappedHandler.applyPreHandle(...)) return;`，一旦返回 `false` 就直接 `return`，`applyPostHandle` 那行根本不会被执行到。而 `afterCompletion` 是在 `triggerAfterCompletion` 里统一调用的（在 `finally` 或 catch 分支中），所以能保证执行。**这个不对称正是「清理逻辑必须放 `afterCompletion`」的原因**。',
-                followup:
-                  '「多个拦截器时，`preHandle` 返回 `false` 会回滚前面拦截器的效果吗」——不会自动回滚，但会调用前面已成功拦截器的 `afterCompletion`，这就是「让它们自己清理」的机制。所以**在 `preHandle` 里申请的资源（`ThreadLocal`、连接、锁）必须在 `afterCompletion` 里释放**，否则会泄漏。这是「拦截器 + 线程池」组合下最隐蔽的 bug 来源。',
+                  '拉开分档:普通答法能把八个步骤按顺序列出;好答法会主动说明「第 ④ 步内部还有三层(参数解析器 → 反射 → 返回值处理器)」,并指出 415 / 406 分别落在哪一层;[[最好的答法会讲清「失败路径」]]——前置返回 false 会跳到哪、后置为什么一次都不执行、收尾为什么必须执行,这才说明真的读过源码而不是背过八条。',
+                followup: '追问:你说写响应体在第 ④ 步就完成了,那如果一个接口返回的是视图名,这条链路上哪里会不一样?',
               },
             ],
           },
         },
         {
           id: 'spring-boot',
-          title: 'Spring Boot：自动配置的真相',
-          kind: 'concept',
+          title: 'Spring Boot：自动装配与启动流程',
+          minutes: 55,
           sources: [{ topic: 'java-05', chapters: ['七、Spring Boot'] }],
           content: {
             intro:
-              'Spring Boot 的 11 道面试题，答案几乎都指向同一个机制：**条件装配**。所谓「约定大于配置」，不是「不用配」，而是「别人替你把默认值配好了，并且允许你在任意一层覆盖它」。看清这一点，`@SpringBootApplication` 为什么是三个注解、`spring.factories` 为什么会演进成 `AutoConfiguration.imports`、Starter 为什么「什么都不用写」、配置文件优先级为什么那样排，全都变成同一件事的不同侧面。本课会沿着「一个 Bean 从被写进清单，到最终进入容器」这条链路走一遍，并在每个环节标出可以干预的扩展点。',
+              '加一个依赖,启动类上加一个注解,一行配置都没写,Web 服务就跑起来了。这件事在面试里常被问成「说说自动装配原理」,但难点不是背流程,而是[[理解「默认值」为什么要带条件]]——不带条件的默认值叫模板,带条件的默认值才叫约定。看清「有默认值、可覆盖、有前提」这三层,启动流程为什么先备环境再造容器、清单文件为什么从 `spring.factories` 换成新格式、内嵌 Tomcat 为什么是被当成一个 Bean 创建出来的,全都串得起来。',
             outline: [
-              '`SpringApplication.run` 的两段：**准备阶段**（造对象、推事件、备环境）与**刷新阶段**（复用 Spring 的 `refresh()`）',
-              '`@SpringBootApplication` = `@SpringBootConfiguration` + `@EnableAutoConfiguration` + `@ComponentScan`，三者各管一件事',
-              '自动配置不是「扫描所有 jar」，而是**读清单 + 逐条过滤 + 排序 + 注册**四步',
-              '条件注解的真正价值是**「让默认值可退让」**：你配了，我就不生效',
-              '内嵌 Tomcat 的本质是**把 Servlet 容器做成一个 Bean**，由 Spring 控制它的生老病死',
+              '「约定大于配置」的三层含义:有默认值、默认值可覆盖、默认值有前提',
+              '`SpringApplication.run` 分两段:准备(备环境、造容器)与刷新(复用 Spring 原有的 `refresh`)',
+              '启动类上那个注解拆开是三层,分别管「标记配置类」「触发自动装配」「扫描组件」',
+              '自动装配是四步:读清单 → 过滤条件 → 排序 → 延迟注册',
+              '内嵌容器的本质是把 Servlet 容器做成一个 Bean,由 Spring 控制它的生老病死',
             ],
             pitfalls: [
-              '把自动配置说成「扫描 classpath 下所有配置类」：实际只读 `META-INF/spring/...AutoConfiguration.imports` 这一个（或两个）清单文件',
-              '认为 `@ConditionalOnMissingBean` 是「判断有没有同名 Bean」：它按**类型**判断，且**只在自动配置里可靠**（普通配置类的解析顺序不保证）',
-              '以为 `application.properties` 一定优先级最高：命令行参数、`SPRING_APPLICATION_JSON`、环境变量都排在它前面',
+              '把自动装配说成「扫描 classpath 下所有配置类」:实际只读 `META-INF/spring/` 下那一个清单文件',
+              '认为「用户没定义就用默认」是按名字判断:它按**类型**判断,而且只有在自动配置里才可靠',
+              '以为 `application.properties` 优先级最高:命令行参数、环境变量都排在它前面',
             ],
             sections: [
+              {
+                kind: 'why',
+                title: '为什么一行配置都不用写',
+                body: [
+                  '两个项目放在一起对比,差别夸张到不像同一件事:一个要写容器注册、配视图解析器、配数据源、配事务管理器,四五个类加起来上百行;另一个只有三行代码加一个注解,功能完全一样。',
+                ],
+                code: {
+                  language: 'java',
+                  code:
+                    "@SpringBootApplication\npublic class App {\n    public static void main(String[] args) {\n        SpringApplication.run(App.class, args);\n    }\n}",
+                  caption: '没有 web.xml,没有容器注册类,没有数据源配置。但启动之后 MVC、Jackson、连接池、事务全都在。',
+                },
+                wrong: [
+                  '**猜法一:它把配置都写死在了框架里?** 不成立。写死就意味着改不了,可实际上你随便覆盖任何一个配置项它都认。',
+                  '**猜法二:它启动时扫描了所有 jar 包里的配置类?** 不成立。classpath 上有几百个 jar,全扫一遍启动要几分钟,而实际启动只要一两秒。',
+                  '**猜法三:它只是把 XML 换成了注解,本质还是一堆配置?** 方向对了一半——确实是配置,但这些配置**不是你写的,而且会在你写的时候自动让位**。这一点才是关键。',
+                ],
+                real:
+                  '真实机制是「带条件的默认值」。框架预先写好上千个配置类,每个都标着条件:[[只有在「依赖确实存在」并且「用户没自己定义」时才生效]]。所以启动时并不是「配好了所有东西」,而是「逐个判断该不该配」——依赖没引的整段跳过,你自定义过的自动退让。',
+                reveal:
+                  '这条主线一旦立住,后面所有问题都变成同一个问题的不同侧面:为什么清单文件要做成「一个文件一类」?因为要能被逐条读取和过滤。为什么注册要「延迟」到用户配置解析完之后?因为只有那时才知道「用户到底有没有自己定义」。为什么启动流程里环境准备得那么早?因为条件判断要看配置值。下面按这条线走一遍。',
+              },
+              {
+                kind: 'analogy',
+                title: '类比:一间默认布置好的客房',
+                text:
+                  '入住一间标准化酒店客房,你会发现毛巾、拖鞋、烧水壶、两瓶水都已经摆好了,你什么都不用准备。这就是「默认值」。但如果你自己带了毛巾,你会把酒店的那条收进柜子——酒店不会跟你抢,这就是「可覆盖」。还有一层容易被忽略:这些东西**只有在你订的房型里才存在**——你订的是无窗小房,就不会有浴缸,不是酒店忘了摆,是这个房型本来就没有。',
+                mapping: [
+                  { real: '毛巾拖鞋已经摆好,不用自己带', tech: '默认值:依赖引进来就有对应的 Bean' },
+                  { real: '自己带了就把酒店的收起来', tech: '可覆盖:用户定义了同类型 Bean,默认配置自动退让' },
+                  { real: '无窗房没有浴缸,不是忘了摆', tech: '有前提:依赖不在 classpath 上,整段配置根本不生效' },
+                  { real: '房型清单:酒店照单布置', tech: '清单文件:框架照着它逐条读取候选配置类' },
+                  { real: '先看房型再布置,不是先摆东西再看房型', tech: '环境先于容器准备:条件判断要读配置值' },
+                  { real: '客人自带的东西优先于酒店的', tech: '延迟注册:用户配置解析完之后,才处理自动配置' },
+                ],
+                limit:
+                  '有一处不像:酒店是「一次性布置完」,而程序里的判断是**逐条独立**的——同一个应用里,有些默认值生效、有些不生效,彼此不影响。更重要的差别是「客房布置错了你会立刻发现」,而默认值判断错了通常什么都不报:[[一段配置静默地没生效,应用照样启动成功]],只是某个功能在运行时才暴露问题。这也是为什么框架要提供「条件评估报告」这种诊断手段。',
+              },
               {
                 kind: 'concept',
                 title: '「约定大于配置」到底约定了什么',
                 body: [
-                  '先从反面问：不用 Spring Boot 写一个 Web 服务，要做哪些事？加 `spring-webmvc` 依赖、写 `web.xml` 或用 `AbstractAnnotationConfigDispatcherServletInitializer` 注册 `DispatcherServlet`、配 `ViewResolver`、装一个外置 Tomcat、把 war 扔进去。这里面**没有一件是业务逻辑**，全是「让一个 Web 应用能跑起来」的仪式。Spring Boot 做的事，就是把这些仪式**固化成一套默认值**，并且保证这套默认值随时可以被你的代码顶掉。',
-                  '所以「约定大于配置」的准确含义有三层：第一层是**有默认值**——你不写，它也有；第二层是**默认值可覆盖**——你写了，它让位；第三层是**默认值有前提**——只有「条件成立」时默认值才生效（你没自己定义 `DataSource`、classpath 里确实有 HikariCP）。这三层缺一不可。如果只有前两层，那就是「一份写死的模板」；加上第三层，它才成为「一套会自我退让的默认值」。',
-                  '而「可退让」这个能力，在代码层面就是 `@Conditional` 系列注解。所以本课的主线不是背注解，而是理解：**Spring Boot 里几乎每一个 `@Bean` 方法，都在说「如果你没自己配，那就用我这个」**。',
-                ],
-                points: [
-                  '**约定**：依赖版本（BOM 统一管理）、目录结构、配置键名、默认端口 8080、默认日志格式',
-                  '**配置**：`application.properties` / `yaml` / 环境变量 / 命令行参数，任意一层都能覆盖上层的约定',
-                  '**为什么能「大于」**：因为约定的默认值**带条件**，条件不成立就自动退让',
-                  '**代价**：出问题时「看不见的东西太多」——这正是 Actuator、`--debug`、条件评估报告存在的原因',
-                  '**一句话总结**：Spring Boot 不是「不需要配置」，而是「把配置从必填改成选填，并给了你一个覆盖顺序」',
+                  '先从反面问:不用这套框架写一个 Web 服务,要做哪些事?加依赖、注册前端控制器、配视图解析器、装配数据源、配事务管理器……每一项都不难,但加起来是几十行样板。这些样板的特点是:**绝大多数项目写法完全一样,只有少数项目需要改**。',
+                  '所以准确的「约定大于配置」有三层,缺一不可。**第一层:有默认值**——你不写它也有。**第二层:默认值可覆盖**——你写了它让位。**第三层:默认值有前提**——只有条件成立时它才生效。前两层加起来只是「一份写得比较全的模板」,加上第三层才叫约定:模板不会自己判断该不该用,而约定会。',
+                  '而「可退让」这个能力,代码层面就是条件注解。所以[[框架里几乎每一个产生 Bean 的方法,都在说同一句话:如果你没自己配,那就用我这个]]。这句话是本课最该记住的一句,它比任何流程步骤都有用——因为它把「自动装配」从「一堆魔法」变成了「一堆条件判断」。',
+                  '代价也要说清楚:隐式行为多了,出问题时就「看不见东西在哪」。这正是诊断工具存在的原因——启动时加一个调试开关就能打印每个条件的判定结果,生产环境则靠运维端点把内部状态暴露出来。会用这些工具,比背流程更能体现经验。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: 'SpringApplication.run 做了什么',
+                title: '启动方法做了什么:两段十二步',
                 body: [
-                  '`run` 可以粗略切成两段：**准备**（造应用对象、推启动事件、备环境、造容器）与**刷新**（调用 `AbstractApplicationContext.refresh()`）。第二段其实和传统 Spring 完全一样——这也是「Spring Boot 只是 Spring 的一层壳」的由来。十二个步骤里，真正属于 Spring Boot 独创的是第 3、4、10、12 步。',
+                  '整个启动可以切成两段:**准备**(造应用对象、备环境、造容器)和**刷新**(调用 Spring 原有的刷新方法)。第二段和传统 Spring 完全一样——这也是「它只是 Spring 的一层壳」这个说法的由来。',
                 ],
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '① `new SpringApplication(...)`', note: '推断应用类型（Servlet / Reactive / None）；加载 `ApplicationContextInitializer` 与 `ApplicationListener`（从 `spring.factories` 读）' },
-                    { label: '② `run(args)` → 造 `StopWatch`', note: '开始计时，用于打印「Started in x.xxx seconds」' },
-                    { label: '③ `DefaultApplicationArguments`', note: '把 `main` 的 `String[] args` 封装成 `--key=value` 形式的属性源' },
-                    { label: '④ 准备 `Environment`', note: '**关键一步**：创建 `Environment`、加载 `application.yml`、把命令行参数塞成最高优先级的 PropertySource' },
-                    { label: '⑤ `printBanner`', note: '打印 banner（`spring.main.banner-mode=off` 可关）' },
-                    { label: '⑥ `createApplicationContext`', note: '按应用类型反射创建 `AnnotationConfigServletWebServerApplicationContext`' },
-                    { label: '⑦ `prepareContext`', note: '把主类注册成 BeanDefinition（**唯一的「配置类」入口**）、执行所有 `Initializer`、推 `contextPrepared` 事件' },
-                    { label: '⑧ `refreshContext`', note: '调用 Spring 的 `refresh()` 十二步——自动配置在这里发生（见下一节）' },
-                    { label: '⑨ `afterRefresh`', note: '空实现，留给子类扩展' },
-                    { label: '⑩ `stopWatch.stop` + 打印启动耗时', note: '日志里那句 `Started XxxApplication in 1.234 seconds`' },
-                    { label: '⑪ `callRunners`', note: '按 `@Order` 依次执行 `ApplicationRunner` 与 `CommandLineRunner`' },
-                    { label: '⑫ 推 `ApplicationReadyEvent`', note: '此时 Web 容器已监听端口，服务真正可用' },
+                    { label: '① 构造应用对象', note: '推断应用类型(Web / 响应式 / 非 Web);加载初始化器与监听器' },
+                    { label: '② 开始计时', note: '用于最后打印「启动耗时 x 秒」' },
+                    { label: '③ 封装启动参数', note: '把 `main` 的入参整理成可查询的属性源' },
+                    { label: '④ 准备环境', note: '**关键一步**:创建环境、加载配置文件、把命令行参数做成优先级最高的属性源' },
+                    { label: '⑤ 打印 banner', note: '可关闭' },
+                    { label: '⑥ 创建容器', note: '按应用类型反射创建对应的容器实现' },
+                    { label: '⑦ 准备容器', note: '把主类注册成 Bean 定义(**唯一的配置类入口**)、执行初始化器、推事件' },
+                    { label: '⑧ 刷新容器', note: '调用 Spring 原有的刷新流程;**自动装配就发生在这里**' },
+                    { label: '⑨ 刷新后回调', note: '默认空实现,留给子类扩展' },
+                    { label: '⑩ 停止计时并打印', note: '日志里那句「Started ... in x seconds」' },
+                    { label: '⑪ 执行启动任务', note: '按顺序执行两类「启动后要跑一次」的接口' },
+                    { label: '⑫ 推就绪事件', note: '此时端口已监听,服务真正可用' },
                   ],
                   caption:
-                    '最容易记错的是第 ④ 与第 ⑧ 的先后：**环境在容器创建之前就准备好了**。这解释了两件事：一是 `EnvironmentPostProcessor` 能在任何 Bean 创建前改配置；二是 `@Value` 能在 `BeanFactoryPostProcessor` 里正常读到值。另外注意第 ⑦ 步「把主类注册成 BeanDefinition」——**主类是唯一的入口**，`@ComponentScan` 的扫描起点就是它所在的包，所以「为什么 Bean 必须放在主类同包或子包下」的答案在这里。',
+                    '最容易记错的是第 ④ 与第 ⑥ 的先后:**环境在容器创建之前就准备好了**。这一条能解释两件事:一是「改配置的扩展点」能在任何 Bean 创建之前介入;二是「读配置值的注解」在 Bean 工厂后置处理阶段就能正常拿到值。另外第 ⑦ 步值得单独记:**主类是唯一的配置类入口**,组件扫描的起点就是它所在的包——「为什么业务类必须放在主类同包或子包下」的答案在这里,而不是在扫描配置里。',
                 },
               },
               {
                 kind: 'diagram',
-                title: '@SpringBootApplication 拆开是三层',
+                title: '启动类那个注解,拆开是三层',
                 body: [
-                  '这个「组合注解」被拆开考的概率极高。三层各有明确分工，不是简单的「打包」。',
+                  '这个组合注解被拆开考的概率极高。三层各有分工,不是简单的「打包在一起」。',
                 ],
                 diagram: {
                   type: 'layers',
                   items: [
-                    { label: '`@SpringBootConfiguration`', note: '本质是 `@Configuration`（`proxyBeanMethods = true`），标记「这是配置类」；Spring Boot 测试用它来定位主类', tone: 'primary' },
-                    { label: '`@EnableAutoConfiguration`', note: '核心。通过 `@Import(AutoConfigurationImportSelector.class)` 把清单里的自动配置类「导入」进来', tone: 'primary' },
-                    { label: '`@ComponentScan`', note: '默认扫描**主类所在包及其子包**，排除 `TypeExcludeFilter` 与 `AutoConfigurationExcludeFilter`', tone: 'warn' },
+                    { label: '标记配置类', note: '本质就是「这是一个配置类」;框架的测试支持靠它定位入口', tone: 'primary' },
+                    { label: '触发自动装配', note: '核心。通过导入一个选择器,把清单里的候选配置类拉进来', tone: 'primary' },
+                    { label: '扫描组件', note: '默认扫描**主类所在包及其子包**,并排除两类不该被扫到的类', tone: 'warn' },
                   ],
                   caption:
-                    '三层里最容易忽略的是 `@ComponentScan` 上的 `excludeFilters`：它会排除掉「既是 `@Configuration` 又是自动配置类」的类，防止同一个配置被扫描和导入两次。**这就是「为什么自动配置类不要放在会被扫描到的包下」的原因**——虽然 Spring Boot 自己会兜底，但自定义 starter 时若不注意，会出现「配置生效两次」的诡异现象。另外 `@SpringBootConfiguration` 的存在意义是「语义化标记」：测试时可以断言「这个类确实是 Boot 应用的入口」。',
+                    '第三层最容易忽略:它的排除规则会把「既是配置类、又是自动配置类」的那种类挑出去,防止同一个配置被「扫描」和「导入」各注册一次。[[这就是「自动配置类不要放在会被扫描的包下」这条规矩的来源]]——框架对自己会兜底,但你写自己的组件时若把自动配置类放在业务包里,就会出现「配置生效两次」的诡异现象,而且很难查。第一层的存在意义则是语义化的:让测试框架能断言「这个类确实是应用入口」。',
                 },
               },
               {
                 kind: 'principle',
-                title: '自动装配的四段链路：读清单 → 过滤 → 排序 → 注册',
+                title: '自动装配的四段链路:读、滤、排、注册',
                 body: [
-                  '`@EnableAutoConfiguration` 背后是 `AutoConfigurationImportSelector`。它做的事可以拆成四段，每一段都有对应的追问点。',
+                  '触发自动装配的那个注解背后是一个「导入选择器」。它做的事可以拆成四段,每一段都对应一个常见追问。',
                 ],
                 steps: [
                   {
-                    title: '① 读清单：从哪拿到候选配置类',
+                    title: '① 读清单:候选配置类从哪来',
                     detail:
-                      'Spring Boot 2.7 之前读 `META-INF/spring.factories` 里的 `org.springframework.boot.autoconfigure.EnableAutoConfiguration` 键；2.7 起改为读 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`（每行一个全限定名）。**为什么要改**：`spring.factories` 是一个大杂烩文件，一个 jar 里所有扩展点都挤在里面，无法按需加载、无法做条件过滤、也无法在 IDE 里跳转。新格式一个文件只放一件事，且行内就是一个类名，编译期即可校验。',
+                      '不是扫包,是读文件。旧版本把所有扩展点堆在一个大杂烩文件里,新版本拆成「一个用途一个文件」,自动配置单独一份。这个改变的动因很实在:大杂烩文件无法按需读取、无法按条件过滤,IDE 里也点不进去。',
                   },
                   {
-                    title: '② 过滤：条件不成立就丢弃',
+                    title: '② 过滤:条件不成立就丢掉',
                     detail:
-                      '拿到上千个候选类（Spring Boot 自身的 jar 里就有 140+ 个），先做**去重**，再用 `AutoConfigurationMetadata` 做一次「快速排除」——这一步只看 `@ConditionalOnClass` 等少数能在元数据里预判的条件，避免加载 Class 对象。之后才真正加载类、评估所有 `@Conditional`。**这就是为什么「引了依赖就有配置、没引就没有」**：`@ConditionalOnClass(Xxx.class)` 在类不存在时直接判否。',
+                      '拿到上千个候选,先做一次**快速排除**——只看「类在不在」这种不需要加载类就能判断的条件,能挡掉大部分;剩下的才真正加载并评估全部条件。这一步的设计意图是性能:[[能靠字符串比较档掉的,就不要去加载类]]。',
                   },
                   {
-                    title: '③ 排序：谁先谁后是有规则的',
+                    title: '③ 排序:谁先谁后是有规则的',
                     detail:
-                      '过滤后的类要按 `@AutoConfigureOrder`、`@AutoConfigureBefore`、`@AutoConfigureAfter` 排序。**为什么顺序重要**：`@ConditionalOnMissingBean` 是「按已注册的 BeanDefinition 判断」的，如果 A 依赖「B 没注册」这个前提，B 必须先被处理。**这里的顺序只影响自动配置类之间**，你自己的 `@Configuration` 永远先于自动配置被解析——这就是「你的 Bean 能覆盖默认 Bean」的根本机制。',
+                      '过滤后要按「顺序、之前、之后」三个注解排一次。为什么顺序重要:后一个配置的生效条件常常依赖前一个已经注册的 Bean,顺序乱了条件就判错,表现为「有的机器上生效、有的机器上不生效」。',
                   },
                   {
-                    title: '④ 注册：变成 BeanDefinition',
+                    title: '④ 延迟注册:用户优先的保证',
                     detail:
-                      '排序后通过 `@Import` 的 `DeferredImportSelector` 机制，在所有用户配置类解析**之后**批量注册成 `BeanDefinition`。`Deferred`（延迟）这个词是关键：它让自动配置晚于用户配置执行，从而实现「用户优先」。**这也解释了「为什么自动配置里的 `@ConditionalOnMissingBean` 能看到你的 Bean」**。',
+                      '排序后不是立刻注册,而是挂到一个「延迟导入」的队列里,**等所有用户自己的配置类都解析完之后**才处理。这一条是「用户定义优先」的机制来源——因为判断「用户有没有定义」这件事,必须在用户配置全部到位之后才做得准。',
+                  },
+                  {
+                    title: '⑤ 一个推论:条件只在自动配置里可靠',
+                    detail:
+                      '普通配置类之间没有这种延迟和排序保证,解析顺序不确定。所以在自己写的普通配置里用「容器里没有这个 Bean 才生效」这类条件,结果可能随版本、随文件顺序变化——[[这不是 bug,而是没有排序保证的必然结果]]。',
                   },
                 ],
               },
               {
                 kind: 'diagram',
-                title: '条件注解家族：一张图记全',
+                title: '条件注解家族:按判断依据分四支',
                 body: [
-                  '条件注解不用逐个背，按「判断依据」分类，一共四支。',
+                  '条件注解不用逐个背。按「判断依据是什么」分四支,每支记一个代表就够。',
                 ],
                 diagram: {
                   type: 'tree',
                   root: {
-                    label: '@Conditional',
-                    note: '唯一原语，其余全是它的派生组合注解',
+                    label: '条件原语',
+                    note: '只有一个接口方法,其余全是它的派生组合注解',
                     children: [
                       {
-                        label: '按 Class 判断',
+                        label: '按类判断',
                         note: 'classpath 里有没有这个类',
                         tone: 'primary',
                         children: [
-                          { label: '@ConditionalOnClass', note: '**自动配置的总开关**：依赖没引，整段配置不生效' },
-                          { label: '@ConditionalOnMissingClass', note: '反向：没这个类才生效' },
+                          { label: '有则生效', note: '**自动配置的总开关**:依赖没引,整段配置不生效' },
+                          { label: '没有则生效', note: '反向用法,常用于「旧版本兼容」' },
                         ],
                       },
                       {
@@ -2737,94 +2132,106 @@ export default {
                         note: '容器里有没有这个 Bean',
                         tone: 'primary',
                         children: [
-                          { label: '@ConditionalOnBean', note: '按**类型**找；受解析顺序影响，只在自动配置里可靠' },
-                          { label: '@ConditionalOnMissingBean', note: '**覆盖默认值的核心**：用户没定义我才登场' },
-                          { label: '@ConditionalOnSingleCandidate', note: '有且仅有一个（或有 `@Primary`）才生效' },
+                          { label: '有则生效', note: '按**类型**找;受解析顺序影响,只在自动配置里可靠' },
+                          { label: '没有才生效', note: '**覆盖默认值的核心**:用户没定义我才登场' },
+                          { label: '有且仅有一个', note: '存在多个候选但有一个是主选时也成立' },
                         ],
                       },
                       {
                         label: '按配置项判断',
-                        note: '属性是否存在 / 取什么值',
+                        note: '属性是否存在、取什么值',
                         tone: 'warn',
                         children: [
-                          { label: '@ConditionalOnProperty', note: '`havingValue` / `matchIfMissing` 两个参数最常考' },
-                          { label: '@ConditionalOnResource', note: '某个资源文件是否存在' },
+                          { label: '属性开关', note: '两个参数最常考:比对值、缺省时是否成立' },
+                          { label: '资源存在', note: '某个文件在不在' },
                         ],
                       },
                       {
                         label: '按运行环境判断',
-                        note: 'Web 类型、表达式、平台',
+                        note: 'Web 类型、表达式、JDK 版本',
                         tone: 'muted',
                         children: [
-                          { label: '@ConditionalOnWebApplication', note: '`type = SERVLET / REACTIVE`' },
-                          { label: '@ConditionalOnExpression', note: 'SpEL 表达式，灵活但不推荐滥用（难调试）' },
-                          { label: '@ConditionalOnJava', note: 'JDK 版本区间' },
+                          { label: 'Web 应用类型', note: '区分 Servlet 与响应式' },
+                          { label: 'SpEL 表达式', note: '灵活但难调试,不推荐滥用' },
+                          { label: 'JDK 版本区间', note: '做版本兼容时用' },
                         ],
                       },
                     ],
                   },
                   caption:
-                    '记忆抓手：`OnClass` 管「**有没有这个依赖**」（最外层开关），`OnMissingBean` 管「**用户有没有自己配**」（最内层退让），`OnProperty` 管「**功能开不开**」（最常见的手动开关）。面试若被问「怎么写一个只有开了某个开关才生效的配置」，答案就是 `@ConditionalOnProperty(name = "x.enabled", havingValue = "true", matchIfMissing = false)`——其中 `matchIfMissing` 决定「不写这个配置时默认开还是关」，这是最容易被追问的一个参数。',
+                    '记忆抓手只有三句:**按类**管「有没有这个依赖」,是最外层开关;**按 Bean** 管「用户有没有自己配」,是最内层退让;**按配置项**管「功能开不开」,是手动开关。若被问「怎么写一个只有开了开关才生效的配置」,答「属性条件注解 + 两个参数」即可,其中「缺省时是否成立」是最容易被追问的一个——[[它决定不写这个配置时默认开还是关,写错方向会让功能默认关闭而无人察觉]]。',
+                },
+              },
+              {
+                kind: 'code',
+                title: '一个最小可用的自动配置:三层条件写在哪',
+                body: [
+                  '把上面的链路落地成一个能跑的最小样例:一个属性类、一个自动配置类、一份清单文件。重点看三处条件写在哪里——**类上放「有没有依赖」,方法上放「用户有没有自己配」**。这个分工不是风格问题,写反了就会出现「整段配置莫名不生效」的故障。',
+                ],
+                code: {
+                  language: 'java',
+                  code:
+                    "// ① 自动配置类:全部逻辑都藏在条件里\n@AutoConfiguration                       // 等价于「配置类 + 参与排序」\n@ConditionalOnClass(SmsClient.class)     // 依赖没引 → 整段不生效\n@ConditionalOnProperty(name = \"sms.enabled\", havingValue = \"true\", matchIfMissing = true)\n@EnableConfigurationProperties(SmsProperties.class)\npublic class SmsAutoConfiguration {\n\n    @Bean\n    @ConditionalOnMissingBean             // 用户自己定义了同类型 Bean → 我这个不生效\n    public SmsClient smsClient(SmsProperties props) {\n        return new SmsClient(props.getEndpoint(), props.getAccessKey());\n    }\n}\n\n// ② 属性类:前缀 + 默认值\n@ConfigurationProperties(prefix = \"sms\")\npublic class SmsProperties {\n    private String endpoint = \"https://sms.example.com\";\n    private String accessKey;\n    private int timeoutMillis = 3000;\n    // getter / setter 省略\n}\n\n// ③ 清单文件:src/main/resources/META-INF/spring/\n//    org.springframework.boot.autoconfigure.AutoConfiguration.imports\n//    内容只有一行(多个就多行):\n//    com.example.sms.SmsAutoConfiguration",
                 },
               },
               {
                 kind: 'diagram',
                 title: '内嵌 Tomcat 是什么时候启动的',
                 body: [
-                  '「内嵌 Tomcat 怎么启动」的答案是反直觉的：**不是 Spring Boot 去启动 Tomcat，而是 Tomcat 被当成一个 Bean 创建出来，创建过程中顺便把端口监听开了**。调用链的起点是 `refresh()` 的 `onRefresh()`。',
+                  '「内嵌 Tomcat 怎么启动」的答案有点反直觉:**不是应用去启动 Tomcat,而是 Tomcat 被当成一个 Bean 创建出来,创建过程中顺便把端口监听了**。调用链的起点在刷新流程的一个回调里。',
                 ],
                 diagram: {
                   type: 'sequence',
-                  actors: ['应用上下文', 'WebServerFactory', 'Tomcat 容器', 'DispatcherServlet'],
+                  actors: ['应用上下文', 'Web 服务器工厂', 'Tomcat 容器', '前端控制器'],
                   messages: [
-                    { from: '应用上下文', to: 'WebServerFactory', text: '`onRefresh()` → `createWebServer()`' },
-                    { from: 'WebServerFactory', to: 'Tomcat 容器', text: '`getWebServer(...)`：new `Tomcat`、设端口、设 `Context`' },
-                    { from: 'Tomcat 容器', to: 'Tomcat 容器', text: '把 `DispatcherServlet` 注册为唯一的 Servlet（映射 `/`）' },
-                    { from: 'Tomcat 容器', to: 'Tomcat 容器', text: '`tomcat.start()`：**这一行开始监听端口**' },
-                    { from: 'Tomcat 容器', to: '应用上下文', text: '返回 `WebServer`，交给 `finishRefresh()` 启动', reply: true },
-                    { from: '应用上下文', to: 'DispatcherServlet', text: '`onApplicationEvent(ContextRefreshedEvent)`：initStrategies 初始化九大组件' },
-                    { from: '应用上下文', to: '应用上下文', text: '`finishRefresh()` → 推 `ServletWebServerInitializedEvent`' },
+                    { from: '应用上下文', to: 'Web 服务器工厂', text: '刷新到「onRefresh」阶段,请求创建 Web 服务器' },
+                    { from: 'Web 服务器工厂', to: 'Tomcat 容器', text: '新建 Tomcat、设端口、设 Context' },
+                    { from: 'Tomcat 容器', to: 'Tomcat 容器', text: '把前端控制器注册为唯一的 Servlet(映射 `/`)' },
+                    { from: 'Tomcat 容器', to: 'Tomcat 容器', text: '`start()`:**这一行开始监听端口**' },
+                    { from: 'Tomcat 容器', to: '应用上下文', text: '返回 Web 服务器对象,交给刷新收尾阶段', reply: true },
+                    { from: '应用上下文', to: '前端控制器', text: '容器刷新完成事件 → 初始化九大组件' },
+                    { from: '应用上下文', to: '应用上下文', text: '收尾阶段 → 推「Web 服务器已初始化」事件' },
                   ],
                   caption:
-                    '两个顺序细节值得记：**第一，端口在 `onRefresh` 阶段就已监听**，此时 `refresh()` 还没走完，所以「容器起来了但 Bean 还在创建」这个时间窗内，请求进来可能拿到 404 或 503——这是「优雅启动」需要 `ReadinessCheck` 的原因。**第二，`DispatcherServlet` 的九大组件是在 `ContextRefreshedEvent` 才初始化的**（`initStrategies`），比 Tomcat 启动晚一拍，所以 `Tomcat` 起来时它还是个空壳。这也是「为什么 `@PostConstruct` 里拿不到 `HandlerMapping`」的原因。',
+                    '两个顺序细节值得记。**第一,端口在「刷新到一半」时就已监听**,此时容器里的 Bean 还没创建完,所以这段时间进来的请求可能拿到 404 或 503——这正是「就绪探针」存在的理由。**第二,前端控制器的九大组件是在「容器刷新完成」之后才初始化的**,比端口监听晚一拍,所以那一瞬间它还是个空壳。[[这也解释了为什么在 Bean 初始化方法里拿不到映射组件]]——不是注入失败,是它还没装配。',
                 },
               },
               {
                 kind: 'diagram',
-                title: '配置源的优先级：从高到低',
+                title: '配置源的优先级:谁覆盖谁',
                 body: [
-                  '「配置文件加载优先级」这题按「谁覆盖谁」记，从高到低四层。同一份配置，排在前面的赢。',
+                  '这道题按「谁覆盖谁」记,从高到低分四层。同一份配置,排在前面的赢。',
                 ],
                 diagram: {
                   type: 'memory',
                   regions: [
                     {
-                      name: '最高：外部动态',
+                      name: '最高:外部动态',
                       slots: [
                         { label: '命令行参数', value: '`--server.port=9090`' },
-                        { label: 'SPRING_APPLICATION_JSON', value: '环境变量里的 JSON' },
-                        { label: 'ServletConfig / Context 参数', value: '外置容器时用' },
+                        { label: '环境变量里的 JSON', value: '整段 JSON 作为属性源' },
+                        { label: 'Web 容器参数', value: '外置容器时用' },
                         { label: 'JNDI', value: '`java:comp/env`' },
                       ],
                     },
                     {
-                      name: '次高：系统与测试',
+                      name: '次高:系统与测试',
                       slots: [
-                        { label: 'System.getProperties()', value: '`-Dkey=value`' },
-                        { label: 'OS 环境变量', value: '`SERVER_PORT=9090`' },
-                        { label: '`@TestPropertySource`', value: '仅测试生效' },
-                        { label: '`@SpringBootTest(properties)`', value: '仅测试生效' },
+                        { label: '系统属性', value: '`-Dkey=value`' },
+                        { label: '操作系统环境变量', value: '`SERVER_PORT=9090`' },
+                        { label: '测试注解属性', value: '仅测试生效' },
+                        { label: '测试内联属性', value: '仅测试生效' },
                       ],
                     },
                     {
                       name: '配置中心',
                       slots: [
-                        { label: 'Nacos / Apollo', value: '经 `PropertySourceLocator` 注入' },
-                        { label: '`SPRING_CONFIG_ADDITIONAL_LOCATION`', value: '追加配置文件位置' },
+                        { label: 'Nacos / Apollo', value: '通过属性源定位器注入' },
+                        { label: '追加配置文件位置', value: '不替换默认位置,只追加' },
                       ],
                     },
                     {
-                      name: '最低：本地文件',
+                      name: '最低:本地文件',
                       slots: [
                         { label: 'jar 外 `./config/`', value: '优先级高于 jar 内' },
                         { label: 'jar 外当前目录', value: '`./application.yml`' },
@@ -2834,269 +2241,77 @@ export default {
                     },
                   ],
                   caption:
-                    '两个实用结论：**「jar 外覆盖 jar 内」**让你改配置不用重新打包；**「命令行参数最高」**让 `java -jar app.jar --server.port=9090` 能临时改端口。同一位置下 `.properties` 与 `.yml` 同时存在时，**`.properties` 优先**（`PropertiesPropertySourceLoader` 排在 `YamlPropertySourceLoader` 之前）。另外 `profile` 专属文件（`application-prod.yml`）**永远覆盖**通用文件（`application.yml`），这是 Java 里唯一「按文件名后缀」而非文件名生效的特殊规则。',
+                    '两个实用结论:**「jar 外覆盖 jar 内」**让你改配置不用重新打包;**「命令行最高」**让临时改端口变成一个参数的事。另外三条容易漏:同一位置下 `.properties` 与 `.yml` 并存时 **`.properties` 优先**;`profile` 专属文件**永远覆盖**通用文件,与位置无关——这是少数「按文件名后缀生效」的规则;要整体换掉默认位置用「替换」,要在此基础上加用「追加」,两者别搞反。',
                 },
               },
               {
                 kind: 'diagram',
-                title: 'Spring Boot 2.x → 3.x 的破坏性变化',
+                title: '2.x 到 3.x:破坏性变化清单',
                 body: [
-                  'Boot 3 / Spring 6 是一组「必须知道」的版本分界线。下面按「变没变、影响到哪」列表。',
+                  '这是一条「必须知道」的版本分界线。按「变没变、影响在哪」列出来,重点看最后一列——那是面试时能直接说的话。',
                 ],
                 diagram: {
                   type: 'matrix',
-                  head: ['变化点', '2.x', '3.x / Spring 6', '面试怎么说'],
-                  cols: ['2.x', '3.x / Spring 6', '面试怎么说'],
+                  head: ['变化点', '2.x', '3.x', '面试怎么说'],
+                  cols: ['2.x', '3.x', '面试怎么说'],
                   rows: [
-                    ['JDK 基线', 'JDK 8+', '**JDK 17+**', '「3.x 强制 17，因为用了 record、密封类、switch 模式匹配」'],
-                    ['命名空间', '`javax.*`', '**`jakarta.*`**', '「Servlet API 从 `javax.servlet` 迁到 `jakarta.servlet`，这是最痛的升级点」'],
-                    ['配置清单', '`spring.factories`', '`AutoConfiguration.imports`', '「大杂烩拆成按用途分文件，IDE 能跳转、能校验」'],
-                    ['GraalVM', '实验性', '**正式支持原生镜像**', '「AOT + native image：启动毫秒级、内存几十 M，代价是构建慢、反射要注册」'],
-                    ['可观测性', 'Micrometer', '**Micrometer Observation + OTLP**', '「`Observation` API 统一 metrics / tracing / logging 三件套」'],
-                    ['HTTP 接口', '`@RequestMapping`', '`@HttpExchange`（声明式客户端）', '「类似 Feign，但内置、无额外依赖」'],
-                    ['Security', '`WebSecurityConfigurerAdapter`', '**`SecurityFilterChain` Bean**', '「适配器基类被废弃，改成声明 Bean」'],
-                    ['Spring Native', '独立项目', '并入核心（AOT）', '「`@AotHints` 换成 `RuntimeHints`」'],
+                    ['JDK 基线', 'JDK 8+', '**JDK 17+**', '「强制 17,因为用了 record、密封类、模式匹配」'],
+                    ['命名空间', '`javax.*`', '**`jakarta.*`**', '「Servlet API 整体迁移,第三方库必须同步升级」'],
+                    ['配置清单', '`spring.factories`', '专用清单文件', '「大杂烩拆成按用途分文件,能跳转、能校验」'],
+                    ['原生镜像', '实验性', '**正式支持**', '「启动毫秒级、内存几十 M,代价是反射要注册」'],
+                    ['可观测性', '三套 API 各管一摊', '**统一 Observation**', '「指标、链路、日志用一个注解全覆盖」'],
+                    ['HTTP 客户端', '注解式声明', '`@HttpExchange`', '「类似 Feign,但内置、无额外依赖」'],
+                    ['安全配置', '继承适配器基类', '**声明过滤器链 Bean**', '「适配器基类废弃,改成声明 Bean」'],
                   ],
                   caption:
-                    '若被问「升级 3.x 最麻烦的是什么」，答三件：**`javax` → `jakarta` 的全量替换**（含第三方库必须同步升级）、**`WebSecurityConfigurerAdapter` 的改法**、**JDK 17 的语言与 `--illegal-access` 行为变化**。这三件事和「业务代码」无关，但会吃掉升级 80% 的工时——这个回答比背新特性更显经验。',
+                    '若被问「升级最麻烦的是什么」,答三件:**命名空间的全量替换**(含所有第三方库必须同步)、**安全配置的改法**、**JDK 17 的语言与封装行为变化**。这三件事和业务代码无关,却会吃掉升级 80% 的工时——[[这个回答比背新特性更显经验,因为它说明你真做过升级]]。',
                 },
               },
               {
-                kind: 'code',
-                title: '一个最小可用的自动配置：从清单到生效',
+                kind: 'concept',
+                title: 'Actuator:生产上真正被用的是那四个端点',
                 body: [
-                  '把前面讲的四段链路落地成一个能跑的最小样例：一个属性类、一个自动配置类、一份清单文件。重点看三处条件注解写在哪里——**类上放「有没有依赖」，方法上放「用户有没有自己配」**。这个分工不是风格问题，写反了就会出「整段配置莫名不生效」的故障。',
+                  '「服务是不是活着」和「服务内部现在什么状态」是两个问题。Actuator 把后者做成一组成熟的 HTTP 端点,由 `spring-boot-starter-actuator` 引入,默认只开 `/actuator/health`(2.x 还有 `info`)。',
+                  '生产上真正会被用到的其实只有四个:`health` 交给 K8s 的存活/就绪探针;`metrics` 暴露 QPS、延迟分位、JVM 与连接池指标,再由 Prometheus 抓取(换成 `/actuator/prometheus` 格式只需加一个 registry 依赖);`loggers` 能在**运行期改日志级别**,排障时最救命——不用重启就能把某个包调成 `DEBUG`;`env` 用来核对「这个环境到底读到了哪份配置」。',
+                  '[[默认暴露的端点越少越好,因为 env、heapdump、threaddump 一旦对外就是事故]]:`env` 能读到环境变量里的密钥,`heapdump` 能下载整个堆快照。正确做法是只暴露 `health,info,prometheus`,其余靠 `management.server.port` 单独开一个管理端口,只对内网或运维网段开放。',
                 ],
-                lang: 'java',
-                code:
-                  '// ① 自动配置类：全部逻辑都藏在条件里\n@AutoConfiguration                              // = @Configuration(proxyBeanMethods = false) + 参与排序\n@ConditionalOnClass(SmsClient.class)           // 依赖没引 → 整段不生效\n@ConditionalOnProperty(name = "sms.enabled", havingValue = "true", matchIfMissing = true)\n@EnableConfigurationProperties(SmsProperties.class)\npublic class SmsAutoConfiguration {\n\n    @Bean\n    @ConditionalOnMissingBean                        // 用户自己定义了 SmsClient → 我这个不生效\n    public SmsClient smsClient(SmsProperties props) {\n        return new SmsClient(props.getEndpoint(), props.getAccessKey());\n    }\n}\n\n// ② 属性类：前缀 + 默认值\n@ConfigurationProperties(prefix = "sms")\npublic class SmsProperties {\n    private String endpoint = "https://sms.example.com";\n    private String accessKey;\n    private int timeoutMillis = 3000;\n    // getter / setter 省略\n}\n\n// ③ 清单文件：src/main/resources/META-INF/spring/\n//    org.springframework.boot.autoconfigure.AutoConfiguration.imports\n//    内容只有一行（多个就多行）：\n//    com.example.sms.SmsAutoConfiguration',
-                caption:
-                  '这三段加起来就是一个完整的 Starter。注意三个「不写就错」的细节：**`@ConditionalOnMissingBean` 必须写在 `@Bean` 方法上而不是类上**（写在类上会让整段配置在「用户定义了任意一个 Bean」时失效）；**属性类必须能被 `@EnableConfigurationProperties` 或 `@ConfigurationPropertiesScan` 找到**，否则注入进来的是个空对象；**`.imports` 文件的路径少一层目录都不行**（必须是 `META-INF/spring/`，不是 `META-INF/`）。',
-                notes: [
-                  { line: '@AutoConfiguration', text: 'Boot 2.7 新增的语义化注解，等价于 `@Configuration(proxyBeanMethods = false)` 并打上「自动配置」标记。**用 `proxyBeanMethods = false` 是因为自动配置类里的 `@Bean` 方法之间不该互相调用**——省掉 CGLIB 代理，启动更快。' },
-                  { line: '@ConditionalOnProperty(name = "sms.enabled", havingValue = "true", matchIfMissing = true)', text: '`matchIfMissing = true` 表示「用户没写这个配置时默认开启」，适合「默认就该有」的能力；若默认关闭则写 `false`。**这个参数最容易被追问**。' },
-                  { line: '@ConditionalOnMissingBean', text: '按**返回类型**判断容器里有没有同类 Bean。它之所以在自动配置里可靠，是因为自动配置在所有用户配置**之后**才被处理（`DeferredImportSelector`）。在普通 `@Configuration` 里用它，结果取决于扫描顺序，不可依赖。' },
-                ],
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot 的核心特性有哪些？「约定大于配置」怎么理解？',
-                questionId: 'java-05-Q55',
-                intent:
-                  '开场题。答「四个特性 + 一句话本质」即可，重点在于把「约定」和「可覆盖」两层都说出来。',
+                term: {
+                  name: 'Actuator',
+                  def: 'Spring Boot 的运维端点模块。它不改业务逻辑,只把「应用内部状态」通过 HTTP 或 JMX 暴露出来:健康、指标、配置、日志级别、线程栈、Bean 清单。',
+                },
                 points: [
-                  '**四个特性**：起步依赖（Starter）、自动配置、内嵌容器、生产就绪（Actuator）',
-                  '**约定大于配置的本质**：提供**带条件的默认值**，你不写它有，你写了它让位',
-                  '**三层含义**：有默认值 → 默认值可覆盖 → 默认值有前提（条件成立才生效）',
-                  '**收益**：从「配置驱动」变为「依赖驱动」——加了 `spring-boot-starter-web` 就自动有 MVC + Jackson + Tomcat',
-                  '**代价**：隐式行为多，排查靠 `--debug`、`ConditionEvaluationReport`、Actuator',
-                  '**不是银弹**：复杂定制仍需手写 `@Configuration`，Boot 只是把「80% 的常规配置」变成零',
+                  '健康检查要分组:存活探针只查进程与关键依赖,就绪探针才查数据库与下游——否则数据库抖一下,K8s 会把所有实例一起重启。',
+                  '指标不要自己写接口去拉,交给 `micrometer` 做门面,底层换 Prometheus / StatsD 都只是换依赖。',
+                  '`loggers` 与 `env` 必须加权限:它们等于「运行期改配置」和「读全部配置」,放在公网就是后门。',
                 ],
-                depth:
-                  '一个能拉开差距的说法：「Spring Boot 的真正创新不是自动配置，而是**把自动配置做成了可退让的**」。早期各种「脚手架」也能生成一堆配置，问题是生成之后就是死代码，想改要删。Spring Boot 用 `@ConditionalOnMissingBean` 把「是否生效」的决策权交给用户——**你只要定义一个同类型 Bean，默认实现就自动消失**，不需要删任何代码。这个「零成本覆盖」才是它取代各类脚手架的原因。',
-                followup:
-                  '「自动配置和 Starter 是什么关系」——Starter 是**分发单位**（一个 pom + 一份清单），自动配置是**实现**（清单指向的类）。所以「自定义 Starter」的完整动作是：写自动配置类 → 写 `.imports` 清单 → 打成 jar。三者缺一不可，缺清单则配置永不被读，缺自动配置类则清单指向空。',
+              },
+              {
+                kind: 'concept',
+                title: '收口:一个 Bean 的完整路径',
+                body: [
+                  '把整条链路串成一句话:**启动类被注册成入口 → 组件扫描找到你写的配置 → 自动装配读清单、滤条件、排顺序、延迟注册 → 刷新容器时把该生效的配置类变成 Bean → 容器回调阶段创建 Web 服务器并监听端口**。',
+                  '三个「容易考但容易答浅」的点全部落在这条线上:**「约定大于配置」考的是第三层(有前提)**——只说「有默认值」是入门答案;**「自动装配原理」考的是第四段(延迟注册)**——说不出「用户优先靠延迟」就只是背了步骤;**「内嵌容器怎么启动」考的是位置(在刷新回调里)**——说「应用启动 Tomcat」方向就反了。',
+                  '能说清这三句就算过了:「默认值必须带条件才叫约定,不带条件的只是模板」;「自动装配是读清单、滤条件、排顺序、延迟注册四步,延迟是为了让用户定义优先」;「内嵌容器是个 Bean,端口在刷新到一半时就监听了,所以才有就绪探针的必要」。',
+                  '自测一道:你自己写了一个数据源 Bean,为什么框架的默认数据源不会一起创建?如果答得出「类型条件判断在延迟注册之后才做,那时你已经定义过了」,说明后面几道题都能自己推。',
+                ],
               },
               {
                 kind: 'question',
-                title: '@SpringBootApplication 由哪些注解组成？各自的作用？',
-                questionId: 'java-05-Q56',
-                intent:
-                  '送分题，但要答出「三个注解各管一件事」，而不是「它包含三个注解」这种同义反复。',
-                points: [
-                  '**`@SpringBootConfiguration`**：本质是 `@Configuration`，标记「这是 Boot 应用的主配置类」，测试时用它定位入口',
-                  '**`@EnableAutoConfiguration`**：通过 `@Import(AutoConfigurationImportSelector.class)` 触发自动配置的整套流程',
-                  '**`@ComponentScan`**：从主类所在包开始扫描 `@Component` 系注解；带两个 `excludeFilters`',
-                  '**`@ComponentScan` 的默认值**：`basePackages` 为空 → 取**主类所在包**；这就是「Bean 必须在主类同包或子包下」的由来',
-                  '**`excludeFilters` 的两个过滤器**：`TypeExcludeFilter`（允许外部扩展排除规则）、`AutoConfigurationExcludeFilter`（排除自动配置类，防重复注册）',
-                  '**别名属性**：`exclude` / `excludeName` 用于排除自动配置，`scanBasePackages` 用于改扫描范围',
-                ],
-                depth:
-                  '追问「能不能只要其中两个」——可以。如果不用自动配置，只写 `@Configuration` + `@ComponentScan` 就是一个纯 Spring 应用；如果只想用自动配置不要包扫描（比如纯库项目、或者你完全靠手动 `@Import` 装配），可以只写 `@EnableAutoConfiguration`。**Spring Boot 里没有魔法，三个注解可以任意拆开用**——这个回答能证明你不是把 `@SpringBootApplication` 当成一个黑盒。',
-                followup:
-                  '「`@SpringBootApplication` 能放在多个类上吗」——技术上可以，但**`@SpringBootConfiguration` 只允许一个**（`@SpringBootTest` 找不到多个会报错）。而且多个入口会导致 `@ComponentScan` 起点不同、Bean 定义重复。正确做法是：只在一个类上用它，其他模块用 `@Configuration` + `@Import` 或 `@ComponentScan(basePackages = "com.example")` 显式声明。',
-              },
-              {
-                kind: 'question',
-                title: '详细说下 Spring Boot 自动装配原理（含 spring.factories → AutoConfiguration.imports 的演变）',
+                title: 'Q57 · 详细说下 Spring Boot 自动装配原理（含清单文件的演变）',
                 questionId: 'java-05-Q57',
-                intent:
-                  '本课的核心题。四段链路必须完整说清，尤其「为什么用 Deferred」和「清单为什么改格式」。',
+                intent: '考的是「能不能把一条链路的动因说清楚」。四段步骤背下来不难,难的是每段都要能说出「为什么必须这样」。',
                 points: [
-                  '**入口**：`@EnableAutoConfiguration` → `@Import(AutoConfigurationImportSelector.class)`',
-                  '**第一段 读清单**：`ImportCandidates.load()` 读 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`（2.7 前是 `spring.factories`）',
-                  '**第二段 过滤**：先按元数据快速排除（`OnClass` 类条件），再加载类评估全部 `@Conditional`',
-                  '**第三段 排序**：`@AutoConfigureOrder` / `Before` / `After`，保证「后置条件」的配置类在其依赖之后处理',
-                  '**第四段 注册**：`DeferredImportSelector` 保证在所有用户配置类解析**之后**批量注册，从而「用户优先」',
-                  '**关键机制**：`@ConditionalOnMissingBean` 之所以可靠，正是靠第四段的「延迟」',
-                  '**清单为什么改**：`spring.factories` 是一个文件装所有扩展点，无法按需加载、无法条件过滤、IDE 不可跳转；新格式一文件一用途、纯类名列表',
-                  '**两点补充**：`AutoConfigurationPackages` 记录主类包名（供自动配置知道该扫哪里）；`ConditionEvaluationReport` 是 `--debug` 输出的那张表',
+                  '**入口**:启动类上的自动装配注解通过导入一个选择器触发整套流程',
+                  '**第一段读清单**:从 `META-INF/spring/` 下的专用文件读候选类名,不扫包、不加载类',
+                  '**第二段过滤**:先用「类在不在」这类轻量条件快速排除,再加载类评估全部条件注解',
+                  '**第三段排序**:按顺序、之前、之后三个维度排,保证「依赖别人」的配置在其之后处理',
+                  '**第四段延迟注册**:挂进延迟队列,**等用户配置全部解析完**才批量注册——这是「用户优先」的机制保证',
+                  '**演变的原因**:旧格式一个文件装所有扩展点,无法按需读、无法条件过滤、IDE 点不进去;新格式一用途一文件、纯类名列表',
+                  '**一句话**:读清单、滤条件、排顺序、延迟注册——四步里只有最后一步是「约定大于配置」真正成立的地方',
                 ],
                 depth:
-                  '最能体现深度的追问是「为什么一定要 `DeferredImportSelector`」。因为普通 `@Import` 在本配置类被解析时立即执行，而此时用户自己的 `@Configuration` 可能还没解析完——`@ConditionalOnMissingBean` 就会误判「用户没定义」从而注册默认 Bean，随后用户 Bean 进来时要么冲突、要么默认 Bean 抢占。`DeferredImportSelector` 把执行时机推到「所有配置类解析完毕、注册 BeanDefinition 之前」，这个时间窗刚好让「用户已声明、但尚未实例化」的状态可见。**一句话：延迟导入是「可覆盖」的实现基础**。',
-                followup:
-                  '「怎么看到底哪些自动配置生效了」——三种方式：启动参数 `--debug`（输出 `ConditionEvaluationReport`，分 Positive / Negative 两张表）、`/actuator/conditions` 端点（需暴露）、`ConditionEvaluationReport.get(beanFactory)` 编程获取。生产排查「某个 Bean 为什么没生效」时，`Negative matches` 表会直接告诉你卡在哪个条件上——比读代码快得多。',
-              },
-              {
-                kind: 'question',
-                title: '什么是条件注解？@Conditional 家族有哪些？',
-                questionId: 'java-05-Q58',
-                intent:
-                  '按「判断依据」四分类回答，比列举更清晰。要能说出 `@ConditionalOnMissingBean` 的使用限制。',
-                points: [
-                  '**底层原语**：`@Conditional(Condition[])`，`Condition` 接口只有一个 `matches(context, metadata)` 方法',
-                  '**为什么需要**：「条件装配」是一切可退让默认值的实现手段',
-                  '**四类**：按 Class（`OnClass` / `OnMissingClass`）、按 Bean（`OnBean` / `OnMissingBean` / `OnSingleCandidate`）、按配置（`OnProperty` / `OnResource`）、按环境（`OnWebApplication` / `OnExpression` / `OnJava`）',
-                  '**`@ConditionalOnProperty` 的两个关键参数**：`havingValue`（比较值）、`matchIfMissing`（缺省时是否成立）',
-                  '**`@ConditionalOnMissingBean` 的两条限制**：按**类型**判断（不是名字）、只在自动配置里可靠（普通配置类解析顺序不保证）',
-                  '**编写自定义条件**：实现 `Condition`，返回值直接决定生效与否；可注册为 `@Component`（Boot 3 起不再自动支持，需显式注册）',
-                  '**调试**：`--debug` 的条件评估报告列出每个条件的判定结果与原因',
-                ],
-                depth:
-                  '一个常被忽略的细节：`@Conditional` 的判断发生在**解析 BeanDefinition 阶段**，不是实例化阶段。所以 `@ConditionalOnBean` 只能看到「已经注册的 BeanDefinition」，看不到「正在创建中」或「稍后才注册」的 Bean——这正是它在普通 `@Configuration` 里不可靠的物理原因（不是「顺序不好」，而是「那一刻信息不全」）。理解了这一点，「为什么官方文档反复强调它只能用在自动配置类上」就不再是死记的规矩。',
-                followup:
-                  '「`@ConditionalOnProperty` 和 `@Profile` 有什么区别」——`@Profile` 只看 `spring.profiles.active` 这个特定属性，语义是「环境」；`@ConditionalOnProperty` 可以看任意属性、任意值，语义是「开关」。所以「prod 环境才启用」用 `@Profile("prod")` 更贴切，「有个 `sms.enabled` 开关」用 `@ConditionalOnProperty`。注意 `@Profile` 也是 `@Conditional` 的派生（`ProfileCondition`），本质同源。',
-              },
-              {
-                kind: 'question',
-                title: 'Starter 的原理？如何自定义一个 Starter？',
-                questionId: 'java-05-Q59',
-                intent:
-                  '考「Starter 只是分发形态」这一点。能把三个组成部分说全（依赖 + 自动配置类 + 清单）就过关。',
-                points: [
-                  '**本质**：Starter 不是代码，是**一个 pom + 一份清单 + 一组自动配置类**的打包约定',
-                  '**命名约定**：官方 `spring-boot-starter-xxx`，第三方 `xxx-spring-boot-starter`',
-                  '**两种 Starter**：`starter`（依赖聚合，如 `spring-boot-starter-web`）+ `autoconfigure`（实现，如 `spring-boot-autoconfigure`）；小项目可合一',
-                  '**三步实现**：① 写 `@AutoConfiguration` 类 + 条件注解 ② 写 `.imports` 清单 ③ pom 里引 `spring-boot-starter` 与 `spring-boot-configuration-processor`',
-                  '**必加的两个**：`@EnableConfigurationProperties(XxxProperties.class)`（属性绑定）+ `@ConditionalOnMissingBean`（可退让）',
-                  '**避免的两个坑**：自动配置类**不要**放在会被 `@ComponentScan` 扫到的包下；`.imports` 路径必须是 `META-INF/spring/`',
-                  '**不要做的事**：Starter 里不要写 `@ComponentScan`（会污染用户包扫描），也不要用 `@Component` 标注自己的 Bean（改为 `@Bean` 方法）',
-                ],
-                depth:
-                  '问「Starter 里为什么必须用 `@Bean` 而不是 `@Component`」——因为 `@Component` 依赖包扫描，而 Starter 的包名和用户项目的包名毫无关系，扫不到。`@Bean` 方法写在自动配置类里，由 `@Import` 主动加载，与包结构无关。这一条是「写 Starter 最常犯的错」，也是很多自定义 Starter「本地测试好好的、引到别的项目就失效」的原因。',
-                followup:
-                  '「怎么让 IDE 有配置项提示」——引 `spring-boot-configuration-processor`（`optional` 依赖），它会在编译期扫描 `@ConfigurationProperties` 类，生成 `META-INF/spring-configuration-metadata.json`，IDE 据此补全 `application.yml` 里的键名与注释（注释来自字段的 Javadoc）。这是「一个 Starter 显得专业」的细节，成本极低。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot 的启动流程（SpringApplication.run 做了什么）？',
-                questionId: 'java-05-Q60',
-                intent:
-                  '能把「准备 → 环境 → 上下文 → 刷新 → Runner」五段说清即可，重点在「环境早于容器」。',
-                points: [
-                  '**构造阶段**：推断应用类型（Servlet / Reactive / None）、加载 `ApplicationContextInitializer` 与 `ApplicationListener`',
-                  '**准备阶段**：造 `DefaultApplicationArguments` → 准备 `Environment`（加载配置文件）→ 打印 banner',
-                  '**上下文阶段**：按类型反射创建 `ApplicationContext` → `prepareContext`（注册主类 BeanDefinition、执行 Initializer、推事件）',
-                  '**刷新阶段**：`refreshContext` → `AbstractApplicationContext.refresh()` 十二步（自动配置在此发生、内嵌容器在 `onRefresh` 启动）',
-                  '**收尾阶段**：`afterRefresh`（空）→ 打印耗时 → `callRunners` 执行 `ApplicationRunner` / `CommandLineRunner` → 推 `ApplicationReadyEvent`',
-                  '**六个可用扩展点**：`ApplicationContextInitializer`、`EnvironmentPostProcessor`、`ApplicationListener`（各阶段事件）、`BeanFactoryPostProcessor`、`ApplicationRunner`、`CommandLineRunner`',
-                  '**关键顺序**：`Environment` 就绪 **早于** Bean 创建；内嵌容器**启动于** `onRefresh`，早于 `refresh` 完成',
-                ],
-                depth:
-                  '追问「`ApplicationRunner` 和 `CommandLineRunner` 的区别」——前者入参是 `ApplicationArguments`（已解析成 option / non-option，支持 `getOptionValues("name")`），后者是原始 `String[]`。**功能上推荐前者**，因为不用自己解析 `--key=value`。两者都按 `@Order` 排序执行，且都在 `ApplicationReadyEvent` **之前**——所以「服务已启动」的判定点应该是 `ApplicationReadyEvent`，而不是 Runner 执行完，更不是 `main` 方法返回。',
-                followup:
-                  '「启动慢怎么排查」——三层：① 加 `--debug` 看自动配置的条件评估耗时；② 用 `ApplicationStartup`（`BufferingApplicationStartup`）记录每个步骤的起止时间，配合 `/actuator/startup` 端点可视化；③ 关注「`BeanFactoryPostProcessor` 数量」与「`@ComponentScan` 范围」——前者多则解析慢，后者宽则扫描慢。**最常见的元凶是「扫描了过大的包」和「某个 Bean 的 `@PostConstruct` 里有阻塞调用」**。',
-              },
-              {
-                kind: 'question',
-                title: '内嵌 Tomcat 是怎么启动的？和外置 Tomcat 有什么区别？',
-                questionId: 'java-05-Q61',
-                intent:
-                  '核心在「容器是被 Spring 创建出来的一个 Bean」这个视角转换，以及两条启动链的差异。',
-                points: [
-                  '**触发点**：`refresh()` 的 `onRefresh()` → `ServletWebServerApplicationContext.createWebServer()`',
-                  '**创建**：`TomcatServletWebServerFactory.getWebServer()` 手动 new `Tomcat`、设端口、设 `Context`、注册 `DispatcherServlet`（映射 `/`）',
-                  '**启动**：`TomcatWebServer` 构造时调用 `tomcat.start()`，**端口在此刻监听**',
-                  '**外置的启动链**：容器（Tomcat）启动 → 扫描 `WEB-INF/lib` → 用 SPI 找 `ServletContainerInitializer` → `SpringServletContainerInitializer` → `WebApplicationInitializer` → 手动 `new AnnotationConfigWebApplicationContext` + `refresh()`',
-                  '**控制权相反**：外置是「容器控制应用」，内嵌是「应用控制容器」',
-                  '**内嵌的优势**：一个可执行 jar 即可运行（无需装 Tomcat）、版本由依赖决定（不会「测试环境 Tomcat 8、生产 Tomcat 7」）、便于容器化',
-                  '**内嵌的代价**：调 Tomcat 本身（连接器、线程池、`server.xml` 级配置）要靠 `WebServerFactoryCustomizer` 或 `TomcatConnectorCustomizer`，不如改 `server.xml` 直观',
-                ],
-                depth:
-                  '一个能显功底的细节：**内嵌 Tomcat 不支持 `web.xml` 与 `WEB-INF` 目录约定**（虽然可通过 `TomcatServletWebServerFactory` 手动挂载 docBase）。所以「为什么 Spring Boot 项目里放 `web.xml` 不生效」的答案是：根本没走「扫描 `WEB-INF`」的代码路径。同理，「静态资源为什么放在 `src/main/resources/static`」也是因为内嵌容器注册的是 Spring 的 `ResourceHttpRequestHandler`，而不是 Tomcat 的 DefaultServlet 目录浏览。',
-                followup:
-                  '「怎么换 Jetty 或 Undertow」——排除 `spring-boot-starter-tomcat`，引 `spring-boot-starter-jetty` 或 `spring-boot-starter-undertow` 即可。**能一行切换，正是「容器被抽象成 `WebServerFactory`」的直接收益**。注意不同容器的 `server.*` 参数不完全一致（如 Undertow 的 `server.undertow.*`），且 Tomcat 的 `maxThreads` 与 Undertow 的 `io-threads` / `worker-threads` 语义并不同构，迁容器要重新压测。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot 配置文件的加载优先级？',
-                questionId: 'java-05-Q62',
-                intent:
-                  '按「外部 > 内部、命令行 > 文件」这条主轴回答，两个实用结论必须有。',
-                points: [
-                  '**总原则**：后加载的覆盖先加载的，但 Spring 用的是「优先级高的排前面」——同名键取优先级最高的那个 PropertySource',
-                  '**从高到低（要点）**：命令行参数 → `SPRING_APPLICATION_JSON` → 环境变量 → `application-{profile}.yml`（外部）→ `application.yml`（外部）→ `application-{profile}.yml`（内部）→ `application.yml`（内部）',
-                  '**位置顺序（由高到低）**：`file:./config/` → `file:./` → `classpath:/config/` → `classpath:/`',
-                  '**profile 覆盖**：`application-{profile}` **永远**覆盖 `application`，不论位置',
-                  '**格式顺序**：同一位置下 `.properties` 优先于 `.yml`',
-                  '**两个实用结论**：jar 外覆盖 jar 内（改配置不用重打包）；命令行最高（临时改端口）',
-                  '**自定义位置**：`spring.config.location`（替换默认位置）、`spring.config.additional-location`（追加）',
-                ],
-                depth:
-                  '「环境变量怎么映射到配置键」是个高频细节：`server.max-http-header-size` 对应 `SERVER_MAXHTTPHEADER_SIZE`。规则是**把 `.` 和 `-` 都转成 `_` 并大写**，但正因为「`.` 与 `-` 都变 `_`」，`server.max-http-header-size` 和 `server.max.http.header.size` 会撞成同一个环境变量名——所以官方建议**不要依赖环境变量表达有歧义的键**。K8s 里用 `SPRING_APPLICATION_JSON` 或挂载配置文件更稳。',
-                followup:
-                  '「配置中心的值和本地文件冲突时谁赢」——取决于 `PropertySource` 的插入位置。Nacos / Apollo 这类实现通常在 `EnvironmentPostProcessor` 阶段把自己的 `PropertySource` **插入到 `application.yml` 之前**（`addFirst`），因此优先级高于本地文件；但也意味着命令行参数仍然能覆盖它。这个「插入位置」正是「为什么配置中心能覆盖本地，却又被命令行覆盖」的答案。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot Actuator 是什么？生产上怎么用？',
-                questionId: 'java-05-Q63',
-                intent:
-                  '考「有没有真的上过生产」。端点是次要的，暴露面控制和健康检查分组才是重点。',
-                points: [
-                  '**是什么**：一组开箱即用的运维端点（`/actuator/**`），提供健康检查、指标、配置、日志级别、线程栈等',
-                  '**常用端点**：`health`（探活）、`info`、`metrics`（Micrometer）、`prometheus`（拉取格式）、`env`、`loggers`（**运行时改日志级别**）、`threaddump`、`heapdump`、`mappings`、`conditions`、`shutdown`',
-                  '**默认只暴露 `health`**：`management.endpoints.web.exposure.include=*` 是**绝对不能在生产盲开**的（`heapdump` / `env` 会泄露密钥）',
-                  '**健康检查分组**：`management.endpoint.health.group.readiness.include=readinessState,db`，配合 K8s 的 liveness / readiness 探针',
-                  '**`readinessState` 与 `livenessState`**：前者在 `ApplicationReadyEvent` 后变 `UP`（用于「能否接流量」），后者用于「是否要重启」',
-                  '**安全**：独立端口（`management.server.port`）+ 内网访问 + Spring Security 保护；**必须做的三件事**：改暴露列表、隔离端口、加认证',
-                  '**指标接入**：Micrometer → Prometheus 拉取 → Grafana 展示；自带 JVM、HTTP、连接池、缓存指标',
-                ],
-                depth:
-                  '一个实战细节：**`/actuator/health` 默认会聚合所有 `HealthIndicator`，其中 `db` 检查会真的执行 `SELECT 1`**。如果数据库连接池被打满或网络抖动，健康检查会变 `DOWN`，K8s 就会重启 Pod——形成「数据库抖一下，全部实例连环重启」的雪崩。所以**生产上一定要把外部依赖从 `liveness` 里摘出去**，只留在 `readiness`（这样才能「摘流量但不重启」）。这个坑在面试里说出来，比背端点列表有价值得多。',
-                followup:
-                  '「怎么在不重启的情况下改日志级别」——`POST /actuator/loggers/com.example`，body `{"configuredLevel":"DEBUG"}`。原理是 `LoggersEndpoint` 直接操作 `LoggingSystem` 的运行时配置，**不持久化**（重启即恢复），所以适合临时排障。若要持久化，用 `logging.level.xxx` 配置或配置中心的动态刷新。同类还有一个 `POST /actuator/refresh`（配合 `@RefreshScope`），但那是 Spring Cloud 的端点，不是 Actuator 自带。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring Boot 3.x / Spring 6 有哪些重要变化？',
-                questionId: 'java-05-Q64',
-                intent:
-                  '按「JDK 基线 / jakarta / 原生镜像 / 可观测性」四条主线回答，重点讲清升级代价。',
-                points: [
-                  '**JDK 17 起**：用了 record、密封类、文本块、switch 模式匹配；JDK 21 是当前推荐的 LTS',
-                  '**`javax` → `jakarta`**：Servlet、JPA、Validation、Mail 全部换命名空间，**第三方库必须同步升级**（这是最大工作量）',
-                  '**AOT + 原生镜像正式支持**：`GraalVM Native Image` 启动毫秒级、内存几十 MB；代价是构建慢、反射 / 动态代理需 `RuntimeHints` 注册、部分库不兼容',
-                  '**`AutoConfiguration.imports`**：替代 `spring.factories` 作为自动配置清单（2.7 引入，3.0 起 `spring.factories` 不再读取）',
-                  '**Micrometer Observation**：`Observation` API 统一 metrics / tracing / logging，`@Observed` 一个注解三件套齐活',
-                  '**HTTP Interface**：`@HttpExchange` 声明式 HTTP 客户端，内置、无需 Feign',
-                  '**Security 改法**：`WebSecurityConfigurerAdapter` 废弃 → 声明 `SecurityFilterChain` Bean',
-                  '**Problem Details（RFC 7807）**：`ProblemDetail` 作为标准错误响应体，`application/problem+json`',
-                ],
-                depth:
-                  '被问「原生镜像为什么不能开箱即用」——因为 GraalVM 的封闭世界假设（closed-world assumption）在**构建期**就把所有可达代码编译成机器码，运行时不存在 `Class.forName` 的能力。而 Spring 大量依赖反射（`@Autowired` 字段注入、`@ConfigurationProperties` 绑定、Jackson 序列化、代理生成），这些「运行期才知道的类」必须在构建期通过 `RuntimeHints` 或 AOT 生成的元数据提前声明。Spring Boot 3 的 AOT 引擎会自动扫描并生成大部分 hints，但**你自己的反射代码（尤其 `Class.forName` 拼类名）必须手写 `@RegisterReflectionForBinding` 或 `RuntimeHintsRegistrar`**，否则只在 native 下运行时才炸。',
-                followup:
-                  '「从 2.7 升 3.x 的实操顺序」——① 先升到 2.7（最后支持 `spring.factories` 的版本），把废弃 API 全清掉；② 用 `spring-boot-properties-migrator` 扫出失效的配置键；③ 全量 `javax` → `jakarta` 替换（IDE 批量 + 编译报错驱动）；④ 逐个升级第三方依赖（MyBatis-Plus、ShardingSphere 这类对 jakarta 敏感的库要查版本矩阵）；⑤ 改 Security 配置；⑥ 最后再评估是否上 native。**跳过第 ① 步直接升 3.0 是升级失败最常见的原因**。',
-              },
-              {
-                kind: 'question',
-                title: '如何排除某个自动配置？如何优雅停机？',
-                questionId: 'java-05-Q65',
-                intent:
-                  '两个实操题捆在一起。排除要说出三种方式，优雅停机要说出「四件事的先后」。',
-                points: [
-                  '**排除方式一**：`@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)`（类型安全，推荐）',
-                  '**排除方式二**：`spring.autoconfigure.exclude=com.xxx.XxxAutoConfiguration`（配置文件，适合按环境切换）',
-                  '**排除方式三**：通过条件让配置不生效（如不引依赖、或 `@ConditionalOnProperty` 关掉）——**这才是「设计层面」的排除**',
-                  '**优雅停机开关**：`server.shutdown=graceful`（Boot 2.3+），默认是 `immediate`',
-                  '**宽限期**：`spring.lifecycle.timeout-per-shutdown-phase=30s`，超时则强制关闭',
-                  '**优雅停机的四步**：① 停止接收新请求（容器停止 accept）② 等在途请求完成 ③ 关闭线程池 / 连接池 ④ 执行 `@PreDestroy` 与 `DisposableBean.destroy`',
-                  '**配合 K8s 的关键**：先 `readiness` 探针失败摘流量，**等一个 `preStop` sleep**，再让进程收到 SIGTERM——否则「摘流量」与「进程退出」同时发生，仍有请求被打断',
-                ],
-                depth:
-                  '「优雅停机为什么还需要 `preStop` sleep」——K8s 的「从 Endpoints 移除」和「向容器发 SIGTERM」是**并行**发生的，不是串行。移除 Endpoints 要经过 kube-proxy / Ingress 各层刷新，通常需要几百毫秒到几秒；而 SIGTERM 立刻到达，应用马上开始「停止接收新请求」。这中间的窗口期内，流量仍会按旧规则打进来，撞上正在关闭的实例 → 502。所以标准做法是 `preStop: exec: sleep 5`，先让流量摘干净，再触发关停。**这个细节是「背过优雅停机」和「真的配过」的分界线**。',
-                followup:
-                  '「异步任务和 MQ 消费者怎么优雅停机」——`server.shutdown=graceful` **只管 HTTP 请求**，不管线程池与 MQ 消费。要自己实现 `SmartLifecycle`（`stop()` 里先 `shutdown()` 线程池、`awaitTermination`，再 `stop()` 消费者），并保证 `getPhase()` 比 Web 容器小（后停先启）。Spring 的 `ThreadPoolTaskExecutor` 提供 `setWaitForTasksToCompleteOnShutdown(true)` + `setAwaitTerminationSeconds(n)`，是两个必须显式打开的开关。',
+                  '拉开分档:普通答法能说出四段和旧格式的缺点;好答法会主动说明「为什么不能扫包」(性能与可控性)并指出「条件注解在普通配置类里不可靠」;[[最好的答法会把四段串成一句因果]]——因为要判断「用户有没有自己配」,所以必须等用户配置解析完;因为要等,所以用延迟导入;因为顺序会影响判断,所以要排序。',
+                followup: '追问:你说延迟注册保证了用户优先,那如果两个自动配置类之间互相依赖对方的 Bean,顺序怎么保证不出错?',
               },
             ],
           },
@@ -3542,797 +2757,467 @@ export default {
           sources: [{ topic: 'java-05', chapters: ['九、MyBatis'] }],
           content: {
             intro:
-              'MyBatis 的 15 道题，几乎都能挂在「一条 SQL 从被调用到返回对象」这条时间轴上。轴上有五个关键站点：**Mapper 接口为什么不需要实现类**（动态代理）、**SQL 怎么从注解 / XML 变成字符串**（`SqlSource` 与动态 SQL）、**参数怎么安全地填进去**（`#{}` 与 `PreparedStatement`）、**谁来执行**（`Executor` → `StatementHandler` → JDBC）、**结果怎么变成对象**（`ResultSetHandler` 与反射）。把这条轴走通，缓存、延迟加载、插件、分页、批量、N+1 全都是「某个站点上的附加装置」，而不是零散的知识点。',
-            outline: [
-              'Mapper 接口没有实现类：启动时 `MapperProxyFactory` 用 JDK 动态代理造实现，方法调用的语义是「找到对应的 `MappedStatement` 并执行」',
-              '`#{}` 走 `PreparedStatement` 占位符（预编译、防注入）；`${}` 是**字符串拼接**，只该用于表名、列名这类无法参数化的位置',
-              '四大对象 `Executor` / `StatementHandler` / `ParameterHandler` / `ResultSetHandler` 是插件的**唯一四个拦截点**',
-              '一级缓存是 `SqlSession` 级的 `PerpetualCache`（一个 HashMap）；与 Spring 集成后「失效」是因为**每次调用都可能拿到新的 SqlSession**',
-              '`resultMap` 的嵌套查询 + `fetchType="lazy"` 才是延迟加载；它的实现是**动态代理 + 触发式加载**，不是「查询时少查几列」',
-            ],
-            pitfalls: [
-              '认为「`${}` 只要不来自用户输入就安全」：任何动态拼接都会让数据库无法复用执行计划，且埋下注入隐患',
-              '把一级缓存说成「默认关闭」：它是默认开启的，只是 Spring 环境下**同一事务内**才有效',
-              '以为「用了 `@Transactional` 二级缓存就一定一致」：二级缓存是 `namespace` 级、跨 `SqlSession`，事务提交前写入的脏数据仍可能被别的会话读到（取决于 `cache` 配置与 `flushCache`）',
-            ],
+              '先解决一个「第一眼就该困惑」的问题:Mapper 接口只有方法签名、没有实现类,为什么调用它能查出数据?答案是动态代理——但这只是入口,真正的链路有九步。这一课沿一条 SQL 走完全程:配置怎么被读成元数据、`#{}` 和 `${}` 在什么时刻分道扬镳、插件只能拦四个对象、两级缓存各自管到哪一层。走完之后,`Mapper 没有实现类`、`#{}` 防注入、`一级缓存为什么感觉失效`、`插件原理`这几个高频问题会共用同一条链路。',
             sections: [
+              {
+                kind: 'why',
+                title: 'Mapper 接口没有实现类，为什么能查出数据？',
+                body: [
+                  '写一个 `interface UserMapper { User findById(Long id); }`,不写任何实现,加上 `@Mapper` 就能用。`findById(1)` 真的发出了 SQL,还返回了对象。调用的是谁?',
+                  '一个常见的猜法是「启动时用字节码生成器给它生成了一个实现类」。方向对,但机制不是生成类文件——**是运行时用 JDK 动态代理造了一个代理对象**,你注入的其实是这个代理。',
+                  '代理拿到调用之后,用「接口全名 + 方法名」拼出一个字符串,去一张表里查。这张表里存着每个 `<select>` 对应的全部信息——SQL 怎么拼、参数怎么填、结果怎么映射。查到了就交给下层执行,查不到就报「找不到语句」。',
+                  '这条机制顺手解释了两个常见限制:**Mapper 接口的方法不能重载**(因为拼出来的 key 里只有方法名,没有参数类型,重载会撞车);**接口不能被代理**(所以它是接口而不是类,也不需要 `final` 的顾虑)。',
+                  '所以这一课的主线是一条链:配置 → 元数据 → 代理 → 拼 SQL → 填参 → 执行 → 映射 → 缓存。后面每一个"为什么"都能挂到这条链的某一环上。',
+                ],
+                without:
+                  '反过来说:如果 MyBatis 要求你手写实现类,那每个方法里都会是一段一样的样板——拿连接、设参数、执行、遍历结果集、塞进对象、关资源。**这些正是框架替你做的事**,也是「半自动」里那个「自动」的全部含义:SQL 你写,机械活它干。',
+              },
               {
                 kind: 'concept',
                 title: '「半自动」到底半在哪',
                 body: [
-                  'ORM 框架按「SQL 由谁写」分成两派。**全自动**（Hibernate / JPA）由框架根据实体映射生成 SQL，开发者只操作对象，代价是「复杂查询写不出来」或「写出来性能很差」。**半自动**（MyBatis）把 SQL 交还给开发者，框架只负责「参数映射」与「结果映射」这两件机械活。',
-                  '所以「半自动」准确的含义是：**SQL 手工编写（half），映射自动完成（auto）**。这让它同时具备两个优势：复杂查询可以精调到每一条索引；而样板代码（`setXxx` / `rs.getXxx`）全部消失。代价是 SQL 与 Java 代码分离（XML 或注解），重构时 IDE 帮不上忙，字段改名要手工同步——这也是 MyBatis-Plus 想解决的问题（用代码生成与 Wrapper 减少手写 SQL）。',
-                  '对比 Hibernate：全自动的优势在「领域模型复杂、CRUD 为主」的场景，一级/二级缓存与脏检查很省心；半自动的优势在「查询复杂、性能敏感、DBA 要 review SQL」的场景。国内互联网公司多选 MyBatis，不是因为 Hibernate 不好，而是因为**慢查询治理需要看到真实 SQL**——这条工程理由比技术优劣更有说服力。',
-                ],
-                points: [
-                  '**半自动 = 手工 SQL + 自动映射**：`#{}` 填参、`resultMap` 转对象，中间不生成 SQL',
-                  '**全自动（JPA）**：由映射元数据生成 SQL，对象即查询；代价是复杂查询要靠 JPQL / 原生 SQL 兜底',
-                  '**MyBatis 的优势**：SQL 可控可优化、复杂查询自然、DBA 可 review、与遗留库表结构兼容好',
-                  '**MyBatis 的劣势**：SQL 与代码分离（重构不友好）、无脏检查（要显式 update）、跨数据库方言需手写',
-                  '**选型口径**：CRUD 密集、模型稳定 → JPA；查询复杂、性能敏感、SQL 需审计 → MyBatis',
+                  'ORM 框架按「SQL 由谁写」分两派。**全自动**(Hibernate / JPA)由框架根据实体映射生成 SQL,你只操作对象;代价是复杂查询要么写不出来,要么写出来性能很差。**半自动**(MyBatis)把 SQL 交还给你,框架只负责两件机械活:**参数怎么填进 SQL**、**结果集怎么变成对象**。',
+                  '所以「半自动」的准确含义是:[[SQL 手工写,映射自动做]]。这带来两个直接好处:复杂查询能精调到每一条索引;而 `setXxx`、`rs.getXxx` 这类样板代码全部消失。',
+                  '代价也要说清:SQL 和 Java 代码分离(XML 或注解),字段改名时 IDE 帮不上忙、得手工同步;没有脏检查,改了对象必须显式 `update`;跨数据库方言要自己写。这也是 MyBatis-Plus 想解决的问题——用代码生成和条件构造器减少手写。',
+                  '国内互联网公司多选 MyBatis,理由往往不是「技术上更优」,而是**慢查询治理需要看到真实 SQL**。这条工程理由比任何架构对比都有说服力:出事时能直接拿到那条 SQL 去 explain,DBA 能 review,这比"优雅"重要。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: '一条 SQL 的完整执行链',
-                body: [
-                  '这是本课的主轴图。九个环节，每一环都对应一个可考的点：第 ②③ 环是「Mapper 为什么不需要实现类」，第 ④⑤ 环是 `#{}` 与 `${}` 的分界，第 ⑥ 环是插件的拦截点，第 ⑧ 环是「结果映射」。',
-                ],
+                title: '一条 SQL 的九步执行链',
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '① `SqlSessionFactoryBuilder` 解析配置', note: '读 `mybatis-config.xml` + 所有 Mapper XML → 生成 `Configuration`（一个巨大的「元数据中心」）' },
-                    { label: '② `Configuration` 中的 `MappedStatement`', note: '**每个 `<select>`/`<insert>` 对应一个 `MappedStatement`**，存 id（`namespace.method`）、`SqlSource`、`resultMap`、超时、`flushCache` 等' },
-                    { label: '③ 调用 Mapper 方法 → 动态代理', note: '`MapperProxy.invoke()` 用「接口全名 + 方法名」拼出 statement id，找到 `MappedStatement`，交给 `SqlSession` 执行' },
-                    { label: '④ `SqlSource.getBoundSql(param)`', note: '动态 SQL（`<if>` / `<foreach>`）在此求值 → 得到最终 SQL 字符串 + `ParameterMapping` 列表；**可能有多个候选 SQL（`<choose>`）**' },
-                    { label: '⑤ `ParameterHandler.setParameters`', note: '`#{}` → `PreparedStatement.setXxx(index, value)`；`${}` 已在第 ④ 步直接拼进 SQL 字符串' },
-                    { label: '⑥ `Executor` → `StatementHandler`', note: '`Executor` 管缓存与事务（`BaseExecutor` 有一级缓存、`CachingExecutor` 管二级缓存）；`StatementHandler` 管 JDBC 细节' },
-                    { label: '⑦ 执行 JDBC 并拿 `ResultSet`', note: '`PreparedStatement.execute()`；`StatementHandler` 分 `Simple` / `Reuse`（复用 PS）/ `Callable`（存储过程）三种' },
-                    { label: '⑧ `ResultSetHandler` 映射结果', note: '按 `ResultMap` 逐行解析 → 反射 `newInstance` + `setField`；嵌套映射在此递归或触发子查询' },
-                    { label: '⑨ 返回并写入缓存', note: '一级缓存（`SqlSession` 级）必写；二级缓存（`namespace` 级）在**事务提交后**才写入' },
+                    { label: '① 启动：解析配置', note: '读 `mybatis-config.xml` 和所有 Mapper XML，生成一个巨大的元数据中心 `Configuration`' },
+                    { label: '② 每个 `<select>` 变成一条 `MappedStatement`', note: '存下 id（`namespace.方法名`）、SQL 来源、结果映射、超时、是否清缓存' },
+                    { label: '③ 调 Mapper 方法 → 动态代理', note: '[[用「接口全名 + 方法名」拼出 id，去 ② 的表里查]]' },
+                    { label: '④ 动态 SQL 求值 → 得到最终 SQL', note: '`<if>` / `<foreach>` 在这一步判完，产出 SQL 字符串 + 参数清单' },
+                    { label: '⑤ 填参数', note: '`#{}` → 交给 PreparedStatement 占位符；`${}` 早在第 ④ 步就被拼进字符串了' },
+                    { label: '⑥ 交给 `Executor`（管缓存与事务）', note: '再往下是 `StatementHandler`（管 JDBC 细节）' },
+                    { label: '⑦ 执行 JDBC，拿到 `ResultSet`', note: '`PreparedStatement.execute()`' },
+                    { label: '⑧ 映射结果', note: '按 `resultMap` 逐行反射造对象；嵌套映射在这里递归或触发子查询' },
+                    { label: '⑨ 写缓存并返回', note: '一级缓存必写；二级缓存在**事务提交后**才写' },
                   ],
                   caption:
-                    '记住两个「反直觉」：**第一，`${}` 不是「另一种传参方式」**——它在第 ④ 步就已经被拼成字符串了，所以到第 ⑤ 步根本没有它的影子。这也解释了「为什么 `${}` 无法防止注入」：注入发生时，SQL 结构已经定死了。**第二，一级缓存写在 `Executor` 而不是 `SqlSession`**——`SqlSession` 只是门面，真正的持有者是 `BaseExecutor` 里的 `localCache`，所以「关闭一级缓存」要改 `Executor` 的 `localCacheScope`，不是关 `SqlSession`。',
+                    '这张图值得记住两个反直觉点。**第一,`${}` 不是「另一种传参方式」**:它在第 ④ 步就被拼成了字符串,到第 ⑤ 步根本没有它的影子——所以它防不住注入,因为注入发生时 SQL 的结构已经定死了。**第二,一级缓存在 `Executor` 里,不在 `SqlSession` 对象上**,这就是为什么「同一个 session 才共享缓存」,也是 Spring 环境下它经常看起来失效的根源(下一块细说)。',
                 },
               },
               {
-                kind: 'diagram',
-                title: '四大对象与插件拦截点',
+                kind: 'concept',
+                title: '③ 那一环：动态代理是怎么找到 SQL 的',
                 body: [
-                  '「MyBatis 插件原理」这题的答案就是这张图：只能拦四个对象，每个对象只能拦指定的方法。',
+                  '把第 ③ 步放大看,因为它一次解释了三个高频问题。',
+                  '容器启动时,为每个 Mapper 接口创建一个代理对象(`MapperProxy`)。你注入的、`@Autowired` 拿到的,都是它——不是你的接口,也不是任何实现类。调用 `findById(1)` 时,控制权先落到代理的 `invoke` 方法里。',
+                  '代理做的事很朴素:把「接口全名」和「方法名」用点连起来,拼成 `com.example.UserMapper.findById`,然后去 `Configuration` 里那张映射表查。表里有,就取出对应的 `MappedStatement`(就是第 ② 步那个),交给 `SqlSession` 往下执行;表里没有,立刻抛「Invalid bound statement (not found)」——**这个报错几乎都是 XML 里的 namespace 或 id 写错了**,而不是代码逻辑问题。',
+                  '**为什么方法不能重载?**因为拼出来的 key 只含方法名,不含参数类型。两个同名不同参的方法会拼出同一个 key,后者覆盖前者,另一个永远查不到。',
+                  '**为什么必须是接口?**因为 JDK 动态代理只能代理接口。想要代理类就得用 CGLIB,MyBatis 没走那条路。所以 Mapper 写成抽象类是不行的。',
                 ],
+              },
+              {
+                kind: 'compare',
+                title: '`#{}` 与 `${}`：分界在「什么时候拼进 SQL」',
+                head: ['维度', '`#{}`', '`${}`'],
+                rows: [
+                  ['拼进 SQL 的时机', '执行时作为**占位符**传入，SQL 结构不变', '**拼 SQL 阶段**就直接拼成字符串'],
+                  ['底层实现', '`PreparedStatement` 的 `?` 占位符', '字符串拼接'],
+                  ['能否防注入', '**能**，值始终是「数据」不是「SQL」', '**不能**，值会变成 SQL 的一部分'],
+                  ['能否用于表名 / 列名', '不能（占位符只能是值）', '**能**，正因如此才必须用它'],
+                  ['典型场景', '几乎所有条件值', '动态表名、动态排序字段（必须白名单校验）'],
+                ],
+                note:
+                  '[[这一对不是「两种写法」，是「两个完全不同阶段的东西」]]:`#{}` 是给 JDBC 的,`${}` 是给自己的模板引擎的。所以「`${}` 能不能防注入」这个问题问错了——它压根不经过参数绑定这条路。',
+                caption:
+                  '实践口径很干脆:**能用 `#{}` 就用 `#{}`**。非用 `${}` 的只有两类场景——表名/列名这类 SQL 结构本身,以及 `order by` 后面的排序字段。而这两类都必须**先做白名单校验**再拼,否则就是标准注入点。记住一句话:[[`${}` 拼的是 SQL 的结构,`#{}` 传的是 SQL 的数据]]。',
+              },
+              {
+                kind: 'diagram',
+                title: '四大对象与插件的拦截点',
                 diagram: {
                   type: 'layers',
                   items: [
-                    { label: '`Executor`', note: '可拦 `update` / `query` / `flushStatements` / `commit` / `rollback`。**分页、读写分离、SQL 审计最常拦这里**', tone: 'primary' },
-                    { label: '`StatementHandler`', note: '可拦 `prepare` / `parameterize` / `batch` / `update` / `query`。**改 SQL（如分页拼 `limit`）最常拦这里**', tone: 'primary' },
-                    { label: '`ParameterHandler`', note: '可拦 `getParameterObject` / `setParameters`。用于**特殊类型转换**（如加密字段）', tone: 'warn' },
-                    { label: '`ResultSetHandler`', note: '可拦 `handleResultSets` / `handleOutputParameters`。用于**结果集脱敏、驼峰转换增强**', tone: 'warn' },
+                    { label: '`Executor`：管缓存与事务', note: '可拦 `update` / `query` / `commit` / `rollback`。**分页、读写分离、SQL 审计最常拦这里**', tone: 'primary' },
+                    { label: '`StatementHandler`：管 JDBC 细节', note: '可拦 `prepare` / `parameterize` / `batch`。**想改最终 SQL（比如拼 `limit`）就拦这里**', tone: 'primary' },
+                    { label: '`ParameterHandler`：管参数', note: '可拦 `setParameters`。用于特殊类型转换（如字段加密）', tone: 'warn' },
+                    { label: '`ResultSetHandler`：管结果', note: '可拦 `handleResultSets`。用于结果集脱敏、驼峰映射增强', tone: 'warn' },
                   ],
                   caption:
-                    '关键机制：**插件通过「层层包装」实现**——`InterceptorChain.pluginAll()` 对每个对象依次调用 `Plugin.wrap()`，生成 JDK 动态代理，所以「多个插件」会形成一条链，执行顺序由 `@Intercepts` 的注册顺序决定（`configuration.addInterceptor` 的顺序）。**这就是「分页插件和另一个改 SQL 的插件为什么可能冲突」的原因**：两者都在 `StatementHandler.prepare` 上包裹，谁在外层谁先看到原始 SQL。另一个易错点：**拦截 `Executor.query` 时拿到的参数是 `MappedStatement` + 参数对象 + `RowBounds`**，不是最终 SQL——想在插件里改 SQL，得拦 `StatementHandler.prepare` 并操作 `BoundSql`。',
+                    '插件原理一句话:**MyBatis 只允许你在四个对象上插一刀,每个对象还只能拦指定的方法**。实现方式是「层层包装」——每个拦截器生成一个动态代理套在对象外面,所以多个插件会形成一条链,顺序由注册顺序决定。[[这也是「分页插件和另一个改 SQL 的插件为什么可能打架」的原因]]:两者都包在 `StatementHandler.prepare` 上,谁在外层谁先看到原始 SQL。另一个易错点:拦 `Executor.query` 拿不到最终 SQL(那时还没拼),想改 SQL 必须拦 `StatementHandler.prepare` 并操作它的 `BoundSql`。',
                 },
               },
               {
-                kind: 'diagram',
-                title: '两级缓存：命中顺序与失效时机',
+                kind: 'concept',
+                title: '两级缓存：各自管到哪一层',
                 body: [
-                  '缓存题的混乱源于「谁的生命周期」没说清。一张时序图看清：查询先问二级、再问一级、最后才走库。',
+                  '缓存题的混乱基本都源于一件事:**没说清「谁的生命周期」**。',
+                  '**一级缓存**的作用域是「一次会话」(`SqlSession`)。同一个会话里查两次相同条件,第二次直接返回内存里的对象,不会发 SQL;而这个会话里只要发生任何写操作,整个一级缓存就被清空。',
+                  '**二级缓存**的作用域是「一个 namespace」(可以理解为一个 Mapper),跨会话共享,默认关闭,要显式开。它写入的时机在**事务提交之后**——这是为了防止「事务回滚了但缓存已经写进去」的脏数据。',
+                  '现在可以回答那个最高频的困惑了:**「一级缓存为什么和 Spring 集成后感觉失效?」**因为 Spring 每次 Mapper 调用都会申请一个 `SqlSession`、用完就关(没事务时尤其如此),而一级缓存是会话级的——换会话就是新缓存。所以它只在**同一个事务内**才可能命中。Spring 集成里真正被注入进 Mapper 代理的是 `SqlSessionTemplate`——它是线程安全的,内部为每次调用取一个 `SqlSession`、用完归还,并靠 `TransactionSynchronizationManager` 把同一事务里的多次调用绑到同一个会话上。[[「一级缓存失效」不是因为它坏了,而是因为它只在「同一个 SqlSession」里生效,而 Spring 默认一次调用一个]]。[[不是缓存坏了,是它管的范围比你想象的窄得多]]。',
+                  '二级缓存则相反:它跨会话,所以真能命中;但正因为跨会话,它有两条必须知道的坑——跨 namespace 的写不会互相清缓存(可能读到脏数据),以及它返回的是反序列化出来的新对象(要求实体可序列化)。**生产上关掉它、改用 Redis 做应用级缓存,是更常见的选择。**',
                 ],
+              },
+              {
+                kind: 'diagram',
+                title: '一次查询的缓存命中顺序',
                 diagram: {
                   type: 'sequence',
                   actors: ['Mapper 代理', '二级缓存', '一级缓存', '数据库'],
                   messages: [
-                    { from: 'Mapper 代理', to: '二级缓存', text: '`query`：查 `namespace` 级 `Cache`' },
-                    { from: '二级缓存', to: 'Mapper 代理', text: '命中 → 直接返回（**不到一级缓存**）', reply: true },
-                    { from: 'Mapper 代理', to: '一级缓存', text: '未命中 → 查 `SqlSession` 级 `localCache`' },
+                    { from: 'Mapper 代理', to: '二级缓存', text: '先查 namespace 级缓存' },
+                    { from: '二级缓存', to: 'Mapper 代理', text: '命中 → 直接返回，一级缓存都不会被碰', reply: true },
+                    { from: 'Mapper 代理', to: '一级缓存', text: '未命中 → 再查会话级缓存' },
                     { from: '一级缓存', to: 'Mapper 代理', text: '命中 → 返回', reply: true },
-                    { from: 'Mapper 代理', to: '数据库', text: '都未命中 → `PreparedStatement` 执行' },
-                    { from: '数据库', to: 'Mapper 代理', text: '返回 `ResultSet`，映射成对象', reply: true },
-                    { from: 'Mapper 代理', to: '一级缓存', text: '写入 `localCache`（**一定写**）' },
-                    { from: 'Mapper 代理', to: '二级缓存', text: '**事务提交后**才写入 `TransactionalCache` → 真正进 `Cache`' },
-                    { from: 'Mapper 代理', to: '一级缓存', text: '同会话内任何 `update`/`insert`/`delete` → **清空整个一级缓存**' },
+                    { from: 'Mapper 代理', to: '数据库', text: '都没命中 → 执行 SQL' },
+                    { from: '数据库', to: 'Mapper 代理', text: '返回结果集，映射成对象', reply: true },
+                    { from: 'Mapper 代理', to: '一级缓存', text: '写入会话缓存（一定写）' },
+                    { from: 'Mapper 代理', to: '二级缓存', text: '**事务提交后**才真正写入' },
+                    { from: 'Mapper 代理', to: '一级缓存', text: '同一会话内任何写操作 → 整个一级缓存清空' },
                   ],
                   caption:
-                    '三个必记结论：**第一，顺序是「二级 → 一级 → 库」**（`CachingExecutor` 在外层），所以命中二级缓存时一级缓存不会被动过。**第二，一级缓存是「会话级」**——它清空的条件是「同一个 `SqlSession` 内执行了写操作」或「手动 `clearCache()`」或「会话关闭」，所以 Spring 环境下**只有同一事务内**才有效（无事务时每次 Mapper 调用后 `SqlSession` 就关了）。**第三，二级缓存写入时机在「事务提交后」**，用 `TransactionalCacheManager` 暂存——这是为了防止「事务回滚了但缓存已写」的脏数据。但**读**仍可能在提交前读到别的会话写入的旧值，所以跨会话一致性依然不保证。',
+                    '三个必记结论:**顺序是「二级 → 一级 → 库」**;一级缓存只在**同一事务内**有效;二级缓存**提交后才写**,所以提交前别的会话仍可能读到旧值。最后一条容易被忽略:[[写操作清空的是「整个一级缓存」,不是只清相关的那条]]——这也是它简单、但也容易让人意外的原因。',
                 },
               },
               {
                 kind: 'principle',
-                title: '动态 SQL 的底层：组合模式 + OGNL',
+                title: '动态 SQL 的底层：一棵会求值的树',
                 body: [
-                  '「动态 SQL 的底层原理」是区分「会用」和「懂」的一题。答案两个关键词：**`SqlNode` 组合模式**与 **OGNL 表达式**。',
+                  '「动态 SQL 的底层原理」是区分「会用」和「懂」的一题。答案两个词:一棵由标签拼成的树,加一个表达式引擎。',
                 ],
                 steps: [
                   {
-                    title: '① 解析期：每个标签变成一棵 `SqlNode` 树',
+                    title: '① 启动时：每个标签变成一个节点',
                     detail:
-                      '`XMLScriptBuilder.parseDynamicTags()` 遍历 XML 节点，按标签名造出对应的 `SqlNode`：`<if>` → `IfSqlNode`、`<where>` → `WhereSqlNode`（`TrimSqlNode` 子类）、`<foreach>` → `ForEachSqlNode`、`<choose>` → `ChooseSqlNode`（内含 `IfSqlNode` 列表 + `OtherwiseSqlNode`）、纯文本 → `StaticTextSqlNode`。嵌套结构自然形成**组合模式**的树，根节点是 `MixedSqlNode`。',
+                      '解析 XML 时,`<if>`、`<where>`、`<foreach>`、`<choose>`、纯文本,各自被造成一个节点对象,嵌套关系自然长成一棵树。这套结构叫**组合模式**——树和叶子用同一套调用方式,所以拼接时递归一次就够。',
                   },
                   {
-                    title: '② 求值期：`apply(DynamicContext)` 递归拼接',
+                    title: '② 执行时：从根节点递归拼接',
                     detail:
-                      '执行时调用根节点的 `apply(context)`，每个节点把「要不要拼、拼什么」的决策做完，把结果追加到 `DynamicContext` 的 `StringBuilder` 里。**注意这是「一次性求值」**：一次调用生成一条 SQL 字符串，不会被复用（除非命中 `SqlSource` 的缓存）。',
+                      '调用根节点的 `apply`,每个节点自己判断「这段要不要拼」,把结果追加进一个缓冲。**注意这是一次性求值**:一次调用生成一条 SQL 字符串。所以「动态 SQL 会不会每次执行都重新拼」的答案是会,除非命中更上层的缓存。',
                   },
                   {
-                    title: '③ 条件判断：OGNL 直接读参数对象',
+                    title: '③ 条件判断用 OGNL 读参数',
                     detail:
-                      '`<if test="status != null and status != \'\'">` 里的表达式由 `ExpressionEvaluator` 用 **OGNL** 求值，根对象就是参数 Map / 参数对象。所以 `test` 里可以直接写 `user.age > 18`、`list.size() > 0`、`@java.lang.Math@max(1,2)`（静态方法调用）。**这就是「`test` 里能用什么」的完整答案：OGNL 支持的一切**。',
+                      '`<if test="status != null">` 里的表达式由一个表达式引擎(OGNL)求值,根对象就是你的参数对象。所以 `test` 里能写 `user.age > 18`、`list.size() > 0`。[[「test 里能用什么」的完整答案就是「OGNL 支持的一切」]]。',
                   },
                   {
-                    title: '④ `<where>` 与 `<set>` 的真实身份',
+                    title: '④ `<where>` 和 `<set>` 并不特殊',
                     detail:
-                      '它们不是「特殊处理」，而是 `TrimSqlNode` 的预设实例：`<where>` 等价于「前缀加 `WHERE`，且**自动去掉开头多余的 `AND` / `OR`**」；`<set>` 等价于「前缀加 `SET`，且去掉结尾多余的逗号」。理解这一点，就能解释「为什么 `<where>` 里第一个条件不用写 `AND`」以及「为什么 `<set>` 里最后一个字段后面可以留逗号」。',
+                      '它们是同一类「修剪节点」的预设实例:`<where>` = 加前缀 `WHERE` 并**去掉开头多余的 AND/OR**;`<set>` = 加前缀 `SET` 并去掉结尾多余的逗号。想通这一点,「为什么第一个条件不用写 AND」「为什么最后一个字段后面可以留逗号」都不用背了。',
                   },
-                  {
-                    title: '⑤ `<foreach>` 的三个必填属性',
-                    detail:
-                      '`collection`（要遍历的集合）、`item`（元素变量名）、`separator`（分隔符），可选 `open` / `close` / `index`。**`collection` 的取值是最大的坑**：参数只有一个 `List` 时写 `list`，只有一个数组时写 `array`，多个参数时必须写 `@Param` 指定的名字或 `param1`。写错会报 `Parameter \'xxx\' not found`——这是 MyBatis 最高频的报错之一。',
-                  },
+                ],
+                takeaway:
+                  '还有一个高频报错值得单独记:`<foreach>` 的 `collection` 写错。参数只有一个集合时写 `list`(List)或 `array`(数组);多个参数时必须写 `@Param` 指定的名字。报错长这样:[[`Parameter \'xxx\' not found. Available parameters are [...]`]]——看到它就先去数参数名,不用怀疑 SQL。',
+              },
+              {
+                kind: 'concept',
+                title: '三个实践坑：N+1、批量、分页',
+                body: [
+                  '**N+1 查询**是最常见的性能事故形态:先查出一批列表,再为每一条去查它的关联数据——100 条数据就发出 101 条 SQL。它通常不是手写出来的,而是**嵌套映射**自动触发的。对策:把关联改成一次 `join` 查回来,或者用 `<foreach>` 批量查一次再在内存里归组。判断信号很直接:日志里同一模板的 SQL 在短时间内重复出现上百次。',
+                  '**批量插入**有三种做法,代价依次降低:`<foreach>` 拼成 `insert ... values(...),(...)`(一次网络往返,但 SQL 会很长)、`ExecutorType.BATCH` 复用同一个 `PreparedStatement` 只换参数、以及 JDBC 层面开 `rewriteBatchedStatements=true` 让驱动真的合并。**注意前两种是不同层次的东西**:一个改 SQL,一个改执行方式;混用时容易被对方抵消。',
+                  '**分页**要分清两件事。逻辑分页是把结果全查回来再在内存里截取(`RowBounds` 就是这种),数据量大时会拖垮应用;物理分页是改写 SQL 加 `limit`。PageHelper 走的是物理分页——它正是上一块说的「拦 `StatementHandler.prepare` 改 SQL」的典型实现,所以它和别的改 SQL 的插件会互相影响。',
                 ],
               },
               {
                 kind: 'question',
-                title: 'MyBatis 是什么？为什么说它是「半自动」ORM？和 Hibernate/JPA 怎么选？',
-                questionId: 'java-05-Q74',
-                intent:
-                  '「半自动」要给出准确定义（手工 SQL + 自动映射），选型要给工程理由而非技术口号。',
-                points: [
-                  '**半自动的定义**：SQL **手写**（half），参数与结果**映射自动**（auto）；框架不生成 SQL',
-                  '**对比 JPA**：JPA 由映射元数据生成 SQL，对象即查询；MyBatis 则「你先写 SQL，我负责填参和转对象」',
-                  '**MyBatis 优势**：SQL 完全可控（能加 hint、能调索引）、复杂查询自然、DBA 可 review、兼容遗留库表',
-                  '**MyBatis 劣势**：SQL 与代码分离（重构不友好）、无脏检查（要显式 update）、方言差异要手写',
-                  '**JPA 优势**：领域模型驱动、自动脏检查、一级/二级缓存省心、跨库方言自动处理',
-                  '**JPA 劣势**：复杂查询易生成低效 SQL（N+1、笛卡尔积）、性能调优要懂它的 SQL 生成规则',
-                  '**选型口径**：CRUD 密集 + 模型稳定 → JPA；查询复杂 + 性能敏感 + SQL 需审计 → MyBatis',
-                ],
-                depth:
-                  '一个能显示经验的补充：**「国内选 MyBatis 的主要理由不是技术优劣，而是慢查询治理」**。线上出慢查询时，MyBatis 的 SQL 就在 XML 里，`EXPLAIN` 一下就能定位；JPA 生成的 SQL 要开 `show-sql` 才能看到，且改起来受框架约束（要么写原生 SQL 破功，要么调优框架参数）。**当团队有专职 DBA、要求「所有上线 SQL 必须 review」时，MyBatis 几乎是唯一选择**——这是流程约束倒逼的技术选型，比「哪个性能好」更真实。',
-                followup:
-                  '「MyBatis 能自动生成 SQL 吗」——能，但方式不同：`MyBatis-Plus` 的 `BaseMapper` 提供单表 CRUD、`QueryWrapper` 提供条件构造，本质是「用代码拼 SQL」，而不是 JPA 那种「按实体元数据推导」。区别在于 **JPQL 是查询语言（可跨库）**，MP 的 Wrapper 最终仍是拼原生 SQL（依赖方言）。所以 MP 的「自动」是便利性的自动，不是语义抽象层的自动。',
-              },
-              {
-                kind: 'question',
-                title: 'MyBatis 执行一条 SQL 的完整流程？',
+                title: 'Q75 · MyBatis 执行一条 SQL 的完整流程？',
                 questionId: 'java-05-Q75',
                 intent:
-                  '按主轴九环回答。必须能说出 `MappedStatement` 与 `BoundSql` 这两个中间产物分别在哪一步产生。',
+                  '这题是整课的主轴。能不能按「配置 → 代理 → 拼 SQL → 填参 → 执行 → 映射 → 缓存」讲成一条链，而不是背七个类名，是分水岭。',
                 points: [
-                  '**初始化**：`SqlSessionFactoryBuilder` 解析配置与 Mapper XML → 生成 `Configuration`（含所有 `MappedStatement`）',
-                  '**`MappedStatement`**：每个 SQL 语句一个，含 id、`SqlSource`、`ResultMap`、超时、`flushCache`、`statementType`',
-                  '**代理入口**：`MapperProxy.invoke()` 拼出 `namespace.method` 找到 `MappedStatement`，调 `SqlSession` 对应方法',
-                  '**`SqlSource.getBoundSql()`**：求值动态 SQL → 得到 **`BoundSql`**（最终 SQL 字符串 + `ParameterMapping` + 参数对象）',
-                  '**`Executor.query`**：先查二级缓存（`CachingExecutor`）→ 一级缓存（`BaseExecutor.localCache`）→ 未命中才 `doQuery`',
-                  '**`StatementHandler`**：`prepare` 创建 `PreparedStatement`、`parameterize` 调 `ParameterHandler` 填参',
-                  '**执行**：`PreparedStatement.execute()` 拿 `ResultSet`',
-                  '**`ResultSetHandler`**：按 `ResultMap` 逐行 `newInstance` + 反射设值（含嵌套映射与延迟加载钩子）',
-                  '**收尾**：写入一级缓存；若在事务内且开了二级缓存，提交时写入二级缓存',
+                  '启动期：解析配置与所有 Mapper XML，生成元数据中心 `Configuration`；**每个 `<select>` 变成一条 `MappedStatement`**（id = `namespace.方法名`）',
+                  '调用期：Mapper 是**动态代理**，用「接口全名 + 方法名」查出对应的 `MappedStatement`',
+                  '拼 SQL：动态 SQL 求值，产出最终 SQL 字符串 + 参数清单',
+                  '填参与执行：`#{}` 走 `PreparedStatement` 占位符；`${}` 早在拼 SQL 阶段就成了字符串的一部分',
+                  '映射：按 `resultMap` 逐行反射造对象，嵌套映射在这里递归',
+                  '缓存：一级缓存在会话内、必写；二级缓存跨会话、**事务提交后才写**',
                 ],
                 depth:
-                  '最容易答漏的是 **`BoundSql` 这个中间产物**——它才是「真正要执行的 SQL」。`MappedStatement` 是**静态**的（启动时确定，全局共享），`BoundSql` 是**动态**的（每次调用重新生成，含具体参数值）。二者关系可以类比为「类与实例」。**面试里提到 `BoundSql` 这个词，立刻就与「只背过流程」的候选人区分开了**——因为你想在插件里改 SQL，就必须知道去改 `BoundSql.sql`，而不是改 `MappedStatement` 里的 `SqlSource`。',
+                  '拉开分档的一句:把「`${}` 为什么不能防注入」接到链路上——它不是在填参那一步漏了校验,而是它压根不走填参这条路,SQL 结构在拼的时候就定死了。能这样串起来的,说明理解的是流程而不是类名。',
                 followup:
-                  '「为什么 `MappedStatement` 要缓存」——它包含解析后的 XML 结构（`SqlNode` 树）与 `ResultMap`，解析成本高（XML 解析 + 反射元数据构建）。所以它启动时一次性构建，之后只读共享。**这也解释了「为什么改了 XML 必须重启」**：`MappedStatement` 已固化在 `Configuration` 里，运行时不会重读文件（虽然 `Configuration` 有 `addMappedStatement` 可用于热加载，但没有内置实现）。',
+                  '「插件为什么只能拦四个对象?」——因为 MyBatis 只在 `Executor`、`StatementHandler`、`ParameterHandler`、`ResultSetHandler` 四处用动态代理包了一层,没被包的地方插不进去。',
               },
               {
-                kind: 'question',
-                title: '#{} 和 ${} 的区别？怎么防 SQL 注入？',
-                questionId: 'java-05-Q76',
-                intent:
-                  '核心是「预编译占位符 vs 字符串拼接」，防注入的机制必须从「占位符不可被解析为语法」讲起。',
-                points: [
-                  '**`#{}`**：编译成 `?` 占位符，走 `PreparedStatement.setXxx()`，参数值不参与 SQL 解析',
-                  '**`${}`**：**直接字符串替换**进 SQL，在 `SqlSource.getBoundSql()` 阶段就完成，等价于文本拼接',
-                  '**防注入的原理**：`?` 处的值在数据库解析 SQL 时**已是数据不是语法**，所以 `\' OR 1=1 --` 只会被当作一个字符串值',
-                  '**`${}` 的合法用途**：表名、列名、`ORDER BY` 字段、`LIMIT` 关键字位置——这些**无法参数化**（数据库不接受把标识符当参数）',
-                  '**`${}` 的正确用法**：必须以**白名单**校验（如 `switch` 判断允许的排序字段），不能直接接收前端值',
-                  '**`#{}` 的附加能力**：`javaType` / `jdbcType` / `typeHandler`，可控制 null 处理与类型转换（`jdbcType=VARCHAR` 解决 Oracle `null` 类型推断问题）',
-                  '**性能提示**：`#{}` 能复用执行计划（SQL 文本固定），`${}` 每次都是新 SQL，无法复用',
+                kind: 'concept',
+                title: '收口：四句话，一道自测',
+                body: [
+                  '不看上面,试着把四句讲出来。讲得出,这一课就通了。',
+                  '**第一句**:MyBatis 的「半自动」= SQL 你写、映射它做;它的价值不是优雅,而是**慢查询能看到真实 SQL**。**第二句**:一条 SQL 走九步,入口是**动态代理**——用「接口全名 + 方法名」查 `MappedStatement`,所以方法不能重载。**第三句**:`#{}` 在填参阶段作为占位符传入,`${}` 在拼 SQL 阶段就成了字符串;[[前者传数据,后者改结构]]。**第四句**:一级缓存是会话级(Spring 下只在同一事务内有效),二级缓存是 namespace 级、提交后才写——所以缓存"失效"多半是作用域没算对。',
+                  '自测一道:`@Autowired UserMapper` 注入的到底是什么?答出「一个运行时生成的动态代理对象,不是你写的接口也不是任何实现类」,说明第 ③ 步通了;再追问「那方法重载为什么不行」,就是本课的白送分。',
+                  '这一课还有几道关联真题可以自评:`#{} 和 ${} 的区别`(java-05-Q76)、`Mapper 接口没有实现类为什么能执行`(java-05-Q77)、`一级缓存为什么和 Spring 集成后感觉失效`(java-05-Q79)。它们的答案都能从上面四句话推出来。',
                 ],
-                depth:
-                  '「`ORDER BY #{col}` 会怎样」——不会报错，但会变成 `ORDER BY \'name\'`（一个字符串常量），排序**完全不生效**，且这个错误极其隐蔽（不报错、结果也「看着正常」）。这是「为什么排序必须用 `${}`」的直接原因，也是「为什么必须白名单」的原因。**正确写法**是用 `${}` 但前置白名单：`<if test="@com.x.Valid@isSortField(sortBy)">ORDER BY ${sortBy}</if>`，或在 Service 层就把非法值替换成默认字段。',
-                followup:
-                  '「`LIKE` 怎么传参」——不能用 `\'%${keyword}%\'`，正确写法是 `CONCAT(\'%\', #{keyword}, \'%\')` 或 `#{%\'%\'}` 这种写法（取决于数据库）。**注意 `LIKE \'%xxx%\'` 前导通配符会让索引失效**，这是性能问题不是安全问题，但两者常在同一道题里被追问。若必须模糊查询，考虑全文索引、`LIKE \'xxx%\'`（可用索引）或搜索引擎。',
               },
-              {
-                kind: 'question',
-                title: 'Mapper 接口没有实现类，为什么能执行 SQL？（动态代理原理）',
-                questionId: 'java-05-Q77',
-                intent:
-                  '要说出「启动期注册代理工厂 + 运行期 `MapperProxy` 拼 statement id」这两段，而不能只说「用了动态代理」。',
-                points: [
-                  '**启动期一**：`@MapperScan` 或 `MapperScannerConfigurer` 扫描接口，用 `ClassPathMapperScanner` 把每个接口注册成 `MapperFactoryBean` 的 BeanDefinition',
-                  '**启动期二**：`MapperFactoryBean.getObject()` → `sqlSession.getMapper(iface)` → `MapperRegistry.getMapper()` → `MapperProxyFactory.newInstance()`',
-                  '**代理的生成**：`Proxy.newProxyInstance(iface.getClassLoader(), new Class[]{iface}, mapperProxy)`，`MapperProxy` 实现 `InvocationHandler`',
-                  '**运行期一**：`MapperProxy.invoke()` 判断是否 `Object` 的方法（`toString` 等直接放行）或 `default` 方法（走 `invokeDefaultMethod`）',
-                  '**运行期二**：普通方法 → 从 `methodCache` 取 `MapperMethod`（首次调用时创建），执行 `mapperMethod.execute(sqlSession, args)`',
-                  '**statement id 的拼法**：`接口全限定名 + "." + 方法名`（如 `com.x.UserMapper.selectById`），必须与 XML 的 `namespace.id` 完全一致',
-                  '**参数处理**：单参数直接传；多参数未加 `@Param` 时会被包成 `ParamMap`（`param1`、`param2`、`arg0`…）',
-                  '**为什么必须用接口**：JDK 动态代理只能代理接口，不能代理类——所以 Mapper 必须是接口，不能是抽象类',
-                ],
-                depth:
-                  '两个能拉开的细节：**第一，`MapperMethod` 有缓存**（`Map<Method, MapperMethod>`，`ConcurrentHashMap`），所以「注解解析」只做一次；但**每个 `SqlSession` 有独立的 `MapperProxy`**（`MapperProxyFactory` 按 sqlSession 造），所以别指望跨会话复用代理对象。**第二，为什么 Spring 没有被循环依赖问题搞死**：`MapperFactoryBean` 的 `getObject()` 返回的是代理，代理的 `InvocationHandler` 里持有的是 `sqlSessionTemplate` 而不是某个具体 `SqlSession`——所以「注入 Mapper 时 SqlSession 还没开」不是问题，等到真正调用时才从 `SqlSessionTemplate` 拿当前线程绑定的会话。',
-                followup:
-                  '「Mapper 能继承吗」——可以，MyBatis 支持接口继承（`<mapper namespace>` 指向父接口时，子接口会继承父接口的方法映射），但**父子接口的 namespace 不能重复**，且实际项目里很少用。更常见的问题是：**两个 Mapper 定义了同名方法但不同 namespace**，这完全合法（statement id 不同），但若在 XML 里手写 `namespace` 写错，会报 `Invalid bound statement (not found)`——这是 MyBatis 第二高频的报错，90% 的原因是「XML 没被扫描到」或「namespace / id 拼错」。',
-              },
-              {
-                kind: 'question',
-                title: 'Mapper 接口里的方法可以重载吗？为什么？',
-                questionId: 'java-05-Q78',
-                intent:
-                  '答案是不能。理由必须落到「statement id 只用方法名，不含参数类型」这一点上。',
-                points: [
-                  '**结论：不能重载**（严格说：语法上允许，但运行会失败或行为不可预期）',
-                  '**根本原因**：MyBatis 用 `接口全名 + "." + 方法名` 作为 statement id，**不含参数类型**，所以两个同名方法会映射到同一个 `MappedStatement`',
-                  '**具体报错**：`Mapper method \'xxx\' is ambiguous` 或 `Invalid bound statement`（取决于版本与是否用注解）',
-                  '**为什么这样设计**：XML 的 `<select id="xxx">` 只有一个 id，无法表达「同名的两个不同签名」；注解方式也只有一个 `@Select`',
-                  '**推论一**：`default` 方法可以「重载」——它是接口自身实现，不走代理（`MapperProxy` 会特判 `method.isDefault()`）',
-                  '**推论二**：想实现「同名不同参」，改为不同方法名（`selectById` / `selectByIds`），或用 `@Param` 区分参数',
-                  '**JDK 代理的额外限制**：`Proxy` 只能代理接口；且 `Object` 的 `equals` / `hashCode` / `toString` 会被特判放行',
-                ],
-                depth:
-                  '一个容易忽略的补充：**`MapperProxy` 的 `methodCache` 以 `Method` 对象为 key**（含参数类型），所以「同名不同参」在**代理层面**是能区分的——真正不可行的是**映射层面**：`MappedStatement` 的 id 唯一，两个方法必然指向同一条 SQL，参数映射就对不上。**所以「不能重载」不是 Java 的限制，是 MyBatis 的 id 设计决定的**。这句话能把答案从「背结论」提升到「讲清边界」。',
-                followup:
-                  '「那 Kotlin 里的默认参数、Java 里的可变参数呢」——可变参数（`String...`）会被当成数组处理，单个方法没问题；但**不能与「数组参数」的同名方法共存**（同样撞 id）。Kotlin 的默认参数会在编译期生成 `$default` 方法，可能意外与手写方法撞名，实际项目里建议显式避免。这类问题在「多语言混编」的项目里偶发出现，排查时往往想不到是 id 冲突。',
-              },
-              {
-                kind: 'question',
-                title: 'MyBatis 的一级缓存是什么？为什么和 Spring 集成后「感觉失效」？',
-                questionId: 'java-05-Q79',
-                intent:
-                  '核心是「会话级」+「Spring 下会话随事务走」。这个「感觉失效」的现象解释清楚，说明你真的踩过。',
-                points: [
-                  '**是什么**：`SqlSession` 级的 `PerpetualCache`，本质是一个 `HashMap`（key 由 statement id + SQL + 参数 + `RowBounds` 算出）',
-                  '**默认开启**，作用域 `localCacheScope` 可为 `SESSION`（默认）或 `STATEMENT`（只在本语句内有效）',
-                  '**失效条件**：同一会话内执行了 `insert` / `update` / `delete`（**清空整个缓存**）、手动 `clearCache()`、会话关闭、`flushCache=true` 的查询',
-                  '**Spring 下的真相**：`SqlSessionTemplate` 依赖 `SqlSessionUtils` 获取会话——**有事务时**绑定到 `ThreadLocal`（同一事务内复用，缓存有效）；**无事务时**每次调用新建并立即关闭（缓存等于没有）',
-                  '**「感觉失效」的三种典型场景**：① Mapper 调用不在同一事务里 ② 中间夹了一次写操作 ③ 用了不同的 `SqlSession`（如手动 `openSession`）',
-                  '**为什么这么设计**：一级缓存要保证「同一会话看到一致视图」，而 Spring 的会话边界是**事务**，不是「Service 方法」',
-                  '**实践建议**：不要依赖一级缓存做业务优化；需要跨请求缓存时用二级缓存或外部缓存（Redis）',
-                ],
-                depth:
-                  '「怎么让一级缓存生效」——把多个查询放进同一个 `@Transactional` 方法里，且**中间不能有写操作**。但这恰恰暴露了一级缓存的尴尬定位：**事务内通常要写，写了就清空；事务外又没有会话**。所以它在生产里的实际命中率很低，官方文档也明确提示「不要依赖它」。**真正有价值的场景是「嵌套查询中的重复子查询」**：一个 `resultMap` 里多个字段引用同一张关联表，同一次映射过程中会重复查同一条语句，这时一级缓存能省掉重复的数据库往返——这是它设计上的原始动机。',
-                followup:
-                  '「一级缓存会导致脏读吗」——**会**，而且这是它最危险的地方。同一事务内，若另一个事务改了数据并提交，本事务再查同一语句会拿到**缓存里的旧值**（因为一级缓存不感知其他会话的提交）。这就是 `localCacheScope=STATEMENT` 存在的原因——把它设成 `STATEMENT` 后，每条语句执行完就清缓存，牺牲命中率换一致性。**分布式场景下这个坑更隐蔽**：多实例部署时，A 实例改了数据，B 实例的事务内缓存仍是旧值。',
-              },
-              {
-                kind: 'question',
-                title: '二级缓存是什么？为什么生产要谨慎使用？',
-                questionId: 'java-05-Q80',
-                intent:
-                  '必须讲清「namespace 级、跨会话、提交后写入」三个特征，以及「多表关联时的失效盲区」这个致命缺陷。',
-                points: [
-                  '**是什么**：`namespace` 级的缓存（`CachingExecutor` 管理），跨 `SqlSession` 共享，可跨线程',
-                  '**开启方式**：XML 里加 `<cache/>`（或 `@CacheNamespace`），并让实体实现 `Serializable`（默认用序列化做深拷贝）；全局开关 `cacheEnabled` 默认 true 但**单条语句仍需 `<cache/>`**',
-                  '**写入时机**：查询结果先进 `TransactionalCache`（暂存），**事务提交时**才真正写入；回滚则丢弃',
-                  '**失效条件**：同 namespace 的任意写操作（`flushCache` 默认对 update 为 true）→ 清空整个 namespace 缓存',
-                  '**致命缺陷一**：**跨 namespace 的写不会清缓存**。A 表在 `UserMapper` 里缓存了，`OrderMapper` 里也 `join` 了 A 表并写了它 → `UserMapper` 的缓存不会失效，读到旧数据',
-                  '**致命缺陷二**：多实例部署时，各实例的本地缓存**互不感知**，A 实例更新后 B 实例仍是旧值',
-                  '**致命缺陷三**：默认 `EvictionPolicy` 是 `LRU`，容量 1024，无 TTL——**缓存永不自然过期**，只靠写操作清空',
-                  '**生产建议**：单机 + 只读为主的字典表可以用；有跨表写、多实例、要求强一致 → 直接上 Redis 并在业务层控制失效',
-                ],
-                depth:
-                  '「为什么默认配置下二级缓存基本不可用」——三个默认值叠加起来就是灾难：① `flushCache` 只在**同 namespace 的写操作**时触发，跨 namespace 的写不触发；② 无 TTL，数据可能永久陈旧；③ 本地缓存，多实例不一致。**所以「开了二级缓存但读到旧数据」几乎必然发生，只是时间早晚**。若一定要用，至少要做到：所有涉及该表的写操作都落在同一 namespace（即不要用 `join` 别的表再写）、配 `@CacheNamespace(implementation = RedisCache.class)` 做集中式缓存、并给缓存加过期策略。',
-                followup:
-                  '「二级缓存和 Redis 缓存的区别」——二级缓存是**框架内置 + 进程内**（默认），Redis 是**外部 + 集中式**。前者零成本但只适合单机、一致性靠「清整个 namespace」很粗暴；后者能跨实例、可设 TTL、可精细化 key，但要自己处理「缓存与数据库的一致性」（延迟双删、订阅 binlog 等）。**实践中「二级缓存」几乎总是被 Redis 取代**，真正保留它的场景是「单机部署 + 只读字典表 + 追求零网络开销」。',
-              },
-              {
-                kind: 'question',
-                title: '延迟加载是什么？原理是什么？',
-                questionId: 'java-05-Q81',
-                intent:
-                  '必须说清「动态代理 + 触发式加载」，并区分「全局开关 / 局部 fetchType」与「N+1 的关系」。',
-                points: [
-                  '**是什么**：关联对象**先不查**，等到真正访问它的属性时才发起子查询（按需加载）',
-                  '**配置**：全局 `lazyLoadingEnabled=true`、`aggressiveLazyLoading=false`（3.4.1 后默认 false，即「访问哪个属性才加载哪个」）',
-                  '**局部覆盖**：`<association fetchType="lazy|eager">`、`<collection fetchType="...">`',
-                  '**触发条件**：**只有 `association` / `collection` 的嵌套查询（`select` 属性）才支持延迟**；嵌套结果映射（`resultMap` 内联）不支持',
-                  '**原理**：`ResultSetHandler` 为待加载的关联对象生成**动态代理**（`JavassistProxyFactory` 或 `CglibProxyFactory`），代理对象里存 `ResultLoader`；访问代理的属性时触发 `load()` 执行子查询并替换真实对象',
-                  '**坑一**：**必须先调用过主对象的 getter**——若直接用 `equals` / `hashCode` / `toString`，代理可能提前触发全部加载（取决于 `aggressiveLazyLoading`）',
-                  '**坑二**：延迟加载在**会话关闭后失效**（`SqlSession` 已关，子查询无法执行）→ 报 `ExecutorException: statement not found`',
-                  '**与 N+1 的关系**：延迟加载常常**制造 N+1**——循环里访问每个对象的关联属性，就是 N 次子查询',
-                ],
-                depth:
-                  '两个进阶点：**第一，代理工厂可换**（`configuration.setProxyFactory(new CglibProxyFactory())`），默认是 Javassist——因为 CGLIB 对 final 类 / 方法有限制，而字段注入的实体通常无参构造 + setter，两者都能用。**第二，为什么「会话关闭后失效」在 Spring 里特别容易踩**：Spring 的 `SqlSession` 生命周期跟事务走，Service 方法返回后会话关闭，Controller / 视图层再去访问关联属性就炸。解决方式是「在 Service 层就把需要的数据取完」（`fetchType="eager"` 或显式调 getter），而不是「开 `OpenSessionInView`」——后者会让会话占着数据库连接直到响应完成，是**性能反模式**。',
-                followup:
-                  '「延迟加载该开还是该关」——**默认建议关闭**。理由是：延迟加载把「SQL 的执行时机」变得不可预测（可能在视图层、可能在序列化时），排查慢查询时很难定位；而且线上一次「遍历 + 访问关联」就是标准 N+1。推荐做法是**显式查询**：需要关联数据时用 `join` 一次查完（嵌套结果映射），或在 Service 里批量查（`IN` 查询）再在内存里拼装——这样 SQL 条数是确定的、可 review 的。',
-              },
-              {
-                kind: 'question',
-                title: '动态 SQL 有哪些标签？底层原理是什么？',
-                questionId: 'java-05-Q82',
-                intent:
-                  '标签要分类说（条件 / 循环 / 复用 / 修剪），原理必须落到 `SqlNode` 组合模式 + OGNL。',
-                points: [
-                  '**条件类**：`<if test="...">`、`<choose>` + `<when>` + `<otherwise>`（相当于 switch）',
-                  '**修剪类**：`<where>`（加 `WHERE` + 去前导 `AND`/`OR`）、`<set>`（加 `SET` + 去尾部逗号）、`<trim prefix/suffix/prefixOverrides/suffixOverrides>`（前两者的通用形式）',
-                  '**循环类**：`<foreach collection item index separator open close>` —— `collection` 是最易错属性（`list` / `array` / `@Param` 名）',
-                  '**复用类**：`<sql id="...">` 定义片段 + `<include refid="...">` 引用，`<include>` 内可嵌套 `<property>` 做变量替换',
-                  '**绑定类**：`<bind name="x" value="...">` 把 OGNL 结果存进上下文，供后续引用（常用于 `LIKE` 拼 `%`）',
-                  '**底层一**：解析期由 `XMLScriptBuilder` 把每个标签变成 `SqlNode`（`IfSqlNode` / `ForEachSqlNode` / `TrimSqlNode` / `ChooseSqlNode` / `StaticTextSqlNode`），嵌套成**组合模式的树**，根是 `MixedSqlNode`',
-                  '**底层二**：执行期调用 `apply(DynamicContext)` **递归**拼接，每个节点自行决定「拼不拼、拼什么」，结果追加到 `StringBuilder`',
-                  '**底层三**：条件判断由 `ExpressionEvaluator` 用 **OGNL** 求值，根对象是参数 Map，所以 `test` 里能写属性访问、比较、方法调用、静态方法',
-                ],
-                depth:
-                  '一个能显功底的观察：**`<where>` 与 `<set>` 不是「特殊标签」，而是 `TrimSqlNode` 的两个预设实例**（源码里 `WhereSqlNode` / `SetSqlNode` 都继承 `TrimSqlNode`，只是构造参数不同）。这解释了两件事：一是「`<where>` 里第一个条件不用写 `AND`」（`prefixOverrides` 会去掉开头的 `AND | OR`）；二是「`<trim>` 才是通用形式，`<where>` 只是它的语法糖」。**能把「标签」还原成「节点 + 参数」的人，才算真读过源码**。',
-                followup:
-                  '「`<if>` 的 `test` 里能写什么」——OGNL 表达式所能表达的一切：属性访问（`user.name`）、比较（`age > 18`）、逻辑（`a and b`）、集合操作（`list.size() > 0`、`list.isEmpty()`）、静态方法（`@java.lang.Math@max(1, 2)`）、甚至 `@com.x.Constants@STATUS_ACTIVE`。**注意 `test` 里不能用 `#{}`**——那是参数占位符，只在 SQL 正文里有效；`test` 里直接写属性名即可。',
-              },
-              {
-                kind: 'question',
-                title: '批量插入有哪几种方式？有什么注意点？',
-                questionId: 'java-05-Q83',
-                intent:
-                  '三种方式（循环 / `foreach` 拼多值 / 真批量）必须能对比出优劣，且要说出 JDBC 参数上限与事务边界。',
-                points: [
-                  '**方式一：循环单条 insert**——最简单，但**每条一次网络往返**，1 万条约几秒到几十秒；只在数据量小时可用',
-                  '**方式二：`<foreach>` 拼多值 `INSERT INTO t (a,b) VALUES (?,?),(?,?)...`**——一次往返，性能好；**但 SQL 长度与参数数有上限**（MySQL `max_allowed_packet` 默认 4MB；`PreparedStatement` 参数数过多会 OOM 或报错）',
-                  '**方式三：`ExecutorType.BATCH` 真批量**——复用同一个 `PreparedStatement`，`addBatch` + `executeBatch`；**一次往返提交多行**，且能返回影响行数数组',
-                  '**方式三的写法**：`sqlSessionFactory.openSession(ExecutorType.BATCH)` 或 `SqlSessionTemplate(ExecutorType.BATCH)`；Spring 下可配 `mybatis.configuration.default-executor-type=batch`（全局，谨慎）',
-                  '**注意一：分批**——方式二按 500~1000 条一批切开，避免 SQL 过长；方式三也要定期 `flushStatements`',
-                  '**注意二：事务边界**——批量必须在**同一事务**内，否则每条独立提交，性能退化且无法回滚',
-                  '**注意三：主键回填**——方式二用 `useGeneratedKeys="true" keyProperty="id"` 只能回填**第一个**自增 id（MySQL 多值插入的行为），后续 id 需靠 `LAST_INSERT_ID()` 计算；方式三 `BATCH` 下 `getGeneratedKeys` 部分驱动不可靠',
-                  '**注意四：`rewriteBatchedStatements=true`**——MySQL 驱动的关键参数，它把多条 `addBatch` 改写成一条多值 SQL，否则「批量」仍是一条条发（这个参数不开，方式三的性能优势几乎消失）',
-                ],
-                depth:
-                  '最能体现踩坑经验的是 **`rewriteBatchedStatements=true`**：MySQL Connector/J 在默认配置下，即使你用了 `addBatch`，驱动仍然逐条发送（只是省了往返的一部分），真正想「合并成一条 `INSERT ... VALUES (...),(...)`」必须显式开启这个参数（且只对 `INSERT`/`UPDATE` 生效，要求 SQL 为 `INSERT INTO ... VALUES` 形式，不能带 `ON DUPLICATE KEY` 之外的复杂语法）。**这个参数是「批量插入性能差 10 倍」的头号原因，也是面试里区分「配过」和「背过」的分水岭**。',
-                followup:
-                  '「一万条数据怎么插最快」——标准答法：**分批（每批 500~1000）+ `foreach` 多值插入 + 单事务 + `rewriteBatchedStatements=true`**，实测可达每秒数万行。若数据量更大（百万级），应该考虑「先落文件再用 `LOAD DATA INFILE`」或「走中间表 + `INSERT INTO ... SELECT`」，而不是继续优化 JDBC——**换手段比调参数更有效**，这个判断力比记住参数更有价值。',
-              },
-              {
-                kind: 'question',
-                title: 'PageHelper 分页插件的原理？逻辑分页和物理分页的区别？',
-                questionId: 'java-05-Q84',
-                intent:
-                  '必须讲清「ThreadLocal + 拦截 Executor.query + 改写 SQL」，以及「count 查询的自动生成」。',
-                points: [
-                  '**用法**：`PageHelper.startPage(pageNum, pageSize)` 紧跟第一条查询，返回 `PageInfo` 包装',
-                  '**原理一**：`startPage` 把分页参数存进 **`ThreadLocal`**（`Page` 对象），**不改变后续调用方式**',
-                  '**原理二**：拦截 `Executor.query`，从 `ThreadLocal` 取出 `Page`，用 `Dialect`（MySQL / Oracle / PG 各自实现）**改写 `BoundSql`**——MySQL 拼 `LIMIT ?, ?`',
-                  '**原理三**：同时**自动生成 count 语句**（把原 SQL 包成 `SELECT count(0) FROM (...)` 或智能优化掉 `ORDER BY`），执行后填进 `Page.total`',
-                  '**原理四**：**`finally` 里 `clearPage()`**——这是「分页参数为什么会串到下一个查询」的原因（异步 / 线程池复用时尤其危险）',
-                  '**物理分页**：数据库层 `LIMIT` / `ROWNUM` / `OFFSET FETCH`，只传回需要的行；**PageHelper 是物理分页**',
-                  '**逻辑分页**：`RowBounds` / 全量查回内存再 `subList`；数据量大时内存与网络开销爆炸',
-                  '**深分页问题**：`LIMIT 1000000, 20` 要扫描前 100 万行；优化用「延迟关联」（先用覆盖索引查 id 再 join）或「游标分页」（`WHERE id > lastId LIMIT 20`）',
-                ],
-                depth:
-                  '两个进阶点：**第一，`startPage` 之后必须紧跟查询**，中间插入任何别的查询（包括同一个 Mapper 的其他方法）都会让分页参数被「用掉」或「串号」——这是 PageHelper 最经典的坑，根因就是 `ThreadLocal` 的作用域是线程而不是「接下来这一次调用」。**第二，count 查询可以被优化掉**：`PageHelper` 提供 `PageHelper.startPage(n, s, false)`（不查 count），适合「前端只需要知道有没有下一页」的场景；也可以用 `pageSize + 1` 的「多取一条」技巧判断 `hasNext`，比 count 快得多。',
-                followup:
-                  '「MyBatis-Plus 的分页和 PageHelper 有什么区别」——MP 用**显式传参**（`IPage<T>` 作为方法参数）而不是 `ThreadLocal`，所以没有「串号」问题，也不需要「紧跟查询」的约束；代价是 Mapper 方法签名要带 `IPage`，且**必须注册 `PaginationInnerInterceptor`**（不注册分页不生效，返回全量数据——这是 MP 常见的坑）。选型上：新项目用 MP 的分页更安全，老项目已用 PageHelper 且无并发问题可不动。',
-              },
-              {
-                kind: 'question',
-                title: 'MyBatis 插件（Interceptor）的原理？',
-                questionId: 'java-05-Q85',
-                intent:
-                  '四大对象 + 四个拦截点 + 「层层包装成链」是核心，「多个插件的顺序」是加分。',
-                points: [
-                  '**能拦的只有四个对象**：`Executor`（管缓存与事务）、`StatementHandler`（管 JDBC）、`ParameterHandler`（管填参）、`ResultSetHandler`（管结果映射）',
-                  '**声明方式**：实现 `Interceptor` 接口，标 `@Intercepts(@Signature(type=..., method=..., args=...))`，注册进 `Configuration`',
-                  '**实现机制**：`InterceptorChain.pluginAll()` 对目标对象逐个 `Plugin.wrap()`，**生成 JDK 动态代理**（因为四个对象都是接口）',
-                  '**链的形成**：多个插件会套成「代理的代理」，`plugin()` 里调 `invocation.proceed()` 才会进入下一层——**不调就是中断**',
-                  '**顺序**：按 `addInterceptor` 的注册顺序，**先注册的在外层**（先被调用）',
-                  '**典型用途**：分页（拦 `Executor.query` / `StatementHandler.prepare`）、读写分离（拦 `Executor`，切换 `DataSource`）、SQL 审计与耗时（拦 `Executor`）、字段加解密（拦 `ParameterHandler` / `ResultSetHandler`）',
-                  '**一个关键限制**：**不能拦「自己写的」Bean，也不能拦 `SqlSession` 的方法**——只对这四个对象生效',
-                  '**`@Signature` 的 `args` 必须精确匹配方法签名**，写错会导致插件不生效（且不报错，静默失败）',
-                ],
-                depth:
-                  '「为什么插件容易出问题」——因为它是**AOP 的暴力版**：没有优先级语义、没有拓扑排序、文档极少。两个真实冲突场景：① 分页插件与「改 SQL 的插件」都拦 `StatementHandler.prepare`，谁在外层决定谁先看到 SQL，写分页的插件如果拿不到带 `LIMIT` 的 SQL 就会算错总数；② 读写分离插件拦 `Executor.query` 切数据源，但如果外层还有个缓存插件提前返回，数据源根本不会被切换。**理解「外层先执行、`proceed` 后才内层」这个模型，才能预判冲突**。',
-                followup:
-                  '「怎么写一个 SQL 耗时监控插件」——拦 `Executor.query`（或 `StatementHandler` 的 `query`），`proceed` 前后取时间差，从 `MappedStatement.getId()` 拿语句 id 打点。**注意要排除 count 语句与租户无关的查询**，否则指标噪音很大；且**别在插件里做同步 IO**（写日志文件、远程上报），会把所有查询拖慢——用异步队列或直接交给 Micrometer。',
-              },
-              {
-                kind: 'question',
-                title: 'MyBatis-Plus 和 MyBatis 是什么关系？提供了哪些能力？',
-                questionId: 'java-05-Q86',
-                intent:
-                  '关系是「增强不是替代」。能力分四类说，且必须点出两个最常见的坑（拦截器未注册、逻辑删除失效）。',
-                points: [
-                  '**关系**：MP 是 MyBatis 的**增强工具**，只做增强不做改变——引了 MP 仍可写原生 XML，`SqlSession` 与 `Configuration` 完全复用',
-                  '**CRUD 增强**：`BaseMapper<T>` 提供 `insert` / `selectById` / `updateById` / `deleteById` / `selectList`，无需写 SQL',
-                  '**条件构造**：`QueryWrapper`（字符串列名）/ `LambdaQueryWrapper`（方法引用，编译期安全）/ `UpdateWrapper`',
-                  '**分页**：`IPage` + `PaginationInnerInterceptor`（**必须注册，否则不生效**）',
-                  '**代码生成**：`AutoGenerator` / `mybatis-plus-generator` 从表结构生成 Entity / Mapper / Service / Controller',
-                  '**逻辑删除**：`@TableLogic` + `logic-delete-field`，自动把 `delete` 改写成 `update set deleted=1`，查询自动加 `deleted=0`',
-                  '**自动填充**：`MetaObjectHandler` + `@TableField(fill = INSERT / INSERT_UPDATE)`，自动填 `createTime` / `updateTime` / `createBy`',
-                  '**乐观锁**：`@Version` + `OptimisticLockerInnerInterceptor`（同样要注册）',
-                  '**防全表更新**：`BlockAttackInnerInterceptor`（阻止不带 `where` 的 update / delete）',
-                  '**两个常见坑**：① 拦截器忘了注册（分页、乐观锁静默失效，返回全量数据）② `LambdaQueryWrapper` 的字段为 `null` 时**默认不参与条件**（要 `eq(condition, ...)` 或 `isNull`）',
-                ],
-                depth:
-                  '一个值得点出的取舍：**「用 Wrapper 还是写 XML」没有标准答案，但边界要清晰**。单表 CRUD、简单条件查询用 Wrapper（省代码、字段改名编译期报错）；多表 join、复杂聚合、需要 hint 或调优的 SQL 写在 XML 里（可读、可 review、可控）。**反模式是「用 Wrapper 硬拼多表 join」**——`inSql` / `apply` 拼出来的 SQL 藏在 Java 代码里，DBA review 不到，出慢查询时极难定位。这是「用 MP 之后 SQL 质量下降」的根本原因。',
-                followup:
-                  '「MP 和 JPA 的定位差在哪」——MP 是「在 MyBatis 上加便利层」，本质仍是拼 SQL（依赖方言）；JPA 是「对象即查询」，有 JPQL 这一层跨库抽象。所以 MP 的优势是「贴近原生、可控」，JPA 的优势是「模型驱动、跨库」。**如果团队已经熟悉 SQL 且需要精细控制，MP 是更自然的选择**；如果要跨多种数据库（如产品化交付），JPA 的方言抽象价值更大。',
-              },
-              {
-                kind: 'question',
-                title: '什么是 N+1 查询问题？怎么避免？',
-                questionId: 'java-05-Q87',
-                intent:
-                  '定义要精确（1 次主查询 + N 次子查询），解法要分「join / 批量 IN / 延迟加载的取舍」三层。',
-                points: [
-                  '**定义**：查 1 次主表拿到 N 条记录，再为每条记录各查 1 次关联表 → 共 **N+1 次**数据库往返',
-                  '**典型来源**：① `resultMap` 里用 `<association select="...">` 嵌套查询 ② 业务代码里循环调 Mapper ③ ORM 的延迟加载被触发',
-                  '**危害**：N 大时往返次数爆炸（1000 条 → 1001 次），每次都有网络 + 解析开销；且常伴随全表扫描',
-                  '**解法一：join 一次查完**——用 `resultMap` 的**嵌套结果映射**（`<collection>` 内联 `resultMap`），或直接用 join 查平表再在代码里分组',
-                  '**解法二：批量 `IN` 查询**——先查主表拿 id 列表，再 `SELECT * FROM 关联表 WHERE 主表id IN (...)`，最后在内存里按 id 分组（**最推荐**，SQL 条数固定为 2）',
-                  '**解法三：关掉延迟加载**——把 `fetchType` 设为 `eager` 或直接不用 `<association select>`，让问题在开发期暴露而非线上',
-                  '**解法四：`<collection>` 配 `columnPrefix`**——一次 join 查多表，用列名前缀区分，避免 `resultMap` 冲突',
-                  '**注意**：join 也有代价——一对多 join 会产生笛卡尔积行数放大（1 主 N 子 → N 行），数据量大时网络传输与内存占用上升，此时**批量 IN 优于 join**',
-                ],
-                depth:
-                  '「join 和批量 IN 怎么选」——判断依据是**关联的基数与数据量**。一对多且子表行数多时，join 的行数放大可能比 N 次查询更糟（比如 1000 个订单 × 平均 50 个明细 = 5 万行），此时批量 IN（2 条 SQL，5 万行也是 5 万行但少了 1000 次往返）更优。**关键指标是「往返次数」与「传输行数」的乘积**，两者要一起算。这个分析方式比背「用 join 解决 N+1」更接近真实决策。',
-                followup:
-                  '「怎么在测试阶段发现 N+1」——三种手段：① 开 `mybatis.configuration.log-impl` 或 p6spy 打印真实 SQL，数一数条数；② 用 `@Transactional` 包住测试方法，看是否有大量重复的相同语句；③ 上 APM（SkyWalking / Arthas `watch`）统计单请求的 SQL 次数。**最有效的工程手段是「给测试环境加 SQL 条数断言」**——单接口 SQL 数超过阈值就告警，把 N+1 挡在合并前。',
-              },
-              {
-                kind: 'question',
-                title: '为什么 Mapper 调用成功了，数据却没有提交？（MyBatis 与 Spring 的事务协同）',
-                questionId: 'java-05-Q88',
-                intent:
-                  '核心是「SqlSession 的生命周期由 Spring 的事务管理器托管」，以及「自动提交被关掉」这个默认行为。',
-                points: [
-                  '**根本原因**：MyBatis 的 `SqlSession` 在 Spring 管理下**不自动提交**（`autocommit=false`），提交动作交给 `SpringManagedTransaction`',
-                  '**有 `@Transactional` 时**：`DataSourceTransactionManager` 在方法开始时开连接并设 `autocommit=false`，`SqlSession` 绑定到该连接；方法正常返回 → `commit`，抛异常 → `rollback`',
-                  '**没有 `@Transactional` 时**：`SqlSessionTemplate` 每次调用后 `close()`，而 `close()` **不会提交**未提交的事务 → **数据丢失**（取决于连接池归还时的行为，多数是回滚）',
-                  '**为什么「本地测着好的、线上不同」**：本地可能开了 `mybatis.configuration.auto-mapping` 之类无关配置，或测试代码在 `@Transactional` 的测试基类里（回滚了但断言在回滚前）',
-                  '**其他常见原因**：① 异常被 `try-catch` 吞掉（拦截器看不到异常 → 提交）② 异常类型是受检异常（默认不回滚）③ 自调用（`this.method()` 不走代理）④ 多数据源用了错的事务管理器',
-                  '**验证方式**：开 `logging.level.org.springframework.jdbc=DEBUG` 看是否有 `Committing JDBC transaction`；或直接查库确认',
-                  '**规范建议**：「写操作必须在 `@Transactional` 方法内」，且用 `rollbackFor = Exception.class`；Service 层统一加，Controller 不加',
-                ],
-                depth:
-                  '一个容易混淆的点：**MyBatis 自己也有事务（`SqlSession.commit()`），但在 Spring 环境下它被「代理掉」了**。`SqlSessionTemplate` 里的 `SqlSessionInterceptor` 会在 `finally` 中调 `closeSqlSession`，而 `SpringManagedTransaction` 的 `commit()` 是空实现——真正的提交由 `DataSourceTransactionManager` 在事务边界执行。**所以「手动 `sqlSession.commit()`」在 Spring 里是无效甚至有害的**（可能提前提交导致事务语义破坏）。理解「谁拥有事务」是这道题的核心。',
-                followup:
-                  '「`@Transactional` 加在 Mapper 上有效吗」——技术上有效（Mapper 是代理对象，能被 AOP 拦截），但**语义上是错的**：事务边界应该在 Service（业务用例）而不是单个 SQL。加在 Mapper 上会导致「每个方法一个独立事务」，跨方法的一致性完全丢失。**判断规则：事务边界 = 业务不变量边界**，一个业务操作里的多条 SQL 必须共享同一个事务。',
-              },
+            ],
+            outline: [
+              '「半自动」= SQL 你写、映射它做，价值在于慢查询能看到真实 SQL',
+              '一条 SQL 走九步：配置 → `MappedStatement` → [[动态代理]] → 拼 SQL → 填参 → 执行 → 映射 → 缓存',
+              '`#{}` 传数据、`${}` 改结构——这是「能不能防注入」的全部原因',
+              '一级缓存是会话级、二级缓存是 namespace 级，作用域决定它何时「失效」',
+              '插件只能拦四个对象，改 SQL 要拦 `StatementHandler.prepare`',
+            ],
+            pitfalls: [
+              '以为 `${}` 只是「另一种传参写法」——它不经过参数绑定，值会变成 SQL 的一部分，除非白名单否则就是注入点',
+              '以为一级缓存「坏了」——它是会话级缓存，Spring 无事务时每次调用都换会话，所以只在同一事务内才可能命中',
+              '以为插件能随便拦——只有四个对象被代理过，拦 `Executor.query` 拿不到最终 SQL，改 SQL 必须拦 `StatementHandler.prepare`',
             ],
           },
         },
         {
           id: 'spring-misc',
-          title: 'Spring 的扩展点与横切能力',
-          kind: 'concept',
+          title: '扩展点、事件与异步定时任务',
+          minutes: 45,
           sources: [{ topic: 'java-05', chapters: ['十、其他高频'] }],
           content: {
             intro:
-              '最后一课收口在两件事上：**Spring 留了哪些口子给你改它**（扩展点），以及**它自带的横切能力怎么用对**（事件、`@Async`、定时任务）。这两件事的共同点是「用对了极其顺手，用错了故障极其隐蔽」——异步任务丢了、定时任务重复执行、事件监听器阻塞主流程，都是线上真实事故。本课会把 `refresh()` 的整条链路当成一张「扩展点地图」来走，再把事件、异步、定时放在这张图上定位，最后用一张表收口 Spring 5 与 Spring 6 的版本差异，并给出一条「连环追问」的答题主线，供面试前过一遍。',
+              '这一课收口在两件事上:**框架留了哪些口子让你改它**(扩展点),以及**它自带的横切能力怎么用对**(事件、异步、定时)。它们的共同点是「用对了极其顺手,用错了故障极其隐蔽」——异步任务悄悄丢了、定时任务在每台机器上各跑一遍、事件发出去了但事务回滚了,都不会抛异常,只会让数据慢慢错掉。本课把容器启动流程当成一张「扩展点地图」来走,再把事件、异步、定时放到这张图上定位,最后落到版本差异上。',
             outline: [
-              '扩展点分三层：**容器级**（`BeanFactoryPostProcessor` / `BeanPostProcessor`）、**Bean 级**（`Aware` / 生命周期回调）、**框架级**（`InitializingBean` / `DisposableBean` / `ApplicationListener`）',
-              '事件机制是**同步**的（默认在发布者线程执行），要异步必须配 `@Async` 或自定义 `ApplicationEventMulticaster`',
-              '`@Async` 的本质是**动态代理 + 线程池**，两大致命陷阱是「自调用失效」与「用了默认的 `SimpleAsyncTaskExecutor`（无界）」',
-              '`@Scheduled` 默认**单线程**，多个任务会互相阻塞；集群下会**重复执行**，必须加分布式锁或换调度平台',
-              'Spring 6 的主线是 **AOT / 原生镜像 / `@HttpExchange` / `ProblemDetail`**，与 Boot 3 的 `jakarta` 迁移同步发生',
+              '扩展点按「你能改什么」分三支:改定义、改实例、参与生命周期',
+              '判断一个扩展点能不能注入别的对象,只看它在启动流程的哪一步——`finishBeanFactoryInitialization` 之前都不安全',
+              '事件默认**同步**,监听器慢则发布者慢,监听器抛异常则发布者收到异常',
+              '`@Async` 是代理加线程池,两个致命陷阱:自调用失效、默认执行器根本不池化',
+              '定时任务默认**单线程**,集群下还会**重复执行**,所以只适合单机轻量场景',
             ],
             pitfalls: [
-              '以为事件监听是异步的：默认**同步**，监听器里慢一步，发布者的方法就慢一步',
-              '认为 `@Async` 加在 `private` / 同类方法调用上有效：都不走代理，注解形同虚设',
-              '把 `@Scheduled(fixedRate)` 当成「上一次执行完再等 n 毫秒」：`fixedRate` 是**按固定频率**（可能并发），`fixedDelay` 才是「上次结束后再等」',
+              '以为事件监听是异步的:默认同步,监听器慢一步,发布者的方法就慢一步',
+              '认为 `@Async` 加在私有方法或同类调用上有效:两者都不走代理,注解形同虚设',
+              '把固定频率当成「上次执行完再等 n 毫秒」:固定频率按开始时间算,长任务会堆积;固定延迟才是「结束后再等」',
             ],
             sections: [
               {
-                kind: 'concept',
-                title: '把 refresh() 当一张扩展点地图',
+                kind: 'why',
+                title: '两个线上事故,都没有报错',
                 body: [
-                  'Spring 的扩展点之所以让人记不住，是因为它们散落在各处文档里。但只要你记住 `AbstractApplicationContext.refresh()` 的十二步，每个扩展点就都有了「坐标」——它在第几步被调用，就决定了它能看到什么、能改什么。',
-                  '沿着 `refresh()` 走：`prepareRefresh` 之后是 **`invokeBeanFactoryPostProcessors`**（此处调用所有 `BeanFactoryPostProcessor`，**此时 Bean 还没实例化**，只能改 `BeanDefinition`）；然后是 `registerBeanPostProcessors`（注册 `BeanPostProcessor`，但**它们的 `postProcessBeforeInitialization` 要等 Bean 实例化时才被执行**）；接着 `finishBeanFactoryInitialization`（**真正的实例化大发生在这里**）；最后 `finishRefresh` 发布 `ContextRefreshedEvent`。',
-                  '所以判断一个扩展点「能不能拿到别的 Bean」，规则极其简单：**在 `finishBeanFactoryInitialization` 之前执行的，不要注入 Bean**（会触发提前初始化，甚至循环依赖报错）；**之后的，随便用**。`BeanFactoryPostProcessor` 只能用 `BeanDefinition`，`BeanPostProcessor` 处理的是「正在创建的 Bean」不能注入别的 Bean（会 `BeanCurrentlyInCreationException`），`ApplicationListener<ContextRefreshedEvent>` 在最后执行，什么都能拿——这条规则能解释 80% 的「扩展点里注入 Bean 报错」问题。',
+                  '第一个:下单后要发一条通知,加了异步注解,上线后一切正常。直到对账时发现有一批订单**从来没发过通知**——日志里连失败记录都没有,仿佛那些调用从未发生。',
+                  '第二个:一个每日清理任务,单机时跑得好好的。上了三台机器之后,清理量变成三倍,把一张日志表删空了——因为三台机器**各跑了一遍**。',
                 ],
-                points: [
-                  '**容器级 · 改定义**：`BeanFactoryPostProcessor`——在 Bean 实例化前修改 `BeanDefinition`（`@Configuration` 的 CGLIB 增强就靠它）',
-                  '**容器级 · 改实例**：`BeanPostProcessor`——每个 Bean 初始化前后各回调一次（AOP 代理在这里生成）',
-                  '**Bean 级 · 拿容器**：各类 `Aware`（`BeanFactoryAware` / `ApplicationContextAware` / `BeanNameAware`）',
-                  '**Bean 级 · 生命周期**：`@PostConstruct` → `InitializingBean.afterPropertiesSet` → 自定义 `init-method`；销毁侧对称',
-                  '**框架级 · 事件**：`ApplicationListener` / `@EventListener`——`ContextRefreshedEvent` 之后才算「全都就绪」',
-                  '**框架级 · 后置处理**：`SmartInitializingSingleton`——**所有单例创建完之后**才回调，是「初始化收尾」的最佳位置',
-                  '**判断口诀**：越早执行的口子，能看到的东西越少；「注入 Bean」这件事，只在 `SmartInitializingSingleton` 之后才安全',
+                code: {
+                  language: 'java',
+                  code:
+                    "// 事故一:异步注解没生效(同类调用)\n@Service\npublic class NotifyService {\n\n    public void onPaid(Order o) {\n        this.sendAsync(o);          // 走 this,不经过代理\n    }\n\n    @Async\n    public void sendAsync(Order o) { smsClient.send(o); }\n}\n\n// 事故二:定时任务在每台机器上各跑一次\n@Scheduled(cron = \"0 0 2 * * ?\")\npublic void cleanLogs() { logMapper.deleteBefore(LocalDate.now().minusDays(30)); }",
+                  caption: '两段代码都「看起来没问题」:注解都在,方法都跑了,没有任何异常。',
+                },
+                wrong: [
+                  '**猜法一:异步只是慢,任务还在队列里?** 不是。第一条根本没进线程池——它是**同步执行完才返回**的,所以「没发出去」和「异步」无关,是别的原因。',
+                  '**猜法二:定时任务配置错了 cron?** 不是。单机时执行得一秒不差,换成集群就出错,说明配置是对的,环境变了。',
+                  '**猜法三:都是并发问题,加锁就好?** 加锁能治第二个,但第一个加锁没用——第一个的问题不是并发,是**注解压根没被读**。',
+                ],
+                real:
+                  '两件事的机制其实不同,但都指向同一个前提:**这些「加个注解就生效」的能力,全部建立在代理之上**。第一个是代理没被经过,方法退化成普通同步调用;第二个是 `@Scheduled` 的设计前提就是「单实例」,它只负责在自己的进程里按时触发,不负责跨进程去重。',
+                reveal:
+                  '所以理解这一课的关键不是记住坑的清单,而是记住两句话:**代理决定注解是否生效,进程边界决定能力是否成立**。前者解释了异步、事务、缓存为什么共用同一套失效清单;后者解释了定时任务、事件、`ThreadLocal` 为什么都不能跨实例/跨线程。下面先讲扩展点(它决定代理在哪生成),再逐个说这三项能力。',
+              },
+              {
+                kind: 'concept',
+                title: '把启动流程当一张扩展点地图',
+                body: [
+                  '扩展点之所以记不住,是因为它们散落在各处文档里。但只要记住容器刷新流程的八个步骤,每个扩展点就都有了「坐标」——[[它在第几步被调用,就决定了它能看到什么、能改什么]]。',
+                  '按「你能改什么」分三支。**第一支:改定义(`BeanFactoryPostProcessor`)**——此时对象还没造出来,你只能改「图纸」`BeanDefinition`,比如动态注册一个新定义、改某个定义的属性值。**第二支:改实例(`BeanPostProcessor`)**——对象正在被创建,你能在初始化前后各插手一次,包装它、替换它;AOP 代理就是在这里生成的。**第三支:参与生命周期**——对象已经是它自己了,你可以拿容器引用、可以注册销毁回调、可以在所有单例就绪后做收尾。',
+                  '由此可以推出一条极其有用的判断规则:**能不能在这个扩展点里注入别的对象,只看它在「预实例化单例」这一步之前还是之后**。之前的阶段注入会触发提前初始化,轻则打乱顺序,重则循环依赖报错;之后的阶段随便用。',
+                  '这条规则能解释一个常见困惑:为什么在「改定义」的扩展点里注入任何业务对象都会出问题?因为那时连图纸都还在改,哪来的实例给你注入。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: '扩展点分类：一棵树记全',
+                title: '扩展点分类:按「改什么」长成一棵树',
                 body: [
-                  '按「改什么」分三支：改定义、改实例、参与生命周期。每一支里再按执行时机排序。',
+                  '按「改定义 / 改实例 / 参与生命周期」分三支,每一支里再按执行时机排序。这样记比按字母表背有效得多。',
                 ],
                 diagram: {
                   type: 'tree',
                   root: {
-                    label: 'Spring 扩展点',
-                    note: '按「你能改什么」分类，比按字母表背有效',
+                    label: '框架扩展点',
+                    note: '按「你能改什么」分类',
                     children: [
                       {
-                        label: '① 改 BeanDefinition',
-                        note: '**Bean 还没造出来**，只能改「图纸」',
+                        label: '① 改定义',
+                        note: '**对象还没造出来**,只能改图纸',
                         tone: 'primary',
                         children: [
-                          { label: 'BeanFactoryPostProcessor', note: '最常用：`ConfigurationClassPostProcessor` 就是它，负责解析 `@Configuration`' },
-                          { label: 'BeanDefinitionRegistryPostProcessor', note: '它的子接口，能**注册新定义**（如 `@MapperScan` 就是这么干的）' },
+                          { label: '`BeanFactoryPostProcessor`', note: '最常用:`ConfigurationClassPostProcessor` 就是它,负责解析配置类' },
+                          { label: '`BeanDefinitionRegistryPostProcessor`', note: '它的子接口,能**注册新定义**——`@MapperScan` 就是这么干的' },
                         ],
                       },
                       {
-                        label: '② 改 Bean 实例',
-                        note: '**Bean 正在造**，能包装、能替换',
+                        label: '② 改实例',
+                        note: '**对象正在造**,能包装、能替换',
                         tone: 'primary',
                         children: [
-                          { label: 'BeanPostProcessor', note: '`postProcessBeforeInitialization` / `AfterInitialization`，AOP 代理在 After 阶段生成' },
-                          { label: 'InstantiationAwareBeanPostProcessor', note: '更早：能干预**实例化本身**（如 `@Autowired` 的注入就靠它的子接口）' },
-                          { label: 'DestructionAwareBeanPostProcessor', note: '销毁前回调，`@PreDestroy` 靠它' },
+                          { label: '`BeanPostProcessor`', note: '初始化前后各回调一次;**AOP 代理在 `postProcessAfterInitialization` 生成**' },
+                          { label: '`InstantiationAwareBeanPostProcessor`', note: '更早:能干预**实例化本身**,`@Autowired` 注入靠它的子接口' },
+                          { label: '`DestructionAwareBeanPostProcessor`', note: '销毁前回调,`@PreDestroy` 靠它' },
                         ],
                       },
                       {
                         label: '③ 参与生命周期',
-                        note: '**Bean 已经是自己的了**，能拿容器、能收事件',
+                        note: '**对象已经是自己的了**,能拿容器、能收事件',
                         tone: 'warn',
                         children: [
-                          { label: 'Aware 系列', note: '`BeanNameAware` → `BeanFactoryAware` → `ApplicationContextAware`，按此顺序回调' },
-                          { label: 'InitializingBean / @PostConstruct', note: '属性注入完成后执行；`@PostConstruct` 更早（由 `CommonAnnotationBeanPostProcessor` 处理）' },
-                          { label: 'SmartInitializingSingleton', note: '**所有单例创建完毕后**回调，此处可安全使用任意 Bean' },
-                          { label: 'ApplicationListener', note: '收 `ContextRefreshedEvent` / `ApplicationReadyEvent` 等' },
+                          { label: '`Aware` 系列', note: '`BeanNameAware` → `BeanFactoryAware` → `ApplicationContextAware`,按此顺序' },
+                          { label: '`InitializingBean` / `@PostConstruct`', note: '属性注入完成后执行;`@PostConstruct` 更早' },
+                          { label: '`SmartInitializingSingleton`', note: '**所有单例创建完毕后**触发,此处可安全使用任意对象' },
+                          { label: '`ApplicationListener`', note: '收 `ContextRefreshedEvent` / `ApplicationReadyEvent` 等内置事件' },
                         ],
                       },
                     ],
                   },
                   caption:
-                    '三条实用推论：**第一，`@Autowired` 为什么能工作**——它由 `AutowiredAnnotationBeanPostProcessor`（一个 `BeanPostProcessor`）在「实例化后、初始化前」完成注入，所以「构造器注入」和「字段注入」的时机不同（前者由容器在实例化时解析，后者靠后置处理器回填）。**第二，AOP 代理为什么在 `BeanPostProcessor` 里生成**——因为只有在那里才能「把原始对象换成代理对象」再交给容器。**第三，`@PostConstruct` 里为什么不能依赖「所有 Bean 就绪」**——它执行在单个 Bean 的初始化阶段，此时别的 Bean 可能还没开始创建。要「全部就绪后做事」，用 `SmartInitializingSingleton` 或监听 `ContextRefreshedEvent`。',
+                    '三条实用推论。**第一,注入为什么能工作**:它由一个「Bean 级后置处理器」在「实例化后、初始化前」完成,所以构造器注入与字段注入时机不同——前者由容器在实例化时解决,后者靠后置处理器回填。**第二,代理为什么在「后」阶段生成**:因为要等对象完全初始化好才能包装它,这也决定了「初始化方法里调用自己的增强方法不会生效」。**第三,收尾为什么放在「单例就绪回调」**:那是唯一一个「所有对象都在、且不会触发提前初始化」的位置。',
                 },
               },
               {
                 kind: 'diagram',
-                title: '事件机制：一次发布的完整路径',
+                title: '事件机制:一次发布的完整路径',
                 body: [
-                  '「Spring 事件机制」这题的答案很短：**`ApplicationEventPublisher.publishEvent()` → `ApplicationEventMulticaster` → 遍历 `ApplicationListener` 同步调用**。但细节里有三个考点。',
+                  '这题的答案很短:发布 → 广播器 → 遍历监听器 → **同步**调用。但细节里有三个考点,全在这张时序图上。',
                 ],
                 diagram: {
                   type: 'sequence',
                   actors: ['发布者', '事件广播器', '监听器 A', '监听器 B'],
                   messages: [
                     { from: '发布者', to: '事件广播器', text: '`publishEvent(new OrderCreatedEvent(order))`' },
-                    { from: '事件广播器', to: '事件广播器', text: '若是 `ApplicationEvent` 且无 `source`，包装 `PayloadApplicationEvent`' },
-                    { from: '事件广播器', to: '事件广播器', text: '按事件类型 + `@Order` 排序，筛出匹配的监听器' },
-                    { from: '事件广播器', to: '监听器 A', text: '**同步**调用 `onApplicationEvent(event)`' },
-                    { from: '监听器 A', to: '事件广播器', text: '返回（若抛异常 → 中断后续监听器，且异常回传发布者）', reply: true },
-                    { from: '事件广播器', to: '监听器 B', text: '同步调用（此时发布者线程仍在阻塞）' },
+                    { from: '事件广播器', to: '事件广播器', text: '不是标准事件类型且没有来源,就包装一层' },
+                    { from: '事件广播器', to: '事件广播器', text: '按事件类型 + 排序注解筛出匹配的监听器' },
+                    { from: '事件广播器', to: '监听器 A', text: '**同步**调用监听方法' },
+                    { from: '监听器 A', to: '事件广播器', text: '返回(若抛异常 → 中断后续监听器,异常回传发布者)', reply: true },
+                    { from: '事件广播器', to: '监听器 B', text: '同步调用(**此时发布者线程仍在阻塞**)' },
                     { from: '事件广播器', to: '发布者', text: '全部执行完才返回', reply: true },
                   ],
                   caption:
-                    '三个必记结论：**第一，默认同步**——监听器慢，发布者就被拖慢；监听器抛异常，异常会传播到发布者的 `publishEvent` 调用处（除非监听器自己 `try-catch`）。**第二，异步要显式配**：给监听方法加 `@Async` 并开启 `@EnableAsync`，或自定义 `ApplicationEventMulticaster`（`SimpleApplicationEventMulticaster` 设 `taskExecutor`）。**第三，`@TransactionalEventListener` 是事务场景的正解**——它能把监听时机推迟到「事务提交后」（`AFTER_COMMIT`），避免「事件发了但事务回滚」的不一致。这个注解在实际项目里价值极高，但知道的人不多。',
+                    '三个必记结论。**第一,默认同步**——监听器慢,发布者就被拖慢;监听器抛异常,异常会传播到发布那一行(除非它自己捕获)。**第二,异步要显式配**——监听方法加异步注解并开启支持,或者自定义广播器给它配一个执行器。**第三,事务场景要用「事务事件监听」**——它能把监听时机推迟到**事务提交之后**,避免「事件已经发了,事务却回滚了」的不一致。[[这个注解在实际项目里价值极高,但知道的人不多]]。',
                 },
               },
               {
                 kind: 'analogy',
                 title: '事件机制像公司公告板',
                 text:
-                  '发布事件就像**在公告板上贴一张通知**，广播器是**行政**，监听器是**关心这件事的部门**。你把通知交给行政（`publishEvent`），行政按「谁订阅了这个主题」挨个打电话通知。**注意：行政是一个一个打的**——第一个部门问得久，后面的都得等，你这个「贴通知的人」也得站在旁边等所有电话打完才能走（**同步**）。如果某个部门接电话时吵起来（抛异常），行政会立刻停下来把冲突报给你，后面的部门就不通知了。',
+                  '发布事件就像**在公告板上贴一张通知**,广播器是**行政**,监听器是**关心这件事的部门**。你把通知交给行政,行政按「谁订阅了这个主题」挨个打电话通知。**注意:行政是一个一个打的**——第一个部门问得久,后面的都得等,你这个「贴通知的人」也得站在旁边等所有电话打完才能走。如果某个部门接电话时吵起来,行政会立刻停下来把冲突报给你,后面的部门就不通知了。',
                 mapping: [
-                  { real: '公告板上的一张通知', tech: '`ApplicationEvent`（或任意 POJO 事件）' },
-                  { real: '行政负责挨个通知', tech: '`ApplicationEventMulticaster`（默认 `SimpleApplicationEventMulticaster`）' },
-                  { real: '订阅了该主题的部门', tech: '`ApplicationListener<E>` / `@EventListener`' },
-                  { real: '一个一个打电话，要等', tech: '**默认同步执行**，在发布者线程内' },
-                  { real: '某个部门吵架，行政停下来上报', tech: '监听器抛异常会中断后续监听器并传播给发布者' },
-                  { real: '改成发邮件，不等人回', tech: '`@Async` + `@EnableAsync`，或给广播器配 `TaskExecutor`' },
-                  { real: '等财务确认到账再通知仓库发货', tech: '`@TransactionalEventListener(phase = AFTER_COMMIT)`' },
+                  { real: '公告板上的一张通知', tech: '事件对象(标准事件类,或任意普通对象)' },
+                  { real: '行政负责挨个通知', tech: '事件广播器(默认实现是简单的那个)' },
+                  { real: '订阅了该主题的部门', tech: '监听器接口实现,或带监听注解的方法' },
+                  { real: '一个一个打电话,要等', tech: '**默认同步执行**,在发布者线程内' },
+                  { real: '某个部门吵架,行政停下来上报', tech: '监听器抛异常会中断后续监听器并传给发布者' },
+                  { real: '改成发邮件,不等人回', tech: '监听方法加异步注解,或给广播器配执行器' },
+                  { real: '等财务确认到账再通知仓库发货', tech: '事务事件监听,监听时机设为「提交后」' },
                 ],
                 limit:
-                  '类比的边界在「顺序与事务」。现实中行政可以并发打电话，而 Spring 默认**严格顺序**（按 `@Order`），并发要靠异步；现实中「通知发出去了就发出去了」，而 Spring 的事件**没有持久化**——进程崩溃时未处理的事件直接丢失。所以需要「可靠投递」时不该用 Spring 事件，而应使用消息队列（本地消息表 / 事务消息）。这个区别很重要：**Spring 事件是「进程内解耦」，不是「可靠消息」**。',
+                  '类比的边界在「顺序与持久化」。现实中行政可以并发打电话,而框架默认**严格顺序**,并发要靠异步;现实中「通知发出去了就发出去了」,而事件**没有任何持久化**——进程崩溃时未处理的事件直接丢失。所以需要「可靠投递」时不该用它,而应该用消息队列或本地消息表。[[这是「进程内解耦」,不是「可靠消息」]]——把它当消息队列用,是这类事故最常见的起因。',
               },
               {
                 kind: 'principle',
-                title: '@Async 的两个致命陷阱',
+                title: '异步注解的两个致命陷阱',
                 body: [
-                  '`@Async` 看起来只是「加个注解就异步」，但它踩坑率高得惊人。原因都在「它是代理实现的」这一点上。',
+                  '它看起来只是「加个注解就异步」,但踩坑率高得惊人。原因全在一个点上:**它是靠代理实现的**。',
                 ],
                 steps: [
                   {
-                    title: '① 原理：代理 + 线程池，两件事缺一不可',
+                    title: '① 原理:代理加线程池,缺一不可',
                     detail:
-                      '`@EnableAsync` 引入 `AsyncAnnotationBeanPostProcessor`，它为标了 `@Async` 的 Bean 生成代理；调用时代理把 `Runnable` 提交给 `TaskExecutor` 并**立即返回**（返回值包装成 `Future` / `CompletableFuture`）。所以「异步」不是注解的魔法，是「代理拦截 + 线程池执行」的组合。',
+                      '`@EnableAsync` 会注册 `AsyncAnnotationBeanPostProcessor`,为标了 `@Async` 的对象生成代理。调用时,代理把原方法包装成一个任务提交给执行器,然后立刻返回。[[所以「代理没生效」和「执行器没配」是两类完全不同的故障]]。',
                   },
                   {
-                    title: '② 陷阱一：自调用必然失效',
+                    title: '② 陷阱一:自调用必然失效',
                     detail:
-                      '同一个类里 `this.asyncMethod()` 走的是 `this`，不是代理对象，注解完全不被触发——方法**同步执行**，而且不报错。这就是「@Async 没生效」最常见的原因。解法三种：把方法拆到另一个 Bean；注入自己的代理（`@Lazy` 注入自己）；用 `AopContext.currentProxy()`（需开 `exposeProxy`）。同类问题也存在于 `@Transactional`、`@Cacheable`——**一切基于代理的注解都有这个限制**。',
+                      '同一个类里用自身引用调用,走的是原始对象,不经过代理,注解完全不被触发——方法**同步执行**,而且不报错。这是「异步没生效」最常见的原因。解法与事务完全一样:拆到另一个类、注入自身、或者用编程式提交。',
                   },
                   {
-                    title: '③ 陷阱二：默认线程池是无界的',
+                    title: '③ 陷阱二:默认执行器根本不池化',
                     detail:
-                      '没配 `TaskExecutor` 时，Spring 用 `SimpleAsyncTaskExecutor`——**它根本不池化，每个任务新建一个线程，且没有上限**。高并发下会疯狂创建线程直到 OOM。所以生产必须自定义 `ThreadPoolTaskExecutor`（核心数、队列、拒绝策略、线程名），并命名为 `applicationTaskExecutor` 或通过 `@Async("myPool")` 指定。**这个坑的可怕之处在于「开发环境完全正常」**。',
+                      '没有配置执行器时,框架用 `SimpleAsyncTaskExecutor`——**它根本不池化,每个任务新建一个线程,且没有上限**。高并发下会疯狂创建线程直至耗尽内存。[[这不是「默认值不够好」,而是「默认值只适合演示」]]——生产必须显式配置核心数、最大数、队列、拒绝策略。',
                   },
                   {
-                    title: '④ 三个次要点：异常、返回值、上下文',
+                    title: '④ 三个次要点:异常、返回值、上下文',
                     detail:
-                      '**异常**：`void` 返回值时异常会被 `AsyncUncaughtExceptionHandler` 吞掉（默认只打日志），调用方毫无感知——必须自定义 handler 或改用 `CompletableFuture` 并 `.exceptionally`。**返回值**：只能返回 `void` / `Future` / `CompletableFuture`，返回其他类型会拿到 `null`。**上下文**：`ThreadLocal`（含 `RequestContextHolder`、`SecurityContext`、MDC 的 `traceId`）**不会传到异步线程**，需要手动传递或用 `TaskDecorator`。',
+                      '**异常**:返回值为空时,异常交给 `AsyncUncaughtExceptionHandler`,默认实现只打日志,调用方毫无感知——必须自定义或改用可返回结果的类型。**上下文**:线程本地变量不跨线程,请求信息、安全上下文、日志追踪标识全都丢,需要显式传递或加装饰器。**方法可见性**:私有方法、`final` 方法同样拦不住。',
                   },
                   {
                     title: '⑤ 关闭时的正确姿势',
                     detail:
-                      '`ThreadPoolTaskExecutor` 默认**不等任务执行完**就关闭，停机时异步任务直接丢失。必须显式设 `setWaitForTasksToCompleteOnShutdown(true)` + `setAwaitTerminationSeconds(30)`。这一条和「优雅停机」是同一个问题的两面——很多团队配了 `server.shutdown=graceful`，却忘了线程池也要优雅关闭。',
+                      '线程池默认**不等任务执行完**就关闭,停机时异步任务直接丢失。必须显式设置「等待任务完成」并给一个超时。这一条在发布频繁的环境里尤其重要——每次发布都会静默丢掉一批正在执行的任务。',
                   },
                 ],
               },
               {
                 kind: 'code',
-                title: '一个生产可用的 @Async 配置',
+                title: '一个生产可用的异步配置',
                 body: [
-                  '把上面五个坑一次填完。注意线程名前缀、拒绝策略、异常处理器、优雅关闭四处。',
+                  '把上面五个坑一次填完。注意线程名前缀、拒绝策略、异常处理器、优雅关闭、上下文传递这五处——每一处都对应一次真实故障。',
                 ],
-                lang: 'java',
-                code:
-                  '@Configuration\n@EnableAsync\npublic class AsyncConfig implements AsyncConfigurer {\n\n    @Bean("bizExecutor")\n    public ThreadPoolTaskExecutor bizExecutor() {\n        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();\n        ex.setCorePoolSize(8);\n        ex.setMaxPoolSize(16);\n        ex.setQueueCapacity(500);\n        ex.setKeepAliveSeconds(60);\n        ex.setThreadNamePrefix("biz-async-");          // ① 线程名：排查问题的第一手线索\n        ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy()); // ② 背压\n        ex.setWaitForTasksToCompleteOnShutdown(true);   // ③ 停机不丢任务\n        ex.setAwaitTerminationSeconds(30);\n        // ④ 传递 MDC / traceId 到异步线程\n        ex.setTaskDecorator(runnable -> {\n            Map<String, String> ctx = MDC.getCopyOfContextMap();\n            return () -> {\n                if (ctx != null) MDC.setContextMap(ctx);\n                try { runnable.run(); } finally { MDC.clear(); }\n            };\n        });\n        ex.initialize();\n        return ex;\n    }\n\n    @Override\n    public Executor getAsyncExecutor() { return bizExecutor(); }\n\n    @Override\n    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {\n        // ⑤ void 方法的异常在这里收口，默认实现只打日志、容易被忽略\n        return (ex, method, params) ->\n                log.error("async failed: {}", method.getName(), ex);\n    }\n}\n\n// 使用：显式指定线程池，不要依赖默认\n@Async("bizExecutor")\npublic CompletableFuture<Order> loadOrder(Long id) {\n    return CompletableFuture.completedFuture(orderMapper.selectById(id));\n}',
-                caption:
-                  '五处细节各有对应的事故：① 没有线程名前缀，出问题时 `pool-3-thread-7` 完全无法定位；② 用 `AbortPolicy` 会在队列满时直接丢任务（抛异常）而调用方往往没 catch；③ 不设优雅关闭，发布时正在跑的任务全部丢失；④ 不传 MDC，异步链路的日志没有 `traceId`，链路追踪断在异步边界；⑤ `void` 方法的异常默认只打一行日志，业务方永远不知道失败。**再加一条：`@Async` 方法必须 `public`，且同类调用无效**——注解不会报错，只会静默失效。',
-                notes: [
-                  { line: 'ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());', text: '拒绝策略选 `CallerRuns` 可以让「提交任务的线程自己执行」，天然形成背压。若业务不能接受「异步变同步」，改用 `DiscardOldestPolicy` 前必须确认丢弃的任务可重跑。' },
-                  { line: 'ex.setTaskDecorator(runnable -> { ... MDC ... });', text: '`TaskDecorator` 是唯一官方支持的「跨线程传上下文」入口。比手动在每个 `@Async` 方法开头设置 MDC 可靠得多——后者很容易漏。' },
-                  { line: '@Async("bizExecutor")', text: '显式指定池名。不指定时会找唯一的 `TaskExecutor` Bean，找到了就用、找不到就退回 `SimpleAsyncTaskExecutor`（**无界建线程**）——所以「没写池名」是线上 OOM 的常见起点。' },
-                ],
+                code: {
+                  language: 'java',
+                  code:
+                    "@Configuration\n@EnableAsync\npublic class AsyncConfig implements AsyncConfigurer {\n\n    @Bean(\"bizExecutor\")\n    public ThreadPoolTaskExecutor bizExecutor() {\n        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();\n        ex.setCorePoolSize(8);\n        ex.setMaxPoolSize(16);\n        ex.setQueueCapacity(500);\n        ex.setKeepAliveSeconds(60);\n        ex.setThreadNamePrefix(\"biz-async-\");          // ① 线程名:排查问题的第一手线索\n        ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy()); // ② 背压\n        ex.setWaitForTasksToCompleteOnShutdown(true);   // ③ 停机不丢任务\n        ex.setAwaitTerminationSeconds(30);\n        // ④ 把日志上下文传到异步线程\n        ex.setTaskDecorator(runnable -> {\n            Map<String, String> ctx = MDC.getCopyOfContextMap();\n            return () -> {\n                if (ctx != null) MDC.setContextMap(ctx);\n                try { runnable.run(); } finally { MDC.clear(); }\n            };\n        });\n        ex.initialize();\n        return ex;\n    }\n\n    @Override\n    public Executor getAsyncExecutor() { return bizExecutor(); }\n\n    @Override\n    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {\n        // ⑤ 返回值为空的方法,异常在这里收口;默认实现只打日志、极易被忽略\n        return (ex, method, params) ->\n                log.error(\"async failed: {}\", method.getName(), ex);\n    }\n}\n\n// 使用:显式指定线程池,不要依赖默认\n@Async(\"bizExecutor\")\npublic CompletableFuture<Order> loadOrder(Long id) {\n    return CompletableFuture.completedFuture(orderMapper.selectById(id));\n}",
+                },
               },
               {
                 kind: 'diagram',
-                title: '定时任务的三代方案',
+                title: '定时任务的五代方案',
                 body: [
-                  '「Spring 定时任务怎么做、有什么局限」——按演进讲最清楚：从 JDK 自带，到 Spring 注解，再到分布式调度平台。',
+                  '「定时任务怎么做、有什么局限」——按演进讲最清楚:从 JDK 自带,到注解封装,再到分布式调度平台。每一代都在解决上一代的一个硬伤。',
                 ],
                 diagram: {
                   type: 'flow',
                   direction: 'v',
                   items: [
-                    { label: '① `java.util.Timer`', note: '单线程；一个任务抛异常会导致**整个 Timer 线程死亡**，后续任务全不执行。已不推荐' },
-                    { label: '② `ScheduledExecutorService`', note: '线程池 + 异常隔离（单任务异常不影响其他）；`scheduleAtFixedRate` / `scheduleWithFixedDelay` 两种语义' },
-                    { label: '③ `@Scheduled` + `@EnableScheduling`', note: 'Spring 封装，底层是 `ScheduledAnnotationBeanPostProcessor` + 默认**单线程**的 `TaskScheduler`' },
-                    { label: '④ `@Scheduled` + 自定义 `TaskScheduler`', note: '设 `poolSize > 1` 让多任务并行；但**同一任务不会并发**（`fixedRate` 也是串行触发）' },
-                    { label: '⑤ Quartz / XXL-JOB / Elastic-Job', note: '分布式调度：任务持久化、失败重试、分片、**集群防重**、可视化运维' },
+                    { label: '① `java.util.Timer`', note: '单线程;一个任务抛异常会导致**整个定时线程死亡**,后续任务全不执行' },
+                    { label: '② `ScheduledExecutorService`', note: '线程池 + 异常隔离;「固定频率」与「固定延迟」两种语义' },
+                    { label: '③ `@Scheduled` + `@EnableScheduling`', note: '底层是 `ScheduledAnnotationBeanPostProcessor` 加**默认单线程**的 `TaskScheduler`' },
+                    { label: '④ 注解 + 自定义 `TaskScheduler`', note: '设 `poolSize > 1` 让多任务并行;但**同一个任务仍不会并发**' },
+                    { label: '⑤ Quartz / XXL-JOB / Elastic-Job', note: '任务持久化、失败重试、分片、**集群防重**、可视化运维' },
                   ],
                   caption:
-                    '`@Scheduled` 的三个必说局限：**第一，默认单线程**（`ThreadPoolTaskScheduler` 的 `poolSize=1`），一个慢任务会阻塞所有其他定时任务——这是「明明配了 5 个任务，只有 1 个按时跑」的原因。**第二，集群下重复执行**——每个实例都会跑同一个 `@Scheduled`，必须靠分布式锁（Redis / 数据库）或改用 XXL-JOB 这类平台。**第三，无运维界面、无失败重试、无执行记录**——出了问题是「任务到底跑没跑」都查不到，只能翻日志。所以结论是：**单机、非关键、轻量任务用 `@Scheduled`；集群或有运维要求的，一律上调度平台**。另外注意 `fixedRate` 与 `fixedDelay` 的区别：前者按「固定频率」（上次开始 + n），任务耗时超过间隔时会排队堆积；后者是「上次结束后再等 n」——**长任务必须用 `fixedDelay`**。',
+                    '注解方案的三个必说局限。**第一,默认单线程**:一个慢任务会阻塞所有其他任务——这是「明明配了 5 个任务,只有 1 个按时跑」的原因。**第二,集群下重复执行**:每个实例都会跑同一个注解方法,必须靠分布式锁或改用调度平台。**第三,无运维能力**:没有执行记录、没有失败重试、没有手动触发,出问题时连「跑没跑」都查不到。[[所以结论很硬:单机非关键任务用注解,集群或有运维要求的一律上平台]]。',
                 },
               },
               {
                 kind: 'diagram',
-                title: 'Spring 5 → 6 版本对照',
+                title: '两个大版本之间的能力差',
                 body: [
-                  '「Spring 5 / 6 各有哪些新特性」按「版本主线 + 面试可说的点」列表。Spring 6 与 Boot 3 是同一波变化。',
+                  '版本题按「能力主线 + 面试可说的点」列。注意这张表的重点不在「新特性有几个」,而在**哪些变化需要你改代码**。',
                 ],
                 diagram: {
                   type: 'matrix',
-                  head: ['能力', 'Spring 5（5.3）', 'Spring 6（6.x）', '面试可说的点'],
-                  cols: ['Spring 5（5.3）', 'Spring 6（6.x）', '面试可说的点'],
+                  head: ['能力', '上一个主线版本', '当前主线版本', '面试可说的点'],
+                  cols: ['上一个主线版本', '当前主线版本', '面试可说的点'],
                   rows: [
-                    ['JDK 基线', 'JDK 8+', '**JDK 17+**', '「6 用了 record、密封类、模式匹配」'],
-                    ['Web 栈', 'Spring MVC + WebFlux', '同上 + **`@HttpExchange` 声明式客户端**', '「内置 HTTP Interface，替代 Feign 的轻量方案」'],
-                    ['响应式', 'Reactor 3.3+', 'Reactor 3.5+ / **虚拟线程支持**', '「JDK 21 虚拟线程 + Boot 3.2 一行开关」'],
-                    ['AOT / Native', 'Spring Native（独立项目）', '**AOT 引擎内置**', '「`RuntimeHints` 替代 `@AotHints`，构建期确定反射」'],
-                    ['可观测性', 'Micrometer', '**Micrometer Observation**', '「`@Observed` 一个注解同时出 metrics / trace / log」'],
-                    ['错误响应', '自定义', '**`ProblemDetail`（RFC 7807）**', '「`application/problem+json` 标准化错误体」'],
-                    ['Security', '`WebSecurityConfigurerAdapter`', '**`SecurityFilterChain` Bean**', '「适配器基类废弃，改声明式」'],
+                    ['JDK 基线', 'JDK 8+', '**JDK 17+**', '「用了 record、密封类、模式匹配」'],
+                    ['Web 栈', 'MVC + WebFlux 并行', '同上 + **`@HttpExchange`**', '「内置声明式客户端,替代 Feign 的轻量方案」'],
+                    ['并发模型', '平台线程', '**虚拟线程一行开关**', '「JDK 21 + 新版本 Boot 直接开」'],
+                    ['AOT / 原生镜像', 'Spring Native 独立项目', '**AOT 引擎内置**', '「`RuntimeHints` 替代 `@AotHints`,从运行期反射转向构建期确定」'],
+                    ['可观测性', 'Micrometer', '**Micrometer Observation**', '「`@Observed` 一个注解同时出指标、链路、日志」'],
+                    ['错误响应', '各自自定义', '**`ProblemDetail`(RFC 7807)**', '「`application/problem+json` 标准化错误体」'],
+                    ['安全配置', '继承适配器基类', '**声明过滤器链 Bean**', '「基类废弃,改声明式」'],
                     ['命名空间', '`javax.*`', '**`jakarta.*`**', '「Servlet / JPA / Validation 全量替换」'],
-                    ['声明式校验', 'Bean Validation 2.0', '**Bean Validation 3.0（jakarta）**', '「`@Valid` 位置语义更严格」'],
                   ],
                   caption:
-                    '若被问「Spring 6 最值得提的新能力」，选 **AOT**（它改变了框架的启动模型，从「运行期反射」转向「构建期确定」）和 **HTTP Interface**（`@HttpExchange` 把「声明式 HTTP 客户端」变成框架内建能力）。若被问「升级的最大障碍」，答案永远是 **`javax` → `jakarta` 的全量迁移 + 第三方库版本矩阵**——这件事没有任何技巧，只能逐个升级。另注意：**Spring 6 不等于 Spring Boot 3**，但两者通常同步升级，因为 Boot 3 就是基于 Spring 6 的。',
+                    '若被问「最值得提的新能力」,选 **AOT**(它改变了启动模型)和**声明式 HTTP 客户端**(把原本要引第三方库的能力变成内建)。若被问「升级最大障碍」,答案永远是**命名空间的全量迁移加第三方库版本矩阵**——这件事没有技巧,只能逐个升级。[[注意「框架大版本」不等于「Boot 大版本」]],但两者通常同步升级,因为新版 Boot 就建立在新版框架之上。',
                 },
               },
               {
-                kind: 'question',
-                title: 'Spring 的事件机制是怎样的？',
-                questionId: 'java-05-Q89',
-                intent:
-                  '默认同步这一点必须说清。能补上 `@TransactionalEventListener` 就是加分。',
-                points: [
-                  '**三要素**：事件（`ApplicationEvent` 或任意 POJO）、发布者（`ApplicationEventPublisher`）、监听器（`ApplicationListener` / `@EventListener`）',
-                  '**发布**：`publishEvent(event)` → `ApplicationEventMulticaster.multicastEvent()`',
-                  '**广播**：`SimpleApplicationEventMulticaster` 遍历匹配的监听器，按 `@Order` 排序',
-                  '**默认同步**：在**发布者线程**内依次调用 —— 监听器慢则发布者慢，监听器抛异常则异常传播回发布者并中断后续监听器',
-                  '**异步化两种方式**：监听方法加 `@Async` + `@EnableAsync`；或给广播器配 `taskExecutor`',
-                  '**事务感知**：`@TransactionalEventListener(phase = AFTER_COMMIT / BEFORE_COMMIT / AFTER_ROLLBACK / AFTER_COMPLETION)`',
-                  '**内置事件**：`ContextRefreshedEvent`、`ContextClosedEvent`、`ApplicationReadyEvent`、`ApplicationFailedEvent`',
-                  '**与 MQ 的本质区别**：Spring 事件是**进程内**、无持久化、无重试；MQ 是跨进程、可持久化、可重投',
+                kind: 'concept',
+                title: '收口:四条链路,一个判据',
+                body: [
+                  '把整个 Spring 课程压缩成四条可以顺着讲的链路。**对象的一生**:`BeanDefinition` 从哪来 → 实例化 → 属性注入 → 初始化前后回调 → 使用 → 销毁。**请求的一生**:过滤器 → 调度器 → 找处理器 → 找适配器 → 参数解析 → 调用 → 返回值处理 → 渲染。**数据访问的一生**:接口代理 → 语句映射 → 动态 SQL 求值 → 执行器 → 结果映射。**事务的一生**:`@Transactional` → 代理 → `TransactionInterceptor` → 事务管理器 → 提交或回滚。',
+                  '这四条链路的价值在于:面试官通常沿其中一条往深处问,而每一环都能主动抛出下一环的钩子。比如讲「代理在哪生成」,自然接「为什么要后置处理器」,再自然接「AOP 与循环依赖怎么共存」。[[主动抛钩子比等着被问更能体现理解深度]]。',
+                  '扩展点的选择只需要一个判据:**你是要改「怎么造」,还是要改「造出来的东西」,还是要在「造完之后做点什么」**。想改定义就找第一支,想包装实例就找第二支,想收尾就找第三支。至于「能不能注入别的对象」,仍然回到那句:预实例化之前都不安全。',
+                  '自测一道:你要在应用启动完成后校验所有配置项是否合法,并且需要用到数据库连接。该把代码放在哪个扩展点?答案在「所有单例就绪」那个回调里——放在更早的位置会因为连接池还没初始化而失败,而放在「容器刷新完成」事件里也可以,但要确认连接池的初始化顺序。',
                 ],
-                depth:
-                  '「为什么需要事件机制」的标准答案是**解耦**：下单成功后要做「发短信、加积分、写日志、通知库存」，如果都写在 `OrderService` 里，它会变成一个「什么都依赖」的上帝类；改成发布 `OrderCreatedEvent`，`OrderService` 只依赖事件本身，新增业务只需加一个监听器。**但要立刻补充边界**：这种解耦的代价是「调用链变得不可见」——排查问题时看不到「谁处理了这个事件」，所以要靠日志与链路追踪。**这个「解耦 vs 可观测性」的权衡，是回答里最能体现工程判断的部分**。',
-                followup:
-                  '「`@EventListener` 和实现 `ApplicationListener` 有什么区别」——前者是注解 + 方法，方法签名自由（参数就是事件类型，可返回一个新事件实现「级联发布」），且**支持条件过滤**（`condition = "#event.type == \'PAID\'"`，用 SpEL）；后者是实现接口，一个类只能监听一种事件（泛型擦除后靠 `ResolvableType` 推断）。**新代码一律用 `@EventListener`**，它更灵活。另外 `@TransactionalEventListener` 只能用于注解形式，接口形式拿不到事务阶段语义。',
               },
               {
                 kind: 'question',
-                title: '@Async 的原理和注意事项？默认线程池是什么？',
-                questionId: 'java-05-Q90',
-                intent:
-                  '「默认是 `SimpleAsyncTaskExecutor` 且无界」这个细节是本题的核心分水岭，必须说。',
-                points: [
-                  '**原理**：`@EnableAsync` → `AsyncAnnotationBeanPostProcessor` 生成代理 → 调用时把任务提交给 `TaskExecutor` 并立即返回',
-                  '**默认线程池**：`SimpleAsyncTaskExecutor`——**不池化、不用线程复用、没有上限**，每个任务新建线程；高并发下 OOM',
-                  '**陷阱一：自调用失效**——`this.method()` 不走代理，注解静默无效（`@Transactional` 同理）',
-                  '**陷阱二：方法必须 `public`**（代理拦截要求），`private` / `final` 也不行',
-                  '**陷阱三：异常被吞**——`void` 返回时异常交给 `AsyncUncaughtExceptionHandler`（默认只打日志）；要可靠处理必须用 `CompletableFuture` 并显式处理',
-                  '**陷阱四：上下文丢失**——`ThreadLocal`（`RequestContextHolder`、`SecurityContext`、MDC 的 `traceId`）不会传递，需 `TaskDecorator` 或手动透传',
-                  '**陷阱五：停机丢任务**——需 `setWaitForTasksToCompleteOnShutdown(true)` + `setAwaitTerminationSeconds(n)`',
-                  '**正确配置**：自定义 `ThreadPoolTaskExecutor`（核心/最大/队列/拒绝策略/线程名前缀），用 `@Async("poolName")` 显式指定',
-                ],
-                depth:
-                  '「为什么默认用 `SimpleAsyncTaskExecutor` 这么危险的设计」——历史原因：Spring 无法在框架层替用户决定合理的线程池参数（CPU 密集还是 IO 密集？能容忍多少队列？），所以给了一个「能跑但不可用于生产」的默认实现。**这个设计的隐含契约是「你必须自己配」**，而文档里这句话不明显，导致大量项目直接上线。类似的「默认不安全」还有 `RestTemplate` 无连接池、`SimpleClientHttpRequestFactory` 无超时——**Spring 的默认值常常是「能跑通」而不是「能上生产」**，这是使用它时的重要心智。',
-                followup:
-                  '「`@Async` 返回 `void` 和返回 `CompletableFuture` 有什么区别」——`void` 时调用方完全不知道执行结果，异常也被吞；`CompletableFuture` 时调用方可以 `.thenApply` / `.exceptionally` / `.get(timeout)`，能拿到结果、能感知失败、能设超时。**规范建议：能用 `CompletableFuture` 就别用 `void`**。另外注意返回 `Future`（非 `CompletableFuture`）时，Spring 用的是 `AsyncResult`，`get()` 会阻塞——别在 Web 线程里直接 `.get()`，那样等于同步。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 定时任务怎么做？有什么局限？',
-                questionId: 'java-05-Q91',
-                intent:
-                  '三个局限（单线程 / 集群重复 / 无运维）必须全说，`fixedRate` 与 `fixedDelay` 的区别是常见追问。',
-                points: [
-                  '**用法**：`@EnableScheduling` + `@Scheduled(fixedRate / fixedDelay / cron)`；cron 支持 6 位（秒 分 时 日 月 周）',
-                  '**局限一：默认单线程**——`ThreadPoolTaskScheduler` 的 `poolSize=1`，慢任务阻塞所有其他任务；需自定义 `TaskScheduler` 提高并发',
-                  '**局限二：集群重复执行**——每个实例都跑，必须加分布式锁（Redis `SETNX` + 过期）或改用调度平台',
-                  '**局限三：无运维能力**——无执行记录、无失败重试、无手动触发、无告警，出问题只能翻日志',
-                  '**`fixedRate` vs `fixedDelay`**：前者「上次**开始** + n」按固定频率（长任务会堆积），后者「上次**结束** + n」（长任务不影响间隔）',
-                  '**cron 的坑**：`0 0 2 * * ?` 在集群下每个实例都执行一次；`cron` 不支持「上次未完成则跳过」，长任务会重叠（除非开 `@DisallowConcurrentExecution`，但那是 Quartz 的）',
-                  '**线程池问题**：`@Scheduled` 方法内的异步调用（`@Async` / 线程池）与调度线程是两回事，别混在一起排查',
-                  '**替代方案**：Quartz（可持久化、集群）、XXL-JOB（可视化、分片、失败重试）、Elastic-Job、K8s CronJob',
-                ],
-                depth:
-                  '「`@Scheduled` 在集群里加 Redis 锁就够了吗」——不够，还有三个细节：**① 锁要设过期时间**，否则实例崩溃后锁永不释放，任务永久停摆；**② 锁的粒度要覆盖整个任务执行期**——常见错误是「拿到锁后立刻释放」，等于没锁；**③ 要考虑「执行时间超过间隔」**，下一轮抢锁时上一轮还没结束，需要「看门狗续期」（Redisson 的 `RLock` 支持）或「先查执行状态」。**所以「自己加锁」只能应付低频、短时的任务；一旦有这些要求，调度平台的复杂度是有必要的**。',
-                followup:
-                  '「K8s CronJob 和 `@Scheduled` 怎么选」——CronJob 的优势是「不依赖应用常驻」（应用可以是纯粹的按需启动）、有执行历史与重试策略、天然单实例（靠 K8s 调度）；劣势是要为每个任务准备镜像与启动开销、无法访问应用内存状态。**实践中的常见组合**：应用内的轻量任务用 `@Scheduled` + 单实例部署（或分布式锁），重型批处理用 CronJob 或 XXL-JOB 分片执行。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 5 / Spring 6 各有哪些新特性？',
-                questionId: 'java-05-Q92',
-                intent:
-                  '按版本主线说，每题挑 2-3 个「能展开讲」的点，别背清单。',
-                points: [
-                  '**Spring 5（基线 JDK 8）**：响应式 WebFlux、`@Nullable` 与 Kotlin 支持、函数式 Bean 注册、`PathPattern` 路由、`WebClient`',
-                  '**Spring 5.3**：`PathPatternParser` 默认、`@HttpExchange` 雏形、GraalVM 实验支持',
-                  '**Spring 6（基线 JDK 17）**：`jakarta.*` 命名空间、AOT 引擎内置、`@HttpExchange` 正式、`ProblemDetail`、Micrometer Observation',
-                  '**响应式增强**：`WebClient`、`R2DBC`、`Reactor Netty`；`@Controller` 也能返回 `Flux` / `Mono`',
-                  '**虚拟线程**：Spring 6.1 / Boot 3.2 起 `spring.threads.virtual.enabled=true` 一行开启（JDK 21）',
-                  '**AOT 的意义**：把「运行期反射」变成「构建期确定」，是原生镜像的前提；代价是需注册 `RuntimeHints`',
-                  '**HTTP Interface**：`@HttpExchange` + `HttpServiceProxyFactory`，接口即客户端，无需 Feign',
-                  '**回答策略**：挑 2 个能讲透的（AOT、`@HttpExchange`），其余一句带过，比罗列 8 条更显深度',
-                ],
-                depth:
-                  '「Spring 6 的 AOT 到底改变了什么」——传统模式下，`@ComponentScan`、`@Conditional`、代理生成、参数名推断全靠**运行期反射**，所以启动慢（秒级）、内存高（元数据）。AOT 把这一切**前移到构建期**：生成「Bean 注册代码 + 代理类 + 反射 hints」，运行时直接执行生成的代码，不再扫描与推断。**收益**：启动快一个数量级、可编译成原生镜像；**代价**：构建变慢、`Class.forName` 这类动态代码必须显式注册 hints、profile 相关的条件在构建期就得确定（`@Profile` 与 AOT 有微妙冲突）。**这个「用构建期成本换运行期性能」的权衡，是 Spring 6 最值得讲的设计变化**。',
-                followup:
-                  '「现在该不该上 Spring 6 / Boot 3」——判断三个条件：① 能否接受 JDK 17+（存量系统可能被中间件、旧 SDK 卡住）；② 关键第三方库是否已支持 `jakarta`（MyBatis-Plus、ShardingSphere、各类公司内部 starter）；③ 是否需要原生镜像（若不需要，AOT 的收益主要是启动速度，可以先不做 native）。**只要有一条不满足，就建议先升到 2.7 + Spring 5.3 把废弃 API 清完，等条件成熟再跨版本**——这是风险最低的路径。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 常见「连环追问」答题链路（面试前过一遍）',
-                questionId: 'java-05-Q93',
-                intent:
-                  '这题是「总纲」，答的是「你的知识是怎么串起来的」。给出两三条主线，展示结构化。',
-                points: [
-                  '**链路一（Bean 的一生）**：`BeanDefinition` 从哪来（`@ComponentScan` / `@Bean` / 自动配置）→ 实例化（构造器）→ 属性注入（`@Autowired`）→ `Aware` 回调 → `BeanPostProcessor` 前置 → `@PostConstruct` → `InitializingBean` → `BeanPostProcessor` 后置（**AOP 代理在此生成**）→ 使用 → `@PreDestroy` → `DisposableBean`',
-                  '**链路二（请求的一生）**：Filter → `DispatcherServlet` → `HandlerMapping` → `HandlerAdapter` → 参数解析 → Controller → 返回值处理 → `HttpMessageConverter` → 响应',
-                  '**链路三（SQL 的一生）**：Mapper 代理 → `MappedStatement` → `BoundSql`（动态 SQL 求值）→ `Executor`（查缓存）→ `StatementHandler` → `ParameterHandler` → JDBC → `ResultSetHandler` → 缓存回写',
-                  '**链路四（事务的一生）**：`@Transactional` → AOP 代理 → `TransactionInterceptor` → `PlatformTransactionManager` → 取连接 + 设 `autocommit=false` → 业务执行 → 提交/回滚 → 释放连接',
-                  '**追问套路**：面试官通常沿一条链路往深处问（如「代理在哪生成」→「为什么要 `BeanPostProcessor`」→「AOP 和循环依赖怎么共存」），**答的时候主动抛出「下一环的钩子」**',
-                  '**反问准备**：项目里用过的版本、遇到的真实故障（如循环依赖、事务失效、自动配置冲突），比背概念更有说服力',
-                ],
-                depth:
-                  '这条链路的价值在「迁移能力」：四条链路其实共享同一套机制——**代理（AOP）+ 后置处理器（扩展）+ 模板方法（骨架）+ 责任链（多组件）**。所以你被问到任何「Spring 里 X 是怎么实现的」，都可以先归到这四种模式之一，再展开细节。**这个「模式识别」的能力，是「背了很多题」和「真的理解了框架」的分界线**——面试官顺着你给的钩子往下问，你能一直答到源码层面，就是最高评价。',
-                followup:
-                  '「怎么准备这类连环追问」——最有效的方式不是刷题，而是**自己画一遍四条链路**（不看资料），画完对照源码补齐断点。第二有效的是**读三个类的源码**：`AbstractApplicationContext.refresh()`、`DispatcherServlet.doDispatch()`、`ConfigurationClassParser`（自动配置的解析入口）。**读源码的收益不在于记住细节，而在于建立「框架会怎么想」的直觉**——有了直觉，没背过的题也能推出来。',
-              },
-              {
-                kind: 'question',
-                title: 'Spring 有哪些值得提的扩展点？（收尾开放题）',
+                title: 'Q94 · Spring 有哪些值得提的扩展点？',
                 questionId: 'java-05-Q94',
-                intent:
-                  '开放题，考的是「有没有真的用扩展点做过事」。答三个「用过且有场景」的，胜过罗列十个。',
+                intent: '这是一道开放题,考的是「你有没有自己的分类方式」。按字母顺序罗列十个名字是入门答案;按「改什么」分三支、并能说出每一支的时机约束,才是会用的答案。',
                 points: [
-                  '**改 BeanDefinition**：`BeanFactoryPostProcessor` / `BeanDefinitionRegistryPostProcessor`——动态注册 Bean（`@MapperScan` 的原理）',
-                  '**改 Bean 实例**：`BeanPostProcessor`——自定义注解的通用处理（如「给标了 `@Encrypted` 的字段生成代理」），AOP 代理也在此生成',
-                  '**拿容器**：`ApplicationContextAware`——需要主动 `getBean` 的场景（如工厂模式里按名称取实现）',
-                  '**初始化时机**：`SmartInitializingSingleton`（所有单例就绪后）、`ApplicationRunner` / `CommandLineRunner`（容器启动完成后）',
-                  '**生命周期**：`@PostConstruct` / `InitializingBean` / `@PreDestroy` / `DisposableBean`——资源申请与释放',
-                  '**框架级**：`HandlerInterceptor`（MVC）、`HandlerMethodArgumentResolver`（自定义参数解析，如 `@CurrentUser`）、`HttpMessageConverter`（自定义序列化）',
-                  '**配置级**：`EnvironmentPostProcessor`（在容器创建前改配置）、`PropertySourceLocator`（接入配置中心）、`WebServerFactoryCustomizer`（改内嵌容器参数）',
-                  '**AOP 级**：自定义 `@Aspect`、`Advisor`（比切面更底层，能控制代理创建）、`BeanPostProcessor` + `ProxyFactory`（手写代理）',
+                  '**改定义**:容器级后置处理器可以在对象创建前修改图纸;它的子接口还能**注册新定义**——注解扫描就是这么实现的',
+                  '**改实例**:Bean 级后置处理器在初始化前后各回调一次,**代理就是在这里生成的**;更早的变体还能干预实例化本身',
+                  '**拿容器**:容器感知系列按「名字 → 工厂 → 上下文」的顺序回调,适合需要主动按名字取对象的场景',
+                  '**初始化时机**:「所有单例就绪」回调是所有对象都在、且不会触发提前初始化的唯一安全位置',
+                  '**框架级**:MVC 的拦截器与自定义参数解析器、配置层的环境后处理器、AOP 的切面与顾问',
+                  '**一条判据**:能不能注入别的对象,只看它在「预实例化单例」之前还是之后——之前的都会触发提前初始化',
                 ],
                 depth:
-                  '答题策略很重要：**先说「我按执行时机分三类」，然后每类只挑一个自己真用过的展开**（讲清「为什么需要它」+「不用它会怎样」）。例如 `HandlerMethodArgumentResolver`：「我们用它实现了 `@CurrentUser`——不然每个 Controller 方法都要写 `request.getAttribute("userId")` 再强转，20 个接口重复 20 次」。**有场景、有对比、有收益陈述的回答，比「Spring 有 20 个扩展点」强十倍**——面试官要判断的是「你写过框架层代码吗」，不是「你背过文档吗」。',
-                followup:
-                  '「有没有扩展点踩过坑」——两个真实且高价值的例子：① `BeanPostProcessor` 里注入了别的 Bean，导致该 Bean 提前初始化，绕过了后续的 `BeanPostProcessor`（表现为「某个 Bean 的 AOP 失效」）；② `ApplicationContextAware` 在静态工具类里保存了上下文，单元测试与多容器场景下拿到的是「上一个上下文」。**这两个坑的共同点是「扩展点的执行时机与你以为的不同」**——所以用扩展点前先问一句「此刻容器里有什么」，比记住接口名重要。',
+                  '拉开分档:普通答法能说出四五个扩展点名字;好答法会按「改定义 / 改实例 / 参与生命周期」分类并说明各自的时机;[[最好的答法会给出「选择判据」而不是清单]]——比如「我要在启动后做一次校验,该放哪」,能立刻答出「所有单例就绪之后」并解释为什么不放更早,这才是会用。',
+                followup: '追问:你说「所有单例就绪」之后才安全,那如果我的校验逻辑本身要发起一次远程调用,放这里合适吗?如果不合适,应该换成哪个扩展点?',
               },
             ],
           },

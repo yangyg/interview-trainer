@@ -202,11 +202,22 @@ export type LessonBlock =
       /** 术语卡:把关键词钉死 */
       term?: { name: string; def: string }
       points?: string[]
+      /** 收口补充:一段不宜打断正文、但必须说的判断 */
+      caption?: string
     }
   | {
       kind: 'why'
       title: string
+      /** 现象:先摆一个反常的事实,不解释 */
       body: string[]
+      /** 现场代码:报错、慢查询计划、错误输出 */
+      code?: { language: string; code: string; caption?: string }
+      /** 读者会先想到的错解,逐条否掉。这是钩子能成立的关键 */
+      wrong?: string[]
+      /** 真正的原因:写完这条,读者才觉得「值得往下读」 */
+      real?: string
+      /** 引出主线:这个答案还差哪一步,所以本课要讲什么 */
+      reveal?: string
       /** 反向论证:没有它会退化成什么样 */
       without?: string
     }
@@ -218,10 +229,14 @@ export type LessonBlock =
       steps: { title: string; detail: string }[]
       /** 收口一句话:这条链路的关键结论 */
       takeaway?: string
+      /** 追问与常见误解:挂在机制后面的问答 */
+      caption?: string
     }
   | {
       kind: 'analogy'
       title: string
+      /** 引子:类比之前先垫一句 */
+      body?: string[]
       text: string
       /** 类比映射:现实物 -> 技术物 */
       mapping?: { real: string; tech: string }[]
@@ -251,11 +266,42 @@ export type LessonBlock =
   | {
       kind: 'code'
       title: string
+      /** 读代码前的一句引导,渲染在代码框上方 */
+      body?: string[]
       lang: string
       code: string
       caption?: string
       /** 关键行讲解 */
       notes?: { line: string; text: string }[]
+      /** 代码之后的一段整体点评(与逐行 notes 互补) */
+      note?: string
+      /** 影响默认值或行为的前提,如 'MySQL 8.0' / 'JDK 21' / 'Spring Boot 3.2' */
+      version?: string
+      /** 运行环境补充,如 'Linux x86_64, 16C32G' */
+      env?: string
+      /** 是否实际运行过。false 时页面强制打「未验证」标记 */
+      verified?: boolean
+    }
+  | {
+      kind: 'explore'
+      title: string
+      /** 六问的前半段:我们此刻在讲的这条知识 */
+      from: string
+      /** 1-2 个分支。每个都必须答全四问,只列名字的分支会被构建拦掉 */
+      branches: {
+        /** down=向下深入 lateral=横向比较 cross=跨领域迁移 outward=向外延伸 reverse=反向探索 */
+        direction: 'down' | 'lateral' | 'cross' | 'outward' | 'reverse'
+        /** 关联知识:接下来探索什么 */
+        related: string
+        /** 联系依据:两者共享什么问题、原理或设计目标 */
+        basis: string
+        /** 相似之处 */
+        shared: string
+        /** 不同之处:哪些机制或结果不能混为一谈 */
+        diff: string
+        /** 探索价值:理解这个联系后多知道了什么 */
+        value: string
+      }[]
     }
   | {
       kind: 'handwrite'

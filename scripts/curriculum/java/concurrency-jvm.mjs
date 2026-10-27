@@ -1225,38 +1225,71 @@ export default {
         {
           id: 'volatile-cas',
           title: 'volatile、CAS 与原子类',
-          kind: 'concept',
+          minutes: 55,
           sources: [
             { topic: 'java-03', chapters: ['volatile'] },
             { topic: 'java-03', chapters: ['CAS'] },
           ],
           content: {
             intro:
-              '`volatile` 与 CAS 是一对搭档：前者解决**可见性与有序性**，后者解决**原子性**，合起来就是无锁编程的全部基础。这一节把 volatile 的两层语义、`i++` 为什么修不好、CAS 的三大缺陷（ABA、自旋开销、只能单变量）、以及 `LongAdder` 为什么比 `AtomicLong` 快讲透。有一条主线要一直抓住：**「无锁」不是「无开销」**——CAS 失败要自旋，高竞争下自旋空转会烧掉大量 CPU，反而比加锁更慢。所以「无锁一定比锁快」是这一节最需要被纠正的误解。',
+              '`volatile` 与 CAS 是并发里最容易被答成口诀的两块。真正要讲清的是三件事:`volatile` 到底阻止了**什么**优化(不是「刷新缓存」这么笼统)、CAS 为什么必须由 CPU 指令实现(而不是「先读再比再写」)、以及无锁在什么条件下反而比锁慢。把这三点立住,`i++` 为什么修不好、DCL 为什么必须加 `volatile`、`LongAdder` 为什么快,就都是推论而不是记忆。',
+            outline: [
+              '`volatile` 两层语义:可见性(禁止寄存器提升)+ 有序性(四种屏障),不保证原子性也不保证互斥',
+              '`i++` 是读-改-写三步,`volatile` 修不好;三种修法对应「单变量 / 多变量 / 超高并发」三种场景',
+              '修饰引用只保证引用本身可见,不保证内部字段;安全发布靠「不可变对象 + `volatile` 引用」',
+              'CAS 三要素由 CPU 指令保证原子;三大缺陷是 ABA、自旋开销、只能单变量',
+              '`AtomicInteger` = `volatile` 字段 + 字段偏移 + CAS 自旋;`LongAdder` 用 Cell 分散热点,`sum()` 不精确',
+            ],
+            pitfalls: [
+              '用 `volatile` 修饰计数器去修 `i++`:三步仍会交错,必须换原子类或锁',
+              '认为 `volatile` 修饰 `Map` 引用就线程安全:`put` 不是 `volatile` 写,内部字段不可见',
+              '高竞争场景仍用 `AtomicLong`:CAS 大量失败空转,应换 `LongAdder` 或直接加锁',
+            ],
             sections: [
               {
-                kind: 'concept',
-                title: 'volatile 的两层语义，一句话说清',
+                kind: 'why',
+                title: '一个 `volatile` 没加,那个线程永远不退出',
                 body: [
-                  '`volatile` 的语义只有两条，但每条都有具体机制：**① 可见性**——对 `volatile` 变量的写，会立刻刷新到主内存，读会强制从主内存重新加载（不走寄存器缓存）；**② 有序性**——禁止 `volatile` 读写与周边指令的特定重排，通过插入四种内存屏障实现。',
-                  '它**不提供**什么：不保证原子性（`i++` 仍会丢更新）、不保证互斥（两个线程可以同时读同一个 `volatile` 变量）、不保证「引用指向的对象内部字段」可见（只保证引用本身）。这三条边界是面试的主要火力点。',
-                  '最典型的正确用法是**状态标志位**：一个线程写 `volatile boolean stopped = true`，另一个线程循环 `while (!stopped)`。这里只有「单次读写」，没有复合操作，恰好落在 volatile 的能力范围内。反过来，只要出现「读-改-写」，就必须换 `Atomic*` 或加锁。',
-                  '一个容易被忽略的成本：`volatile` 禁止的优化里包括**寄存器提升（hoisting）**。没有 `volatile` 时，JIT 可以把循环里的变量读一次放进寄存器（因为单线程看不出差别）；有 `volatile` 就必须每次重读主内存。所以 `volatile` 在紧循环里的开销，主要来自「每次都要发内存访问」而不是屏障指令本身。',
+                  '一个后台任务线程,`while (!stopped) { ... }`,主线程在某个时刻把 `stopped` 置为 `true`。日志显示赋值确实执行了,但任务线程继续跑——`jstack` 里它一直是 `RUNNABLE`,而且**没有任何输出**,像在空转。给 `stopped` 加上 `volatile` 之后,同一份代码立刻正常退出。',
+                ],
+                code: {
+                  language: 'java',
+                  code:
+                    'class Worker implements Runnable {\n    private boolean stopped;          // ← 没有 volatile\n\n    public void run() {\n        while (!stopped) {            // JIT 优化后:这个判断里没有 load 指令\n            doWorkChunk();\n        }\n    }\n    void shutdown() { stopped = true; }\n}\n\n// 实际观察到的现象\n// jstack: "worker" #21 RUNNABLE        ← 在跑,不阻塞\n// 业务日志:一行都没有                   ← 循环体没被执行?\n// 主线程:stopped = true 已执行          ← 赋值生效了\n// 加上 volatile 后:立刻退出',
+                  caption: '三个现象放在一起是矛盾的:线程在跑、赋值生效了、循环体却没在跑。矛盾点说明**判断本身被优化掉了**。',
+                },
+                wrong: [
+                  '**猜法一:线程被阻塞或挂起了。** 但 `jstack` 显示 `RUNNABLE`,不是在 `WAITING`/`BLOCKED`。它确实在占 CPU。',
+                  '**猜法二:`stopped = true` 没执行到。** 打个断点或者加一行日志,赋值确实执行了,而且执行在循环退出之前。',
+                  '**猜法三:CPU 缓存没刷新,读到了旧值。** 方向对,但这个说法**不准确**,而且它无法解释「循环体一行日志都没有」——如果只是读到旧值,循环体应该一直在跑。',
+                ],
+                real:
+                  '真因是 **JIT 把 `stopped` 的读提升到了循环外**(寄存器提升,hoisting)。单线程语义下,循环里没有任何代码写 `stopped`,所以「读一次放进寄存器、循环里只看寄存器」与「每次都读主内存」结果相同——JIT 当然选快的。于是编译后的循环里**根本没有 load 指令**,主内存怎么改都读不到。[[`volatile` 真正阻止的是这个优化,而不只是「刷新缓存」]]。',
+                reveal:
+                  '所以 `volatile` 的第一层语义是「**禁止把它优化进寄存器**」,第二层才是内存屏障与有序性。理解了这一层,后面几条推论都不用背:`i++` 修不好(它不是单次读写)、修饰 `Map` 引用没用(`put` 不经过那个 `volatile` 写)、高竞争下反而更慢(它禁掉的优化里就有 JIT 的提速手段)。',
+              },
+              {
+                kind: 'concept',
+                title: '`volatile` 的两层语义,一句话说清',
+                body: [
+                  '`volatile` 的语义只有两条,但每条都有具体机制:**① 可见性**——对 `volatile` 变量的写会立刻刷新到主内存,读会强制从主内存重新加载(不走寄存器);**② 有序性**——禁止 `volatile` 读写与周边指令的特定重排,通过插入四种内存屏障实现。',
+                  '它**不提供**什么:不保证原子性(`i++` 仍会丢更新)、不保证互斥(两个线程可以同时读同一个 `volatile` 变量)、不保证「引用指向的对象内部字段」可见(只保证引用本身)。这三条边界是面试的主要火力点。',
+                  '最典型的正确用法是**状态标志位**:一个线程写 `volatile boolean stopped = true`,另一个线程循环 `while (!stopped)`。这里只有「单次读写」,没有复合操作,恰好落在 `volatile` 的能力范围内。反过来,只要出现「读-改-写」,就必须换 `Atomic*` 或加锁。',
+                  '一个容易被忽略的成本:`volatile` 禁止的优化里包括**寄存器提升**。没有它时,JIT 可以把循环里的变量读一次放进寄存器(单线程看不出差别);有它就必须每次重读主内存。所以 `volatile` 在紧循环里的开销,主要来自「每次都要发内存访问」而不是屏障指令本身。',
                 ],
                 term: {
-                  name: 'volatile 的可见性保证',
-                  def: '写 volatile 变量时，JIT 在该写之前插入 StoreStore 屏障（保证之前的写都刷出去）、之后插入 StoreLoad 屏障；读 volatile 变量时，在其后插入 LoadLoad 与 LoadStore 屏障。合起来实现「写 volatile 之前的一切，对读它之后的一切可见」。',
+                  name: 'volatile 的四种屏障',
+                  def: '写 `volatile` 前插 `StoreStore`(保证之前的写都刷出去)、写后插 `StoreLoad`(保证写完才让后面的读写过去);读 `volatile` 后插 `LoadLoad` 与 `LoadStore`。合起来实现「写对后续读可见」这一条 happens-before。',
                 },
                 points: [
-                  '两层语义：可见性（强制走主内存）+ 有序性（禁止特定重排）',
-                  '不保证原子性、不保证互斥、不覆盖「引用所指对象的内部字段」',
-                  '最合适的用法：状态标志位、一次性安全发布、DCL 的引用',
-                  '真实开销来自「禁止寄存器提升 → 每次都要访存」，而不只是屏障指令',
+                  '`volatile` 的 happens-before 只有一条:**对它的写,先行发生于对它的读**。它不建立「多变量之间」的先后关系。',
+                  '`long` / `double` 不加 `volatile` 时,32 位 JVM 上的读写可能被拆成两次——`volatile` 顺带把这个洞补上。',
+                  '`volatile` 不保证互斥,所以「两个线程同时 `count++`」依然是错的;它只保证「另一个线程能看到 `count` 的最新值」。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: 'volatile 能做与不能做',
+                title: '`volatile` 能做与不能做',
                 diagram: {
                   type: 'split',
                   left: {
@@ -1279,103 +1312,61 @@ export default {
                       '互斥：两个线程可以同时读同一个变量',
                       '保护「引用所指对象」的内部字段可见性',
                       '替代锁：涉及多个变量的一致性约束',
-                      '保证 long/double 的复合操作（只能保证单次读写原子）',
+                      '把「先检查再动作」变成原子（检查与动作是两步）',
                       '性能优化：它反而**禁止**了一批 JIT 优化',
                     ],
                   },
                   caption:
-                    '判断标准只有一条：**这个操作是不是「单次读」或「单次写」？** 是 → `volatile` 够用；不是（读-改-写、多变量一致）→ 必须 `Atomic*` 或锁。「用 `volatile` 修 `i++`」是最高频的错误答案。',
+                    '判断标准只有一条:**这个操作是不是「单次读」或「单次写」?** 是 → `volatile` 够用;不是(读-改-写、多变量一致)→ 必须 `Atomic*` 或锁。「用 `volatile` 修 `i++`」是最高频的错误答案。',
                 },
               },
               {
-                kind: 'question',
-                title: 'volatile 的作用（两层语义）是什么？',
-                questionId: 'java-03-Q22',
-                intent:
-                  '必须完整说出「可见性 + 有序性」两层，并明确「不保证原子性」。只答「保证可见性」会被追问到卡住。',
-                points: [
-                  '**可见性**：写 volatile 变量会立刻刷回主内存并让其他核的缓存行失效；读会强制从主内存重新加载',
-                  '**有序性**：禁止 volatile 写与之前、volatile 读与之后的操作重排（写前 StoreStore、写后 StoreLoad、读后 LoadLoad + LoadStore）',
-                  '实现层：字节码加 `ACC_VOLATILE` 标志；JIT 编译时插入内存屏障；x86 上写变成 `lock addl`（等价 mfence）',
-                  '**不保证原子性**：`i++` 三步仍可能交错；`volatile` 只让每一步读到最新值',
-                  '**不保证互斥**：多个线程可以同时读同一个变量',
-                  '一句话定义：`volatile` 是「轻量级的同步机制」，保证可见性与有序性，但不保证原子性',
+                kind: 'concept',
+                title: '`i++` 为什么修不好:它是三步,不是一步',
+                body: [
+                  '`count++` 编译出来是四条字节码:**取字段 → 压入常量 1 → 相加 → 写回字段**。中间任何一步之后都可能被切走。两个线程同时读到 `count = 5`,各自加一写回,最终是 `6` 而不是 `7`——丢了一次更新。',
+                  '`volatile` 在这里帮不上忙,原因很干脆:它保证的是「读到的值是最新的」和「写完马上可见」,但**不保证这四步之间没人插进来**。[[可见性解决「看不看得到」,原子性解决「中间会不会被打断」——这是两个正交的问题]]。',
+                  '所以修法只有三类,分别对应三种场景:**单变量计数**用 `AtomicInteger`(CAS 自旋);**多个变量必须一起变**用 `synchronized`(锁保护一段临界区,CAS 管不了多变量);**超高并发累加且读不要求精确**用 `LongAdder`(分散热点)。选哪个不取决于「哪个更高级」,取决于「你要保护的是一个变量还是一组不变量」。',
                 ],
-                depth:
-                  '追问「`volatile` 会不会刷整个缓存」——不会。现代实现是**按缓存行失效（invalidate）**而非「回写全部」，且 x86 的 `lock` 前缀会锁总线或锁缓存行，只影响被操作的地址。所以 `volatile` 的开销与「访问的缓存行数」相关，而不是与内存总量相关。',
-                followup: '「`volatile` 修饰数组会怎样」——只保证**数组引用**的可见性，不保证**数组元素**的可见性。`volatile int[] arr` 中 `arr[0] = 1` 不是 volatile 写，别的线程可能看不到。要对元素做可见性保证，得用 `AtomicIntegerArray`。',
-              },
-              {
-                kind: 'question',
-                title: 'volatile 为什么不能保证原子性？怎么解决？',
-                questionId: 'java-03-Q23',
-                intent:
-                  '要能画出 `i++` 的三步并说明「哪一步出了问题」，然后给出三种解决方式及各自适用场景。',
                 points: [
-                  '`i++` 是三步：**读** `i` → **加一** → **写** `i`。`volatile` 只保证「读到的都是最新值」，三步之间仍可被插入',
-                  '具体交错：T1 读 0，T2 读 0，T1 写 1，T2 写 1 → 两次自增只加了一次（丢更新）',
-                  '解法一：`AtomicInteger.incrementAndGet()`（CAS 循环，单变量最优）',
-                  '解法二：`synchronized` / `Lock`（需要多个变量一起保持一致性时）',
-                  '解法三：`LongAdder`（高并发累加，牺牲「读的精确性」换吞吐）',
-                  '**不能**的解法：继续加 `volatile`、把 `i++` 拆成多行（没用，拆完仍不是原子）、用 `volatile` 加 `synchronized` 混写（浪费）',
+                  '`AtomicInteger` 不是「更快的锁」,它根本没有锁——高竞争下它会自旋失败,此时加锁反而更稳。',
+                  '`synchronized` 在低竞争下经过偏向锁/轻量级锁优化后已经很快(JDK 15 起偏向锁被移除,但轻量级锁仍在),不必谈锁色变。',
+                  '`LongAdder` 的 `sum()` 不是原子快照:并发累加时可能读到「部分更新」,只适合监控统计,不能当序列号。',
                 ],
-                depth:
-                  '「既然 `volatile` 让每次都读到最新值，为什么还会丢更新」——关键在于「读到最新」和「写得对」之间有时间窗。T1 读到 0 之后、写回之前，T2 也可能读到 0；两者都基于「旧值」计算，最后都写 1。**原子性要求的是「读-改-写不可分割」，`volatile` 只解决了「读得新」这一半。**',
-                followup: '「`AtomicInteger` 是不是绝对安全」——单次操作安全，但**复合操作**（如 `if (count.get() < limit) count.incrementAndGet();`）仍然不是原子的，仍需要额外同步或改用 `compareAndSet` 循环。这就是「线程安全的组件组合起来不一定线程安全」的典型例子。',
               },
               {
                 kind: 'code',
-                title: 'i++ 的三种修法，以及 volatile 的正确用法',
+                title: '`i++` 的三种修法,以及 `volatile` 的正确用法',
                 lang: 'java',
+                version: 'JDK 8+（LongAdder 为 JDK 8 引入）',
                 code:
-                  '// ✗ 错：volatile 修不好 i++\nclass BadCounter {\n    volatile int count;\n    void inc() { count++; }        // 三步操作，仍会丢更新\n}\n\n// ✓ 修法一：AtomicInteger（单变量最优）\nclass AtomicCounter {\n    private final AtomicInteger count = new AtomicInteger();\n    void inc() { count.incrementAndGet(); }\n    int get()  { return count.get(); }\n}\n\n// ✓ 修法二：synchronized（需要多变量一起保持一致时）\nclass SyncCounter {\n    private int a, b;              // 两个变量必须一起变，只能用锁\n    synchronized void inc() { a++; b++; }\n    synchronized int[] get() { return new int[]{a, b}; }\n}\n\n// ✓ 修法三：LongAdder（超高并发累加，读不要求绝对精确）\nclass AdderCounter {\n    private final LongAdder count = new LongAdder();\n    void inc() { count.increment(); }\n    long get() { return count.sum(); }   // sum() 是「准快照」，并发下可能偏小\n}\n\n// ◆ volatile 的正确用法：状态标志位（单次读写）\nclass Worker implements Runnable {\n    private volatile boolean stopped;          // 只有「写一次 / 读多次」，没有复合操作\n\n    public void run() {\n        while (!stopped) {                     // 没有 volatile 时，JIT 可能提到寄存器 → 死循环\n            doWorkChunk();\n        }\n    }\n    void shutdown() { stopped = true; }\n}',
-                caption:
-                  '最后一组才是 `volatile` 的「家」。判断能不能用 `volatile`，只需问一句：**这个变量是不是「一个线程写、其他线程只读」或「单次读写」？** 是 → 用它；只要出现「基于旧值算新值」，就必须换成原子类或锁。',
+                  '// ✗ 错:volatile 修不好 i++\nclass BadCounter {\n    volatile int count;\n    void inc() { count++; }        // 三步操作,仍会丢更新\n}\n\n// ✓ 修法一:AtomicInteger(单变量最优)\nclass AtomicCounter {\n    private final AtomicInteger count = new AtomicInteger();\n    void inc() { count.incrementAndGet(); }\n    int get()  { return count.get(); }\n}\n\n// ✓ 修法二:synchronized(需要多变量一起保持一致时)\nclass SyncCounter {\n    private int a, b;              // 两个变量必须一起变,只能用锁\n    synchronized void inc() { a++; b++; }\n    synchronized int[] get() { return new int[]{a, b}; }\n}\n\n// ✓ 修法三:LongAdder(超高并发累加,读不要求绝对精确)\nclass AdderCounter {\n    private final LongAdder count = new LongAdder();\n    void inc() { count.increment(); }\n    long get() { return count.sum(); }   // sum() 是「准快照」,并发下可能偏小\n}\n\n// ◆ volatile 的正确用法:状态标志位(单次读写)\nclass Worker implements Runnable {\n    private volatile boolean stopped;          // 只有「写一次 / 读多次」,没有复合操作\n\n    public void run() {\n        while (!stopped) {                     // 没有 volatile 时,JIT 可能提到寄存器 → 死循环\n            doWorkChunk();\n        }\n    }\n    void shutdown() { stopped = true; }\n}',
                 notes: [
-                  { line: 'count++', text: '字节码是 `getfield / iconst_1 / iadd / putfield` 四条，且没有 `monitorenter`——中间完全可能被切走。' },
-                  { line: 'count.incrementAndGet();', text: '内部是 `do { v = get(); } while (!compareAndSet(v, v + 1));` 的自旋，失败就重读重试，因此不会丢更新。' },
-                  { line: 'count.sum();', text: '`LongAdder.sum()` 遍历所有 Cell 累加，**不是原子快照**；并发累加时可能读到「部分更新」，所以只适合统计报表，不适合做序列号。' },
-                  { line: 'private volatile boolean stopped;', text: '这是 `volatile` 的经典用法：无复合操作、只需要可见性。没有它，JIT 会把 `stopped` 提升到寄存器，`while` 变成死循环。' },
+                  { line: 'count++', text: '字节码是 `getfield / iconst_1 / iadd / putfield` 四条,中间完全可能被切走。' },
+                  { line: 'count.incrementAndGet();', text: '内部是 `do { v = get(); } while (!compareAndSet(v, v + 1));` 的自旋,失败就重读重试,因此不会丢更新。' },
+                  { line: 'count.sum();', text: '`LongAdder.sum()` 遍历所有 Cell 累加,**不是原子快照**;只适合统计报表,不适合做序列号。' },
+                  { line: 'private volatile boolean stopped;', text: '这是 `volatile` 的「家」:一个线程写、其他线程读,读到的值只用于判断,不参与计算。' },
                 ],
+                caption:
+                  '判断能不能用 `volatile`,只需问一句:**这个变量是不是「一个线程写、其他线程只读」或「单次读写」?** 是 → 用它;只要出现「基于旧值算新值」,就必须换成原子类或锁。',
               },
               {
-                kind: 'question',
-                title: '双重校验锁（DCL）单例为什么必须加 volatile？写出实现。',
-                questionId: 'java-03-Q24',
-                intent:
-                  '经典题。要说清「对象创建不是原子操作」与「2/3 步重排导致半初始化对象」，并写出正确实现。注意本课已在 JMM 一节推导过，这里要能**当场写出来**。',
-                points: [
-                  '`instance = new Singleton()` 三步：分配内存 → 初始化对象 → 把引用赋给 `instance`',
-                  '第 2、3 步可能被重排 → 别的线程在第一次判空时看到非 null，拿到一个**半初始化对象**',
-                  '`volatile` 通过写前的 StoreStore 屏障禁止这个重排，从根上消灭该问题',
-                  '为什么要「双重」校验：第一次检查避免「已初始化后还要抢锁」（绝大多数调用走这条快路径）；第二次检查防止「两个线程同时通过第一次检查」',
-                  '更优的两种替代：**静态内部类**（靠类初始化的线程安全）、**枚举**（防反射、防序列化破坏）',
-                  '注意：`volatile` 只解决重排，不解决「if 判断 + new」的竞态——后者靠 `synchronized`',
+                kind: 'concept',
+                title: '修饰引用 ≠ 内部安全:安全发布的两步',
+                body: [
+                  '`volatile Map<String, String> cache` 能不能保证线程安全?**不能**。`volatile` 只保证「你看到的是最新的那个引用」,至于这个 `Map` 内部的 `put` / `get`、内部的数组与 size 字段,全都不经过那个 `volatile` 写。[[把引用声明成 volatile,不会让它指向的对象变成线程安全]]。',
+                  '真正的用法叫**安全发布**:先构造出一个**完全初始化好的对象**,再通过 `volatile` 引用或 `final` 字段让它可见。这两步缺一不可——如果对象还在构造中就被别的线程看到,它会读到一个「字段还是默认值」的半成品。',
+                  '最能说明问题的是 DCL 单例:`instance = new Singleton()` 编译后是三步(分配内存 → 执行构造 → 引用赋值),其中第二步和第三步**允许重排**。重排后,另一个线程可能在 `instance != null` 成立时拿到一个**构造还没跑完**的对象。`volatile` 在这里的作用不是「让引用可见」,而是**禁止那两步重排**。',
                 ],
-                depth:
-                  '为什么第一次检查不能省：`synchronized` 是重量级操作，如果每次 `get()` 都要抢锁，单例反而成了性能瓶颈。第一次检查让「已初始化」的路径完全无锁。为什么第二次检查也不能省：A、B 同时通过第一次检查后，A 拿到锁创建了实例，B 随后拿到锁时若不再检查就会**重复创建**（覆盖掉 A 的实例，破坏单例）。两次检查各解决一个不同的问题，缺一不可。',
-                followup: '「枚举为什么能防反射」——`Constructor.newInstance` 对枚举类型有硬编码检查，直接抛 `IllegalArgumentException: Cannot reflectively create enum objects`。这也是《Effective Java》推荐枚举单例的原因：它同时解决了线程安全、反射攻击、反序列化生成新实例三个问题。',
-              },
-              {
-                kind: 'question',
-                title: 'volatile 和 synchronized 的区别？',
-                questionId: 'java-03-Q25',
-                intent:
-                  '对比题，关键是「原子性」这一列和「是否阻塞」这一列。要能一句话总结「volatile 是轻量级同步，synchronized 是完整同步」。',
                 points: [
-                  '**原子性**：`volatile` ✗；`synchronized` ✓（互斥）',
-                  '**可见性**：两者都有，但机制不同——`volatile` 靠屏障，`synchronized` 靠 `monitor` 进出时刷主内存/清副本',
-                  '**阻塞**：`volatile` 不阻塞（非阻塞同步）；`synchronized` 抢不到锁会 `BLOCKED` 阻塞',
-                  '**粒度**：`volatile` 只作用于一个变量；`synchronized` 可保护一段代码或多个变量',
-                  '**编译器优化**：`volatile` 只禁止特定重排；`synchronized` 的临界区仍可内部重排（只保证进出是屏障）',
-                  '**性能**：低竞争下 `volatile` 明显更轻；高竞争下 `synchronized` 靠锁升级与阻塞反而更稳（不会空转烧 CPU）',
+                  '不可变对象(所有字段 `final` 且构造期不外泄 `this`)天然可安全发布,不需要 `volatile`——这是最省心的做法。',
+                  '静态初始化(`static final`)由类加载保证安全,也是零成本的安全发布。',
+                  '「对象里的字段都加了 `volatile`」不等于对象不可变:整体状态仍可能是不一致的中间态,读者需要的是快照语义。',
                 ],
-                depth:
-                  '一个反直觉的点：**`synchronized` 并不禁止临界区内的重排序**。临界区内部依然可以任意重排（只要符合 as-if-serial），只有「进出临界区」这个边界是屏障。所以「synchronized 保证了有序性」的准确含义是「跨临界区的顺序被保证」，而不是「临界区内串行执行」。',
               },
               {
                 kind: 'compare',
-                title: 'volatile vs synchronized：五列定取舍',
+                title: '`volatile` vs `synchronized`:五列定取舍',
                 head: ['维度', 'volatile', 'synchronized'],
                 rows: [
                   ['原子性', '✗ 不保证', '✓ 互斥保证'],
@@ -1388,95 +1379,55 @@ export default {
                   ['典型用途', '状态标志、安全发布、DCL 引用', '复合操作、多变量一致性、临界区'],
                 ],
                 note:
-                  '最后一行「性能」值得咀嚼：在**高竞争**下，`volatile` 的 CAS 类用法会失败重试、空转烧 CPU，而 `synchronized` 会把抢不到的线程挂起。所以「无锁一定快」是错的——**低竞争无锁快，高竞争锁更稳**。这也是 `LongAdder` 存在的理由（见本节后半）。',
-              },
-              {
-                kind: 'question',
-                title: 'volatile 能保证线程安全吗？修饰对象引用代表内部字段安全吗？',
-                questionId: 'java-03-Q26',
-                intent:
-                  '两个陷阱连问。第一问答案是否定的（要看有没有复合操作），第二问更是否定（只保证引用可见，不保证对象内部字段）。',
-                points: [
-                  '**不能一概而论**：`volatile` 只保证可见性与有序性。若共享状态只有「单次读/写」，它够用；一旦有复合操作或多个字段的约束，就不够',
-                  '`volatile` 修饰对象引用：只保证**引用本身**的可见性与「不被重排」，**不保证对象内部字段**的可见性',
-                  '原因：屏障只作用在「引用这个 4/8 字节的值」上，对象内部字段是另外的内存位置，各写各的',
-                  '典型反例：`volatile Map<K,V> map`，`map.put(k, v)` 不是 volatile 写，其他线程可能看不到这个 entry',
-                  '正确做法：状态不可变（`volatile` 指向不可变对象，整体替换）、或用 `ConcurrentHashMap`、或加锁',
-                  '「整体替换」是推荐手法：`volatile Config config; void update(Config c){ config = c; }`——引用切换是原子的，且新对象构造完成后才发布',
-                ],
-                depth:
-                  '为什么「不可变对象 + volatile 引用」是安全发布的黄金组合：`final` 字段保证「构造器中对 final 的写不会外泄」，`volatile` 保证「引用赋值对其他线程立即可见」。两者叠加，读线程看到引用时对象一定已完整初始化。这就是 `Collections.unmodifiableXxx`、`record`、以及各种 `Snapshot` 配置类的设计依据。',
-                followup: '「那 `volatile` 数组呢」——同样只保证引用。要对元素做原子性/可见性保证，用 `AtomicIntegerArray` / `AtomicReferenceArray`（内部对每个元素做 volatile 读写）。',
+                  '最后一行值得咀嚼:在**高竞争**下,`volatile` 配 CAS 的用法会失败重试、空转烧 CPU,而 `synchronized` 会把抢不到的线程挂起。所以「无锁一定快」是错的——[[低竞争无锁快,高竞争锁更稳]]。这也是 `LongAdder` 存在的理由。',
               },
               {
                 kind: 'concept',
-                title: 'CAS：三个值 + 一次 CPU 指令',
+                title: 'CAS:三个值 + 一次 CPU 指令',
                 body: [
-                  'CAS（Compare-And-Swap）的语义只有一句话：**「如果内存位置 V 的当前值等于期望值 A，就把它改成新值 B，返回成功；否则什么都不做，返回失败。」** 它是无锁编程的唯一原语，也是 `Atomic*`、AQS、`ConcurrentHashMap` 的共同基础。',
-                  '关键点：**「比较」和「交换」是一个不可分割的硬件动作**，由 CPU 的 `cmpxchg` 指令（x86）或 `LL/SC`（ARM）保证。所以它不是「先读再比再写」的三步软件逻辑——那三步之间可以被插入，就失去了原子性。这也是为什么 CAS 必须由硬件支持，纯软件无法实现。',
-                  'Java 里的入口是 `sun.misc.Unsafe.compareAndSwapInt` 等一组方法，JDK 9 之后推荐 `VarHandle`（标准 API，无需反射拿 Unsafe）。`AtomicInteger` 内部就是「`Unsafe` + 一个 `volatile int value`」再包一层自旋循环。',
-                  'CAS 的三个缺陷必须记全：**① ABA**（值绕回原样，看不出中间变过）；**② 自旋开销**（高竞争下不停失败重试，白烧 CPU）；**③ 只能保证单个变量**（多变量无法用一个 CAS 原子更新）。这三条各有对应的解法，也是「什么时候该用锁」的判断依据。',
+                  'CAS(Compare-And-Swap)的语义只有一句话:**「如果内存位置 V 的当前值等于期望值 A,就把它改成新值 B,返回成功;否则什么都不做,返回失败。」** 它是无锁编程的唯一原语,也是 `Atomic*`、AQS、`ConcurrentHashMap` 的共同基础。',
+                  '关键点:**「比较」和「交换」是一个不可分割的硬件动作**,由 CPU 的 `cmpxchg` 指令(x86)或 `LL/SC`(ARM)保证。所以它不是「先读再比再写」的三步软件逻辑——那三步之间可以被插入,就失去原子性了。这也是为什么 CAS 必须由硬件支持。',
+                  'Java 里的入口是 `sun.misc.Unsafe.compareAndSwapInt` 一组方法;JDK 9 之后推荐 `VarHandle`(标准 API,无需反射拿 `Unsafe`)。`AtomicInteger` 内部就是「`Unsafe` + 一个 `volatile int value` + 字段偏移量」再包一层自旋循环——[[所谓原子类,拆开看只有这三样东西]]。',
                 ],
                 term: {
                   name: 'CAS（Compare-And-Swap）',
-                  def: '一种原子指令：比较内存值与期望值，相等则写入新值。返回是否成功。它把「检查」与「修改」合并成一个不可分割的硬件操作，是无锁算法的基础。',
+                  def: '一种原子指令:比较内存值与期望值,相等则写入新值,返回是否成功。它把「检查」与「修改」合并成一个不可分割的硬件操作,是无锁算法的基础。',
                 },
                 points: [
-                  '三要素：内存地址 V、期望值 A、新值 B',
-                  '「比较 + 交换」由 CPU 指令原子完成（`cmpxchg` / `LL-SC`），不是软件三步',
-                  'Java 入口：`Unsafe.compareAndSwapXxx` → JDK 9 起推荐 `VarHandle`',
-                  '三大缺陷：ABA、自旋开销、只能单变量',
-                  '`Atomic*` 类 = `volatile` 字段 + CAS 自旋 + 内存屏障',
+                  '三要素:内存地址 V、期望值 A、新值 B。缺一个都无法表达「在什么前提下改」这个语义。',
+                  '`AtomicInteger.incrementAndGet()` 等价于 `do { v = get(); } while (!compareAndSet(v, v + 1));`——`get()` 必须在循环内。',
+                  '`compareAndSet` 返回 `false` 不是异常,只是「有人抢先改了」,所以要循环重试而不是抛错。',
                 ],
-              },
-              {
-                kind: 'question',
-                title: 'CAS 是什么？在 Java 中如何实现？',
-                questionId: 'java-03-Q27',
-                intent:
-                  '要说清语义、硬件基础、以及 Java 层的三个入口（Unsafe / Atomic 类 / VarHandle）。只答「比较并交换」太单薄。',
-                points: [
-                  '语义：`if (V == A) { V = B; return true; } else return false;`，整个过程原子',
-                  '硬件基础：CPU 的 `cmpxchg`（x86，配合 `lock` 前缀）或 `LL/SC`（ARM）。**没有硬件支持就实现不了**',
-                  'Java 第一层入口：`sun.misc.Unsafe` 的 `compareAndSwapInt` / `compareAndSwapObject` 等（需反射拿实例，JDK 9+ 受限）',
-                  'Java 第二层：`AtomicInteger` / `AtomicReference` 等原子类（封装好自旋与屏障，**业务代码应该用这层**）',
-                  'Java 第三层：JDK 9 起的 `VarHandle`（标准 API，支持普通字段的原子/volatile 访问，替代 Unsafe）',
-                  '典型用法：`do { old = get(); } while (!compareAndSet(old, newValue(old)));` —— 失败就重读重试',
-                ],
-                depth:
-                  '为什么 CAS 循环必须「重读」而不是「重试同一个旧值」：因为失败说明值已被别人改过，用原来的期望值再试永远不会成功（除非值恰好又被改回来，那就是 ABA）。所以标准写法是 `old = get()` 放在循环体内。这个细节在手写 CAS 代码时最容易错。',
               },
               {
                 kind: 'code',
-                title: '手写一个 CAS 自旋：从 Unsafe 到 AtomicInteger',
+                title: '手写一个 CAS 自旋:从 Unsafe 到 VarHandle',
                 lang: 'java',
+                version: 'JDK 9+（VarHandle 为 JDK 9 引入）',
                 code:
-                  '// 第一层：直接用 Unsafe（了解原理，业务代码不要这么写）\nclass UnsafeCounter {\n    private static final Unsafe U;\n    private static final long OFFSET;      // value 字段在对象内的偏移量\n    private volatile int value;\n\n    static {\n        try {\n            Field f = Unsafe.class.getDeclaredField("theUnsafe");\n            f.setAccessible(true);\n            U = (Unsafe) f.get(null);\n            OFFSET = U.objectFieldOffset(UnsafeCounter.class.getDeclaredField("value"));\n        } catch (Exception e) {\n            throw new Error(e);\n        }\n    }\n\n    int incrementAndGet() {\n        int old;\n        do {\n            old = value;                              // ① 每次循环都重读\n        } while (!U.compareAndSwapInt(this, OFFSET, old, old + 1));  // ② 失败就再来\n        return old + 1;\n    }\n}\n\n// 第二层：AtomicInteger（内部就是上面那套，只是封装好了）\nclass AtomicCounter {\n    private final AtomicInteger v = new AtomicInteger();\n    int inc() { return v.incrementAndGet(); }\n}\n\n// 第三层：VarHandle（JDK 9+，标准 API，无需 Unsafe）\nclass VarHandleCounter {\n    private volatile int value;\n    private static final VarHandle VH;\n    static {\n        try {\n            VH = MethodHandles.lookup()\n                    .findVarHandle(VarHandleCounter.class, "value", int.class);\n        } catch (ReflectiveOperationException e) {\n            throw new Error(e);\n        }\n    }\n    int incrementAndGet() {\n        int old;\n        do {\n            old = (int) VH.getVolatile(this);\n        } while (!VH.compareAndSet(this, old, old + 1));\n        return old + 1;\n    }\n}',
-                caption:
-                  '三层的递进关系就是「封装程度」：Unsafe 要自己算字段偏移（`objectFieldOffset`）、反射拿实例，且 JDK 9+ 会警告；`AtomicInteger` 一行搞定；`VarHandle` 是官方推荐的标准替代。**手写这题的价值**是让你明白：`AtomicInteger` 并没有什么魔法，就是「volatile 字段 + 字段偏移 + CAS 循环」。',
+                  '// 第一层:直接用 Unsafe(了解原理,业务代码不要这么写)\nclass UnsafeCounter {\n    private static final Unsafe U;\n    private static final long OFFSET;      // value 字段在对象内的偏移量\n    private volatile int value;\n\n    static {\n        try {\n            Field f = Unsafe.class.getDeclaredField("theUnsafe");\n            f.setAccessible(true);\n            U = (Unsafe) f.get(null);\n            OFFSET = U.objectFieldOffset(UnsafeCounter.class.getDeclaredField("value"));\n        } catch (Exception e) {\n            throw new Error(e);\n        }\n    }\n\n    int incrementAndGet() {\n        int old;\n        do {\n            old = value;                              // ① 每次循环都重读\n        } while (!U.compareAndSwapInt(this, OFFSET, old, old + 1));  // ② 失败就再来\n        return old + 1;\n    }\n}\n\n// 第二层:AtomicInteger(内部就是上面那套,只是封装好了)\nclass AtomicCounter {\n    private final AtomicInteger v = new AtomicInteger();\n    int inc() { return v.incrementAndGet(); }\n}\n\n// 第三层:VarHandle(JDK 9+,标准 API,无需 Unsafe)\nclass VarHandleCounter {\n    private volatile int value;\n    private static final VarHandle VH;\n    static {\n        try {\n            VH = MethodHandles.lookup()\n                    .findVarHandle(VarHandleCounter.class, "value", int.class);\n        } catch (ReflectiveOperationException e) {\n            throw new Error(e);\n        }\n    }\n    int incrementAndGet() {\n        int old;\n        do {\n            old = (int) VH.getVolatile(this);\n        } while (!VH.compareAndSet(this, old, old + 1));\n        return old + 1;\n    }\n}',
                 notes: [
-                  { line: 'old = value;', text: '必须在循环体内重读。写在循环外会导致「期望值永远是旧的」，一旦失败就无限失败。' },
-                  { line: 'U.compareAndSwapInt(this, OFFSET, old, old + 1)', text: '四个参数：目标对象、字段偏移、期望值、新值。返回 boolean。' },
-                  { line: 'VH.compareAndSet(this, old, old + 1)', text: '`VarHandle` 的签名更友好（无偏移量），且提供 `getVolatile` / `compareAndExchange` 等更细粒度的内存语义选择。' },
+                  { line: 'old = value;', text: '必须在循环体内重读。写在循环外会导致「期望值永远是旧的」,一旦失败就无限失败。' },
+                  { line: 'objectFieldOffset', text: 'CAS 要的是「内存地址」,Java 只能通过字段偏移量来表达它——这是 `Unsafe` 的整个设计前提。' },
+                  { line: 'VH.compareAndSet', text: '签名是 `(对象, 期望, 新值)`,不需要自己传偏移量,类型安全由 `VarHandle` 保证。' },
                 ],
+                caption:
+                  '三层的递进关系就是「封装程度」:Unsafe 要自己算字段偏移、反射拿实例,且 JDK 9+ 会警告;`AtomicInteger` 一行搞定;`VarHandle` 是官方推荐的标准替代。**手写这题的价值**是让你明白:`AtomicInteger` 没有魔法,就是「`volatile` 字段 + 字段偏移 + CAS 循环」。',
               },
               {
-                kind: 'question',
-                title: 'CAS 存在哪些问题？如何解决？',
-                questionId: 'java-03-Q28',
-                intent:
-                  '必须说全三个（ABA、自旋开销、单变量），每个都要给出解法。ABA 是必答项。',
-                points: [
-                  '**① ABA 问题**：值从 A→B→A，CAS 检查时看到还是 A 就成功，但中间状态被忽略了（如链表节点被摘除又重新挂上）',
-                  'ABA 解法：加版本号 → `AtomicStampedReference`（`int` 戳）或 `AtomicMarkedReference`（`boolean` 标记）',
-                  '**② 自旋开销**：高竞争下大量 CAS 失败，循环空转烧 CPU；还可能引发「总线风暴」（大量 `lock` 前缀争抢缓存行）',
-                  '自旋解法：限制自旋次数（AQS 里 `tryAcquire` 失败就入队阻塞）、或用 `LongAdder` 分散热点、或直接改用锁',
-                  '**③ 只能保证单个变量**：无法用一次 CAS 原子更新「两个字段」',
-                  '单变量解法：把多字段打包成一个不可变对象，用 `AtomicReference` 整体替换（CAS 引用）；或直接加锁',
+                kind: 'concept',
+                title: 'CAS 的三个缺陷,以及各自的解法',
+                body: [
+                  '**① ABA**:CAS 只校验值、不校验历史。值从 A 变成 B 又变回 A,CAS 看不出中间动过。这在链表、栈这类「值相等但结构已变」的场景会直接损坏数据。解法是给值附上版本号——`AtomicStampedReference` / `AtomicMarkableReference`。',
+                  '**② 自旋开销**:高竞争下 CAS 反复失败,每次失败都重读重试,CPU 空转。[[它把「等锁」的挂起代价换成了「空转」的 CPU 代价]]——低竞争时这笔交易划算,高竞争时血亏。解法是分散热点(`LongAdder`)或直接加锁。',
+                  '**③ 只能单变量**:CAS 的操作对象是**一个内存地址**。所以要原子地更新两个字段,没有任何 CAS 组合能保证中间态不可见。解法只有两个:把多字段打包成不可变对象用 `AtomicReference` 整体替换,或者加锁。',
+                  '这三个缺陷不是「实现不够好」,而是**无锁范式的边界**。所以面试里答完缺陷一定要接一句解法,否则听起来像在背清单。',
                 ],
-                depth:
-                  'ABA 在什么场景才真的有害：如果只是「计数」，ABA 完全无害（A→B→A 之后再加一，结果一样）。真正有害的是**依赖「中间没人动过」这一假设**的场景——典型是链表/栈的 `pop`：T1 读到栈顶 A（`A.next = B`），T2 把 A、B 都弹出又重新压入 A，T1 的 CAS 成功，但此时 `A.next` 已经是 null，于是栈结构被破坏。**判断标准：如果业务不关心中间状态，ABA 可以忽略。**',
-                followup: '「`AtomicStampedReference` 有什么缺点」——它把「值 + 版本」打包成一个 `Pair` 对象，**每次 CAS 都要创建新对象**，GC 压力大，且版本号会回绕（int 溢出）。所以高并发下它也没那么理想，很多场景改用「避免依赖中间状态」的设计（如 `ConcurrentLinkedQueue` 用「逻辑删除 + 哨兵节点」绕开 ABA）。',
+                points: [
+                  'ABA 的实际危害场景很具体:无锁栈/队列的 `pop` 时,`next` 指针可能已被别人改成 `null`。',
+                  '自旋还可以用「失败后退让」缓解:`Thread.onSpinWait()`(JDK 9+)提示 CPU 这是自旋,减少对超线程兄弟核的拖累。',
+                  'JUC 里确实有「打包多变量」的例子:`StampedLock` 的 stamp、`ConcurrentHashMap` 的 `sizeCtl` 都是把多个状态位压进一个 `long`/`int`。',
+                ],
               },
               {
                 kind: 'diagram',
@@ -1493,48 +1444,26 @@ export default {
                     { from: '内存中的栈', to: '线程 T1', text: '栈变成「B，而 A.next 已是 null」→ 结构损坏', reply: true },
                   ],
                   caption:
-                    'ABA 的本质是「**CAS 只校验值，不校验历史**」。T1 的假设是「栈顶还是 A，说明没人动过」，但 T2 动过又还原了。修法就是给「值」附上「历史」——版本号。注意图中 `A.next` 从 `B` 变成 `null` 是关键：值没变，但**关联的结构变了**，这才是真正被破坏的东西。',
+                    'ABA 的本质是「**CAS 只校验值,不校验历史**」。T1 的假设是「栈顶还是 A,说明没人动过」,但 T2 动过又还原了。修法就是给「值」附上「历史」——版本号。注意图中 `A.next` 从 `B` 变成 `null` 是关键:值没变,但**关联的结构变了**,这才是真正被破坏的东西。',
                 },
               },
               {
-                kind: 'question',
-                title: 'AtomicInteger 的实现原理？incrementAndGet 为什么是线程安全的？',
-                questionId: 'java-03-Q29',
-                intent:
-                  '要能落到源码：`volatile int value` + `Unsafe` + 自旋 CAS。答「用了 CAS」不够，要说清 volatile 字段的作用。',
-                points: [
-                  '核心字段：`private volatile int value;` —— `volatile` 保证读可见与禁止重排',
-                  '`incrementAndGet()` 的实现：`return U.getAndAddInt(this, VALUE, 1) + 1;`（JDK 8）',
-                  '`getAndAddInt` 是自旋：`do { v = getIntVolatile(o, offset); } while (!compareAndSwapInt(o, offset, v, v + delta)); return v;`',
-                  '线程安全来自两点：**volatile 读保证拿到最新值** + **CAS 保证「比较并写入」原子**',
-                  '失败重试：CAS 失败说明被别人改过，重新读最新值再试，所以不会丢更新',
-                  '`getAndIncrement` 与 `incrementAndGet` 只差「返回旧值还是新值」；`lazySet` 是「最终可见」的弱化写（省一个屏障）',
+                kind: 'concept',
+                title: '`LongAdder` 为什么快:把一格拆成很多格',
+                body: [
+                  '`AtomicLong` 的所有线程都在 CAS **同一个 `volatile` 变量**。高并发时后果有两层:一是 CAS 大量失败重试,二是失败重试又加剧了那个缓存行的争抢——[[所有核心轮流把这一行拉进自己的缓存,再互相作废]]。',
+                  '`LongAdder` 的做法是分散:维护一个 `base` 加一组 `Cell`,每个线程通过自己的 `probe` 值映射到某个 `Cell`,**各加各的**;只有在没竞争时才走 `base`。`sum()` 时把 `base + Cell[0] + ...` 加起来。每格之间用填充(padding)隔开,保证各占独立的缓存行。',
+                  '代价也很明确:**内存更大**(每格独占缓存行)、**低竞争时更慢**(多一层寻址与分支)、**`sum()` 不精确**——它遍历求和的过程中,别的线程可能还在加,所以拿到的是「近似快照」。所以它适合「高并发累加、读用于监控」,不适合「要精确值或要做序列号」。',
                 ],
-                depth:
-                  '为什么必须有 `volatile`：如果 `value` 是普通字段，`getIntVolatile` 读到的可能是寄存器里的旧值，CAS 会一直失败（期望值永远过期）；而且即使 CAS 成功，其他线程也可能永远看不到新值。**volatile 提供「读最新 + 写可见」，CAS 提供「原子」，两者缺一不可**——这就是「无锁 = volatile + CAS」的由来。',
-              },
-              {
-                kind: 'question',
-                title: 'LongAdder 为什么比 AtomicLong 快？sum() 是精确值吗？',
-                questionId: 'java-03-Q30',
-                intent:
-                  '性能设计题。核心是「分散热点」：把对一个变量的竞争，分散到多个 Cell 上。第二问要明确回答「不是精确值」。',
                 points: [
-                  '`AtomicLong` 的问题：所有线程 CAS 同一个 `volatile long value`，高并发下大量失败重试 + 同一缓存行反复失效（热点）',
-                  '`LongAdder` 的思路：维护一个 `Cell[]` 数组，每个线程通过 `Thread.hashCode` 的探针（probe）映射到**不同的 Cell**，各加各的',
-                  '只有在需要总数时（`sum()`）才把 base + 所有 Cell 累加，把「写竞争」换成了「读汇总」',
-                  '扩容：Cell 数量随竞争增长（最多到 CPU 核数量级），像 `ConcurrentHashMap` 的分段思想',
-                  '`sum()` **不是精确值**：遍历 Cell 的过程中其他线程可能正在累加，得到的是「准快照」，并发下通常偏小',
-                  '适合「高频写、低频读汇总」的统计场景（QPS 计数、指标采集）；不适合做序列号、余额等要求精确的场合',
-                  '`LongAdder` 还有 `sumThenReset()`，以及针对低延迟的 `LongAccumulator`（自定义聚合函数）',
+                  '`LongAdder` 的 `sum()` 没有加锁,只是在遍历时用 `volatile` 读每个 Cell——精确值并不存在,只有「某一瞬间的近似」。',
+                  '需要「累加中途取精确值」就用 `AtomicLong`;需要「不可变快照」可以用 `LongAdder.sumThenReset()`(JDK 8+ 的 `sumThenReset` 也不是原子语义,慎用)。',
+                  '`LongAccumulator` 是它的泛化版本:可以把「加」换成任意可交换的结合运算,如取最大值。',
                 ],
-                depth:
-                  '「为什么 Cell 要填充（padding）」——`Cell` 继承自 `Striped64` 的内部类，用 `@Contended` 注解（或手动补 7 个 long）把每个 Cell 撑到独立的缓存行（64 字节）。否则多个 Cell 落在同一缓存行上，一个线程写会让其他核的整行失效，竞争又回来了——这就是**伪共享**。JDK 8 里 `@Contended` 需要 `-XX:-RestrictContended` 才生效。',
-                followup: '「什么时候 `LongAdder` 反而不如 `AtomicLong`」——**低竞争**时。`LongAdder` 要维护 Cell 数组、要算 probe、`sum()` 要遍历，固定开销更大。单线程或低竞争下 `AtomicLong` 更简单更快。选型判据：先问「写并发高不高」，再问「读要不要精确」。',
               },
               {
                 kind: 'diagram',
-                title: '热点分散：一个变量 vs 多个 Cell',
+                title: '热点分散:一个变量 vs 多个 Cell',
                 diagram: {
                   type: 'memory',
                   regions: [
@@ -1559,33 +1488,28 @@ export default {
                     },
                   ],
                   caption:
-                    '对比一眼就看懂：左边是「N 个线程抢一个缓存行」，右边是「N 个线程各占一行」。`sum()` 时才把 `base + Cell[0] + Cell[1] + …` 加起来。**代价**是「读不精确 + 内存占用更大 + 低竞争时固定开销更高**」——这是一个典型的「用一致性换吞吐」的取舍。',
+                    '对比一眼就懂:左边是「N 个线程抢一个缓存行」,右边是「N 个线程各占一行」。`sum()` 时才把 `base + Cell[0] + Cell[1] + …` 加起来。**代价**是「读不精确 + 内存占用更大 + 低竞争时固定开销更高」——这是一个典型的「用一致性换吞吐」的取舍,也是并发设计里最常见的交换模式。',
                 },
               },
               {
-                kind: 'question',
-                title: '乐观锁和悲观锁的区别？乐观锁在数据库中怎么实现？',
-                questionId: 'java-03-Q31',
-                intent:
-                  '概念 + 落地两问。重点是「乐观锁不是一种锁」这个澄清，以及数据库版本号/时间戳的具体写法。',
-                points: [
-                  '**悲观锁**：假设一定有并发冲突，操作前先加锁 → `synchronized`、`ReentrantLock`、DB 的 `SELECT ... FOR UPDATE`',
-                  '**乐观锁**：假设冲突很少，先操作，提交时用 CAS 校验「期间没被改过」→ `Atomic*`、DB 的版本号',
-                  '澄清：**乐观锁不是一种锁实现**，它是一种「无锁 + 冲突检测 + 重试」的策略',
-                  '数据库实现一（版本号）：`UPDATE t SET stock = stock - 1, version = version + 1 WHERE id = ? AND version = ?;` 判断影响行数是否为 1',
-                  '数据库实现二（时间戳）：与版本号同理，用 `update_time` 做校验',
-                  '数据库实现三（条件更新）：`UPDATE t SET stock = stock - 1 WHERE id = ? AND stock >= 1;` —— 用业务条件代替版本号，最简洁',
-                  '选型：读多写少 → 乐观锁；写多冲突频繁 → 悲观锁（乐观锁会大量失败重试）',
+                kind: 'concept',
+                title: '乐观锁与悲观锁:CAS 只是乐观锁的一种实现',
+                body: [
+                  '**悲观锁**假定「冲突一定会发生」,所以先占坑再干活:`synchronized`、`ReentrantLock`、数据库的 `SELECT ... FOR UPDATE` 都是。**乐观锁**假定「冲突很少发生」,所以先干活、提交时再检查有没有人改过:CAS 是它在内存里的实现,版本号是它在数据库里的实现。',
+                  '数据库里的乐观锁通常是一列 `version`:`UPDATE t SET value = ?, version = version + 1 WHERE id = ? AND version = ?`,然后看影响行数是否为 1。**影响行数为 0 就说明有人抢先改了**,业务层重试或报错。[[它不是数据库提供的锁,而是你用一条带条件的 UPDATE 自己实现的]]。',
+                  '两者的选择依据只有一条:**冲突概率**。冲突极低(如按主键更新单行)→ 乐观锁省掉了加锁开销;冲突高(如秒杀扣库存)→ 大量重试反而更慢,应该用悲观锁或原子的条件更新;跨事务、跨机器时,乐观锁还省掉了「锁服务」这个单点。',
                 ],
-                depth:
-                  '「`stock >= 1` 这种写法算不算乐观锁」——严格讲它是「乐观锁思想的条件更新」，不需要额外版本字段，也天然幂等安全。但它只能防「超卖」，防不了「ABA 式的业务覆盖」（比如两个管理员同时改价格）。所以**业务条件校验 + 版本号**往往要一起用：前者防超卖，后者防覆盖。',
-                followup: '「乐观锁重试几次合适」——必须有上限（如 3 次），否则高冲突下会变成无限重试的活锁。超过上限就该降级为「加锁」或「排队」，这也说明**乐观锁不适合写热点**。',
+                points: [
+                  '数据库乐观锁必须带 `version` 或「状态先行」条件,否则退化成盲写(最后写入者覆盖)。',
+                  'CAS 与数据库乐观锁的共同点:都靠「提交时校验前提」而不是「事先占位」;不同点:CAS 的校验由 CPU 保证原子,数据库的校验靠行锁保证。',
+                  '`AtomicStampedReference` 就是「乐观锁 + 版本号」在内存里的完整形态,ABA 问题正是靠它解决的。',
+                ],
               },
               {
                 kind: 'analogy',
-                title: 'CAS 像抢车位：看一眼空着就直接停进去',
+                title: 'CAS 像抢车位:看一眼空着就直接停进去',
                 text:
-                  '停车场里有一个空位，但**没有管理员**（没有锁）。你要停进去，流程是：**看一眼**——空着；**立刻倒车进去**——如果这期间没人抢，成功；如果被人抢先了，你只能**退出来、再看一眼别的空位**（重试）。这就是 CAS：**「检查」和「占用」是一个动作**，靠的是你亲眼确认 + 车已经在动。悲观锁则像**先去岗亭领一张停车凭证**，领到了才能停，领不到就排队等——稳妥，但要跑一趟岗亭。',
+                  '停车场里有一个空位,但**没有管理员**(没有锁)。你要停进去,流程是:**看一眼**——空着;**立刻倒车进去**——如果这期间没人抢,成功;如果被人抢先了,你只能**退出来、再看一眼别的空位**(重试)。这就是 CAS:**「检查」和「占用」是一个动作**,靠的是你亲眼确认加车已经在动。悲观锁则像**先去岗亭领一张停车凭证**,领到了才能停,领不到就排队等——稳妥,但要跑一趟岗亭。',
                 mapping: [
                   { real: '那个空车位', tech: '内存位置 V' },
                   { real: '你看到「空着」', tech: '期望值 A' },
@@ -1597,51 +1521,57 @@ export default {
                   { real: '加个「停车时间戳」', tech: '版本号（`AtomicStampedReference`）' },
                 ],
                 limit:
-                  '类比到「多车位一起占用」就失效了：你想同时占两个相邻车位（多变量原子更新），CAS 做不到——因为它只能校验**一个**地址的值。这正是 CAS 的第三大缺陷，解法是把两个车位「打包成一个大车位」（封装成不可变对象用 `AtomicReference` 整体替换），或者干脆请个管理员（加锁）。',
+                  '类比到「多车位一起占用」就失效了:你想同时占两个相邻车位(多变量原子更新),CAS 做不到——因为它只能校验**一个**地址的值。这正是 CAS 的第三大缺陷,解法是把两个车位「打包成一个大车位」(封装成不可变对象用 `AtomicReference` 整体替换),或者干脆请个管理员(加锁)。',
+              },
+              {
+                kind: 'question',
+                title: 'Q24 · 双重校验锁（DCL）单例为什么必须加 volatile？写出实现。',
+                questionId: 'java-03-Q24',
+                intent:
+                  '这题是 `volatile` 语义的试金石。考的不是「能不能默写 DCL」,而是「知不知道 `volatile` 在这里阻止的是哪一次重排」——答不出这一点,就说明只是背了「必须加 volatile」这句话。',
+                points: [
+                  '**执行步骤**:`instance = new Singleton()` 编译后是三步——分配内存、执行构造、把引用赋值给 `instance`',
+                  '**重排风险**:第二步与第三步之间**允许重排**;重排后引用先指向对象,而对象还没构造完',
+                  '**后果**:第二个线程在第一个 `if` 处看到 `instance != null` 就直接返回,**拿到一个字段全是默认值的半成品**',
+                  '**volatile 的作用**:禁止「初始化」与「引用赋值」重排,保证「看到引用非空」就意味着「对象已构造完成」',
+                  '**为什么两次检查**:第一个 `if` 避免每次都进同步块(性能);第二个 `if` 防止重复创建(正确性)',
+                ],
+                depth:
+                  '拉开分档的是能不能说清「缺了 `volatile` 到底会怎样」:普通答法只会说「保证可见性」;好答法会指出这是**有序性**问题而非可见性问题——[[引用本身早就可见了,问题是它可见得太早]]。能补一句「JDK 5 修正了 `volatile` 语义之后这个写法才成立,在那之前 DCL 是有名的错误示范」,就是加分项。',
+                followup:
+                  '追问:那用「静态内部类」或「枚举」实现单例,还需要 `volatile` 吗?——不需要,两者的安全性由**类加载机制**保证(类初始化是 JVM 层面的同步,天然线程安全且只执行一次)。再追一句:既然有更好的写法,为什么还考 DCL?因为它是把「指令重排」讲清楚的最短路径。',
               },
               {
                 kind: 'principle',
                 title: '无锁编程的三条铁律',
                 body: [
-                  '这一节把 volatile 与 CAS 讲完了，最后收成三条可以直接用在代码里的判断规则。无锁代码之所以难写，是因为它把「正确性」押在了很少的几条约束上，一旦破一条就全错。',
+                  '把 `volatile` 与 CAS 讲完,最后收成几条可以直接用在代码里的判断规则。无锁代码之所以难写,是因为它把正确性押在了很少的几条约束上,一旦破一条就全错。',
                 ],
                 steps: [
                   {
-                    title: '① 共享变量必须 volatile（或由 VarHandle 做 volatile 访问）',
+                    title: '① 共享变量必须 volatile（或经 VarHandle 做 volatile 访问）',
                     detail:
-                      '没有 volatile，读可能来自寄存器（看不到别人的写），写可能延迟生效（别人看不到你的写）。CAS 循环也会因为「期望值永远过期」而无限失败。这是最常见的手写无锁 bug。',
+                      '没有 `volatile`,读可能来自寄存器(看不到别人的写),写可能延迟生效(别人看不到你的写)。CAS 循环也会因为「期望值永远过期」而无限失败。这是最常见的手写无锁 bug。',
                   },
                   {
-                    title: '② 复合操作必须用 CAS 循环包住，且循环内重读',
+                    title: '② 复合操作必须用 CAS 循环包住,且循环内重读',
                     detail:
-                      '「读-改-写」三步必须整体重试。写法固定为 `do { old = get(); next = f(old); } while (!compareAndSet(old, next));`——把 `old = get()` 写在循环体内是硬要求。若 `f(old)` 有副作用（如发消息），重试会导致重复执行，此时应改用锁或做幂等。',
+                      '写法固定为 `do { old = get(); next = f(old); } while (!compareAndSet(old, next));`——把 `old = get()` 写在循环体内是硬要求。若 `f(old)` 有副作用(如发消息),重试会导致重复执行,此时应改用锁或做幂等。',
                   },
                   {
-                    title: '③ 先问「冲突频率」，再决定用不用无锁',
+                    title: '③ 先问「冲突频率」,再决定用不用无锁',
                     detail:
-                      '低冲突：无锁明显更优（无系统调用、无阻塞）。高冲突：CAS 大量失败、空转烧 CPU、缓存行弹跳，性能可能远低于 `synchronized`。判断依据是「同一变量的并发写线程数」——超过核数就该考虑 `LongAdder` 或直接加锁。',
+                      '低冲突:无锁明显更优(无系统调用、无阻塞)。高冲突:CAS 大量失败、空转烧 CPU、缓存行弹跳,性能可能远低于 `synchronized`。判断依据是「同一变量的并发写线程数」——超过核数就该考虑 `LongAdder` 或直接加锁。',
                   },
                   {
                     title: '④ 记住无锁解决不了「多变量一致性」',
                     detail:
-                      '这是 CAS 的天花板。要么把多变量打包成不可变对象整体替换（读方看到的总是一致快照），要么老实加锁。任何「用多个 CAS 分别更新多个字段」的方案都不是原子的——中间状态会被别人看到。',
+                      '这是 CAS 的天花板。要么把多变量打包成不可变对象整体替换(读方看到的总是一致快照),要么老实加锁。任何「用多个 CAS 分别更新多个字段」的方案都不是原子的——中间状态会被别人看到。',
                   },
                 ],
                 takeaway:
-                  '一句话收口：**「无锁」是「用重试换阻塞」，不是「免费的性能」。** 判断能不能用，只需三问：共享变量 volatile 了吗？操作能不能写成 CAS 循环？冲突率高不高？三问都过，再用无锁；有一个不过，就用锁——锁不是失败，是更稳的选择。',
+                  '一句话收口:**「无锁」是「用重试换阻塞」,不是「免费的性能」。** 判断能不能用,只需三问:共享变量 `volatile` 了吗?操作能不能写成 CAS 循环?冲突率高不高?三问都过再用无锁;有一个不过就用锁——锁不是失败,是更稳的选择。',
               },
-            ],
-            outline: [
-              'volatile 两层语义：可见性（强制访存）+ 有序性（四种屏障），不保证原子性也不保证互斥',
-              'i++ 三步读-改-写，volatile 修不好；用 AtomicInteger / 锁 / LongAdder',
-              '修饰对象引用只保证引用可见，不保证内部字段；安全发布用「不可变对象 + volatile 引用」',
-              'CAS 三要素（V/A/B）由 CPU 指令保证原子；三大缺陷：ABA、自旋开销、只能单变量',
-              'AtomicInteger = volatile 字段 + 字段偏移 + CAS 自旋；LongAdder 用 Cell 分散热点，sum 不精确',
-            ],
-            pitfalls: [
-              '用 volatile 修饰计数器去修 i++：三步仍会交错，必须换原子类或锁',
-              '认为 volatile 修饰 Map 引用就线程安全：put 不是 volatile 写，内部字段不可见',
-              '高竞争场景仍用 AtomicLong：CAS 大量失败空转，应换 LongAdder 或直接加锁',
             ],
           },
         },
@@ -2066,72 +1996,68 @@ export default {
         {
           id: 'threadpool',
           title: '线程池七参数与执行流程',
-          kind: 'concept',
+          minutes: 55,
           sources: [{ topic: 'java-03', chapters: ['线程池'] }],
           content: {
             intro:
-              '线程池几乎必问，而且必追问参数。真正要掌握的不是七个参数的名字，而是**任务提交后的判定顺序**：核心线程未满就新建 → 否则入队 → 入队失败才扩到最大线程 → 再满才走拒绝策略。理解这个顺序，你就能解释「为什么用了无界队列，`maximumPoolSize` 等于失效」，也就能回答线上 OOM 到底是怎么来的。这一节还会讲清 `execute` 与 `submit` 的异常差异（这是最容易踩的坑：任务抛异常但日志里什么都没有）、`shutdown` 与 `shutdownNow` 的取舍、以及线程复用的真实机制。最后给出一套可以照着算的参数估算方法，而不是背「N+1」这一句。',
+              '线程池这题几乎必问,而且必追问参数。但真正要掌握的不是七个参数的名字,而是**任务提交后的判定顺序**:核心线程未满就新建 → 否则入队 → 入队失败才扩到最大 → 再满才拒绝。理解了这个顺序,你就能解释「为什么配了 200 个最大线程,实际只有 8 个在跑」,也能解释线上 OOM 是怎么一点点堆出来的。',
+            outline: [
+              '四道闸门的顺序是「核心 → 队列 → 最大 → 拒绝」,任何一步成功就结束',
+              '队列容量决定弹性区间:无界队列让 `maximumPoolSize` 永远不生效',
+              '`Executors` 四个工厂方法都不适合生产,因为它们的队列要么无界、要么线程无上限',
+              '线程数不是背 N+1:CPU 密集与 IO 密集的公式,以及为什么最终要以压测为准',
+              '`submit` 会把异常吞进 `Future`,不 `get` 就永远看不到',
+            ],
+            pitfalls: [
+              '用 `Executors.newFixedThreadPool`:无界队列让 `maximumPoolSize` 失效,任务无限堆积直到 OOM',
+              '用 `submit` 提交却不 `get`、任务里也不兜底:抛了异常但日志里什么都没有',
+              '只调核心线程数不管队列容量:无界队列等于没有背压,有界但过小会导致大量拒绝',
+            ],
             sections: [
               {
-                kind: 'concept',
-                title: '线程池解决的三件事',
+                kind: 'why',
+                title: '配了 200 个最大线程,为什么只有 8 个在跑',
                 body: [
-                  '**① 复用线程，摊薄创建成本。** 每 `new Thread()` 都要向操作系统申请内核线程（约 1MB 栈 + 内核结构），创建与销毁都有系统调用开销。线程池把「线程生命周期」与「任务生命周期」解耦，一个线程可以执行成千上万个任务。',
-                  '**② 限制并发数，保护下游。** 没有池的代码在突发流量下会无限创建线程，直到 `OutOfMemoryError: unable to create native thread`。线程池用「核心数 + 队列 + 最大值」三个闸门，把并发压在一个可控范围里——**这才是线程池最重要的价值**，而不是「省资源」。',
-                  '**③ 统一管理生命周期与可观测性。** 池化之后才有地方统计「活跃线程数、队列长度、完成任务数」，才能做优雅关闭、拒绝策略、异常上报。裸线程这些都没有。',
-                  '一个常见误解要纠正：**线程池不是越大越好**。线程数超过 CPU 核数后，增加线程只会增加上下文切换与内存占用；除非这些线程大量处于阻塞（IO 等待），否则吞吐不会提升。所以「线程池参数」本质是在「吞吐」与「稳定性」之间找平衡点。',
+                  '一次大促前的压测:线程池按「8 核机器、200 最大线程」配好,理论上能扛住十倍流量。结果压测只跑到预期吞吐的十分之一就上不去了,`jstack` 里翻遍全文,池线程只有 8 个。四十分钟后服务 OOM。',
+                ],
+                code: {
+                  language: 'java',
+                  code:
+                    'new ThreadPoolExecutor(\n    8,                                  // corePoolSize\n    200,                                // maximumPoolSize —— 以为能扩到 200\n    60L, TimeUnit.SECONDS,\n    new LinkedBlockingQueue<>(),        // ← 没传容量 = 无界队列\n    new ThreadPoolExecutor.AbortPolicy());\n\n// 压测现场\n// pool 线程数      : 8        ← 无论如何都不涨\n// workQueue.size() : 1_832_401\n// 拒绝次数         : 0        ← 一次都没拒绝过\n// 40 分钟后:java.lang.OutOfMemoryError: Java heap space',
+                  caption: '三个数字放在一起就是答案:**线程卡在 8、队列涨到百万、拒绝次数为 0**。',
+                },
+                wrong: [
+                  '**猜法一:是不是 `maximumPoolSize` 没生效?** 回头看配置——写的是 200,而且 `getMaximumPoolSize()` 打印出来也是 200。参数生效了,是**扩容这一步根本没被走到**。',
+                  '**猜法二:是不是线程都被业务阻塞了?** `jstack` 里那 8 个线程全停在 `LinkedBlockingQueue.take()`,状态是 `WAITING`——它们不在干活,是在**等活**。',
+                  '**猜法三:拒绝策略配错了?** 拒绝次数是 0。策略一次都没触发,说明任务从来没走到第四道闸门。',
+                ],
+                real:
+                  '真因是**入队发生在扩容之前**。提交任务时,线程数已达 8(等于核心数),于是走第二道闸门「入队」;而 `LinkedBlockingQueue` 不带容量就是 `Integer.MAX_VALUE`,[[`offer` 永远成功,第三道闸门「扩到 200」永远轮不到]]。于是 200 这个数字从头到尾没被使用过,任务全堆在队列里,直到堆被占满。',
+                reveal:
+                  '所以「线程池有几个参数」不是一道背诵题,而是一道**顺序题**:七个参数各自守着四道闸门里的一道,改错一个,另一道就永远不触发。下面先把这个顺序钉死,再逐个参数说清它守哪道门。',
+              },
+              {
+                kind: 'concept',
+                title: '七个参数:每一个都在守一道门',
+                body: [
+                  '`ThreadPoolExecutor` 的构造器有七个参数,它们不是并列的七个设置项,而是**分工守门的七个角色**。先记住四道闸门,再把参数挂上去,追问就不会散。',
+                  '`corePoolSize` 守第一道门:线程数没到它就新建线程,**不管队列里有没有活**。`workQueue` 守第二道门:核心数满了就入队,它的容量直接决定「弹性区间」有多宽。`maximumPoolSize` 守第三道门:**只有入队失败才会扩到它**——这是最容易被误解的一个。`handler` 守第四道门:队列满且线程数达上限时的兜底。',
+                  '剩下三个是配角但都管用:`keepAliveTime` 加 `unit` 决定非核心线程空闲多久被回收;`threadFactory` 决定线程叫什么名字、是不是守护线程、异常往哪抛——[[默认线程名 `pool-N-thread-M` 在 `jstack` 里等于没有信息]]。',
+                  '还有一个不写在参数里的第八项:`ctl`。它是一个 `AtomicInteger`,**高 3 位存运行状态、低 29 位存线程数**。这样「改状态」和「改线程数」能用一次 CAS 完成,不必担心两个字段不同步——[[把两个相关变量压进一个整数,是为了消除它们之间的一致性问题]]。',
                 ],
                 term: {
-                  name: '线程池（ThreadPoolExecutor）',
-                  def: '把预先创建或按需创建的线程集中管理，通过一个工作队列接收任务，用核心线程数 / 最大线程数 / 拒绝策略控制并发规模。线程执行完任务后不销毁，而是循环从队列取下一个任务，从而复用。',
+                  name: 'ctl',
+                  def: '线程池的内部状态字。一个 `AtomicInteger` 拆成两段用:高 3 位是 `RUNNING` / `SHUTDOWN` / `STOP` / `TIDYING` / `TERMINATED` 五种状态,低 29 位是当前线程数(上限约 5 亿)。',
                 },
                 points: [
-                  '复用线程：把创建销毁成本摊到多个任务上',
-                  '限制并发：三个闸门（核心数 / 队列 / 最大值）保护系统与下游',
-                  '统一管理：可观测、可优雅关闭、可定制拒绝与异常处理',
-                  '不是越大越好：超过核数后增加的是切换成本，除非线程大量阻塞',
+                  '`RUNNING` 收任务也处理队列;`SHUTDOWN` 不收新任务但把队列跑完;`STOP` 既不收也不跑,还要中断进行中的线程。这三个状态就是 `shutdown` 与 `shutdownNow` 的差别来源。',
+                  '`keepAliveTime` 默认只对非核心线程生效;`allowCoreThreadTimeOut(true)` 之后核心线程也会因空闲被回收,适合「流量有明显波峰波谷」的场景,代价是下次突发要多付创建线程的开销。',
+                  '`maximumPoolSize` 设成 `Integer.MAX_VALUE` 不是「弹性好」,而是把背压交给了操作系统——线程创建不出来时抛的是 `OutOfMemoryError: unable to create native thread`,和堆 OOM 的排查方向完全不同。',
                 ],
-              },
-              {
-                kind: 'question',
-                title: '为什么要用线程池？',
-                questionId: 'java-03-Q39',
-                intent:
-                  '开场题。不要只答「减少创建销毁开销」，那只是三分之一。要把「限流保护」和「可管理」这两条说出来，层次立刻不同。',
-                points: [
-                  '**复用线程**：避免频繁创建/销毁的系统调用与内存分配（每线程约 1MB 栈）',
-                  '**控制并发数**：用队列 + 最大线程数形成背压，避免线程数无限膨胀导致 OOM 或压垮下游',
-                  '**统一管理**：提供拒绝策略、优雅关闭、活跃数/队列长度等监控指标',
-                  '**提升响应速度**：任务到达时线程已就绪，无需等待创建（对短任务尤其明显）',
-                  '**可定制**：线程工厂（命名、异常处理器）、`beforeExecute`/`afterExecute` 钩子（埋点、上下文传递）',
-                  '对比裸线程：`new Thread()` 无法限制总数、无法复用、无法统一关闭与观测',
-                ],
-                depth:
-                  '加分点：说清「线程池的收益随任务特征变化」。任务是**短小且大量**时，创建成本占比高，池化收益最大；任务是**长耗时且数量少**时，池化收益有限（复用次数少），此时更该关心的是「并发上限」而不是「复用」。这个视角能把「为什么要用」提升到「什么场景才值得用」。',
-                followup: '「虚拟线程出来了还需要线程池吗」——需要，但角色变了。虚拟线程让「创建成本」几乎归零，所以「复用」这一条不再重要；但「**限制并发**」仍然必须（否则会打爆下游），只是这时用 `Semaphore` 做限流比用线程池更自然。JDK 21 的 `Executors.newVirtualThreadPerTaskExecutor()` 就是「每任务一个虚拟线程」，不再池化。',
-              },
-              {
-                kind: 'question',
-                title: '线程池有哪七个参数？各是什么含义？',
-                questionId: 'java-03-Q40',
-                intent:
-                  '必背题，但只背名字会被追问。每个参数都要能说清「不设对会怎样」。',
-                points: [
-                  '`corePoolSize`：核心线程数，**即使空闲也不会被回收**（除非开 `allowCoreThreadTimeOut`）',
-                  '`maximumPoolSize`：线程总数上限，只有**队列满了**才会扩到它',
-                  '`keepAliveTime` + `unit`：非核心线程空闲存活时间，超时销毁',
-                  '`workQueue`：工作队列。**选什么队列决定了整个池的行为**（有界=背压，无界=OOM 风险）',
-                  '`threadFactory`：创建线程的工厂。**必须自定义**——起可读的名字、设 `UncaughtExceptionHandler`、决定是否守护线程',
-                  '`handler`（拒绝策略）：队列满且线程达上限时的兜底。默认 `AbortPolicy`（抛异常）',
-                  '内部还有第 8 个隐含参数：`ctl`（`AtomicInteger`），高 3 位存运行状态、低 29 位存线程数',
-                ],
-                depth:
-                  '「`maximumPoolSize` 什么时候才生效」是最常见的追问：**只有队列满了才会创建超过 `corePoolSize` 的线程**。所以如果用了无界队列（`LinkedBlockingQueue` 不传容量），`maximumPoolSize` 永远不生效，池里最多只有 `corePoolSize` 个线程，任务全部堆在队列里——这就是 `newFixedThreadPool` 会 OOM 的完整链条。',
-                followup: '「`keepAliveTime` 对核心线程有效吗」——默认无效。`allowCoreThreadTimeOut(true)` 后核心线程也会因空闲被回收（此时 `keepAliveTime` 对它们生效）。这个开关在「流量有明显波峰波谷」的场景有用，但会让「冷启动」多一次创建开销。',
               },
               {
                 kind: 'diagram',
-                title: '线程池内部：一个 ctl、一个队列、一组 worker',
+                title: '内部就四样东西:ctl、队列、worker 集合、拒绝策略',
                 diagram: {
                   type: 'memory',
                   regions: [
@@ -2140,7 +2066,7 @@ export default {
                       note: '高 3 位 + 低 29 位',
                       slots: [
                         { label: '高 3 位', value: '运行状态（5 种）', tone: 'warn' },
-                        { label: '低 29 位', value: 'workerCount（最多 5 亿）', tone: 'primary' },
+                        { label: '低 29 位', value: 'workerCount（约 5 亿上限）', tone: 'primary' },
                       ],
                     },
                     {
@@ -2163,33 +2089,12 @@ export default {
                     {
                       name: 'handler',
                       note: '兜底',
-                      slots: [
-                        { label: '拒绝策略', value: '默认 AbortPolicy', tone: 'warn' },
-                      ],
+                      slots: [{ label: '拒绝策略', value: '默认 AbortPolicy', tone: 'warn' }],
                     },
                   ],
                   caption:
-                    '把 `ctl` 用一个 `AtomicInteger` 同时表达「状态」和「线程数」是很有意思的设计：**一次 CAS 就能同时安全地修改两者**，避免两个字段的一致性问题。五种状态是 `RUNNING`（接任务且处理队列）、`SHUTDOWN`（不接新任务，但处理完队列）、`STOP`（不接也不处理，中断进行中的）、`TIDYING`（全部终止，准备跑 `terminated()`）、`TERMINATED`（`terminated()` 执行完）。',
+                    '这张图解释了「线程复用」的全部机制:worker 不是「一个任务一个线程」,而是**一个线程循环取任务**——`runWorker` 里反复 `getTask()`,拿到就跑、跑完再取,取不到(超时或池已关闭)才退出循环、线程结束。所以复用不是「缓存线程对象」,而是[[让线程活着一遍遍领活]]。',
                 },
-              },
-              {
-                kind: 'question',
-                title: '线程池处理任务的执行流程（submit 一个任务后发生了什么）？',
-                questionId: 'java-03-Q41',
-                intent:
-                  '本节最核心的一题。必须按顺序说清四步判断，并解释「为什么是这个顺序」。',
-                points: [
-                  '① `workerCount < corePoolSize` → 直接 `addWorker(command, true)` 新建核心线程执行',
-                  '② 否则 `workQueue.offer(command)` 入队。**入队成功**后再做一次复查：若池已 `SHUTDOWN` 则移除该任务并拒绝；若 `workerCount == 0` 则补一个线程',
-                  '③ 入队**失败**（队列满）→ `addWorker(command, false)` 尝试扩到 `maximumPoolSize`',
-                  '④ 扩容也失败 → 执行 `reject(command)` 走拒绝策略',
-                  '顺序的含义：**先扩容到核心数 → 再排队 → 再扩容到最大数 → 才拒绝**。所以「队列」在「最大线程数」之前，这是与直觉相反的地方',
-                  '由此推论：**无界队列会让 `maximumPoolSize` 完全失效**（永远走不到第 ③ 步）',
-                  '`addWorker` 内部会再检查一次状态与线程数（CAS 递增 `ctl`），所以并发提交也不会超限',
-                ],
-                depth:
-                  '为什么「先排队再扩容」而不是「先扩容再排队」：这是 Doug Lea 的取舍——**创建线程比入队贵得多**。绝大多数任务都能很快执行完，让它们在队列里等一小会儿，比立刻新建线程更划算。只有当队列都满了（说明任务确实堆积），才值得付出创建线程的成本。理解这个取舍，就能解释为什么「突发流量下线程数上不去、延迟飙升」——因为队列还没满。',
-                followup: '「为什么要入队后再复查一次 `workerCount == 0`」——因为存在竞态：线程池可能刚把最后一个 worker 回收（`STOP` 状态或 `allowCoreThreadTimeOut`），此时任务已入队但没人处理。补一个线程（`addWorker(null, false)`）能保证队列不饿死。',
               },
               {
                 kind: 'diagram',
@@ -2199,292 +2104,193 @@ export default {
                   direction: 'v',
                   items: [
                     { label: '① workerCount < corePoolSize', note: '新建核心线程执行 —— 不碰队列' },
-                    { label: '② workQueue.offer 成功', note: '入队等待；复查状态，必要时补建线程' },
+                    { label: '② workQueue.offer 成功', note: '入队等待;复查状态,必要时补建线程' },
                     { label: '③ addWorker(cmd, false)', note: '队列满 → 扩到 maximumPoolSize' },
                     { label: '④ reject(command)', note: '扩容失败 → 拒绝策略兜底' },
                   ],
                   caption:
-                    '四道闸门自上而下依次尝试，**任何一步成功就结束**。记忆抓手：**「核心 → 队列 → 最大 → 拒绝」**。这个顺序也解释了两个经典现象：无界队列让第三步永远不触发（池卡在核心数）；有界队列 + 小最大值会让第四步频繁触发（大量拒绝）。',
+                    '四道闸门自上而下依次尝试,**任何一步成功就结束**。记忆抓手:**「核心 → 队列 → 最大 → 拒绝」**。这个顺序解释了两个经典现象:无界队列让第三步永不触发(池卡在核心数);有界队列配很小的最大值,会让第四步频繁触发(大量拒绝)。',
                 },
               },
               {
                 kind: 'code',
-                title: 'execute 源码：四道闸门就这么几十行',
+                title: 'execute 源码:四道闸门就这么几十行',
                 lang: 'java',
+                version: 'JDK 8 起稳定,JDK 21 未改',
                 code:
-                  'public void execute(Runnable command) {\n    if (command == null) throw new NullPointerException();\n    int c = ctl.get();\n\n    // ① 未达核心数：直接建核心线程\n    if (workerCountOf(c) < corePoolSize) {\n        if (addWorker(command, true)) return;\n        c = ctl.get();                       // addWorker 失败（如池已关闭），重读状态\n    }\n\n    // ② 池仍在 RUNNING：尝试入队\n    if (isRunning(c) && workQueue.offer(command)) {\n        int recheck = ctl.get();\n        if (!isRunning(recheck) && remove(command))\n            reject(command);                 // 入队后池被关闭 → 移除并拒绝\n        else if (workerCountOf(recheck) == 0)\n            addWorker(null, false);          // 队列有任务但没线程 → 补一个\n    }\n    // ③ 入队失败（队列满）：扩到最大线程数\n    else if (!addWorker(command, false))\n        // ④ 扩容也失败：拒绝\n        reject(command);\n}\n\n// addWorker 里的关键一段（保证不超限）\nprivate boolean addWorker(Runnable firstTask, boolean core) {\n    retry:\n    for (;;) {\n        int c = ctl.get();\n        int wc = workerCountOf(c);\n        // 核心线程看 corePoolSize，非核心看 maximumPoolSize\n        if (wc >= CAPACITY ||\n            wc >= (core ? corePoolSize : maximumPoolSize))\n            return false;\n        if (compareAndIncrementWorkerCount(c))   // CAS 递增线程数\n            break retry;\n        // CAS 失败 → 重读 ctl 继续（可能状态变了或数满了）\n    }\n    // ... 创建 Worker、启动线程\n}',
+                  'public void execute(Runnable command) {\n    if (command == null) throw new NullPointerException();\n    int c = ctl.get();\n\n    // ① 未达核心数:直接建核心线程\n    if (workerCountOf(c) < corePoolSize) {\n        if (addWorker(command, true)) return;\n        c = ctl.get();                       // addWorker 失败(如池已关闭),重读状态\n    }\n\n    // ② 池仍在 RUNNING:尝试入队\n    if (isRunning(c) && workQueue.offer(command)) {\n        int recheck = ctl.get();\n        if (!isRunning(recheck) && remove(command))\n            reject(command);                 // 入队后池被关闭 → 移除并拒绝\n        else if (workerCountOf(recheck) == 0)\n            addWorker(null, false);          // 队列有任务但没线程 → 补一个\n    }\n    // ③ 入队失败(队列满):扩到最大线程数\n    else if (!addWorker(command, false))\n        // ④ 扩容也失败:拒绝\n        reject(command);\n}\n\n// addWorker 里的关键一段(保证不超限)\nprivate boolean addWorker(Runnable firstTask, boolean core) {\n    retry:\n    for (;;) {\n        int c = ctl.get();\n        int wc = workerCountOf(c);\n        // 核心线程看 corePoolSize,非核心看 maximumPoolSize\n        if (wc >= CAPACITY ||\n            wc >= (core ? corePoolSize : maximumPoolSize))\n            return false;\n        if (compareAndIncrementWorkerCount(c))   // CAS 递增线程数\n            break retry;\n        // CAS 失败 → 重读 ctl 继续(可能状态变了或数满了)\n    }\n    // ... 创建 Worker、启动线程\n}',
                 caption:
-                  '`addWorker` 的 `core` 参数决定用哪个上限做检查——**这就是「核心线程」与「非核心线程」在代码上的唯一区别**（除了 `getTask` 里的超时策略）。注意 `addWorker` 是用 CAS 递增 `workerCount` 的，所以并发提交时不会突破上限。',
-                notes: [
-                  { line: 'if (isRunning(c) && workQueue.offer(command))', text: '`offer` 而非 `put`——线程池绝不阻塞提交线程，队列满就返回 false，走下一步。这是「不给调用方添阻塞」的设计取舍。' },
-                  { line: 'else if (workerCountOf(recheck) == 0) addWorker(null, false);', text: '`core=false` 表示建的是「非核心」线程（受 `keepAliveTime` 管理）；`firstTask=null` 表示它只从队列取任务。' },
-                  { line: 'wc >= (core ? corePoolSize : maximumPoolSize)', text: '核心线程数检查用 `corePoolSize`，非核心用 `maximumPoolSize`。**这一行就是「最大线程数只在核心满了之后才生效」的实现**。' },
-                ],
+                  '`addWorker` 的 `core` 参数决定用哪个上限做检查——**这就是「核心线程」与「非核心线程」在代码上的唯一区别**(另一个区别在 `getTask` 的超时判断)。注意第二道门里的那个「复查」:`offer` 成功后线程池可能刚被关闭,所以必须重新读一次状态,把任务捞回来拒绝掉——[[先入队再复查,是因为关闭和入队无法在同一步里原子完成]]。',
               },
               {
-                kind: 'question',
-                title: '线程池有哪几种拒绝策略？想尽量不丢任务用哪个？',
-                questionId: 'java-03-Q42',
-                intent:
-                  '四种策略必须说全，并给出「不丢任务」的正确答案。注意「不丢任务」和「不阻塞」是矛盾的，能指出这一点就是加分。',
+                kind: 'concept',
+                title: '弹性区间由队列容量决定,和最大线程数没关系',
+                body: [
+                  '把四道门串起来看,会发现一个反直觉的结论:**决定「池能弹多高」的是队列容量,不是 `maximumPoolSize`**。队列容量为 0(`SynchronousQueue`),任务递不进去,立刻触发扩容,弹性最大;容量为 n,先攒 n 个再扩容;容量无穷,永远攒得下,扩容永不发生。',
+                  '`maximumPoolSize` 只是「弹到多高为止」的天花板,而**能不能弹**由队列说了算。这就是「为什么 `Executors` 的四个工厂方法都不该在生产用」的全部原因——它们清一色选了无界队列或线程无上限,把两个安全阀同时拆掉了。',
+                ],
                 points: [
-                  '`AbortPolicy`（**默认**）：抛 `RejectedExecutionException`，让调用方感知失败',
-                  '`CallerRunsPolicy`：**由提交任务的线程自己执行**。天然形成背压（提交方被拖慢），代价是可能阻塞调用方',
-                  '`DiscardPolicy`：**静默丢弃**，什么都不做。最危险——任务凭空消失且无任何日志',
-                  '`DiscardOldestPolicy`：丢弃队列中**最老**的任务，再重新提交当前任务。会静默丢数据',
-                  '「尽量不丢」→ `CallerRunsPolicy`（任务仍会被执行，只是改由调用线程跑）；它也是唯一自带限流效果的策略',
-                  '自定义策略：实现 `RejectedExecutionHandler`，常见做法是「落库/落 MQ 稍后重试」或「降级返回兜底值」',
+                  '有界队列 + 合理最大值 + `CallerRunsPolicy` = 有背压、不丢任务(代价是拖慢提交方)。',
+                  '`SynchronousQueue` 配 `maximumPoolSize = Integer.MAX_VALUE` 就是 `CachedThreadPool`:任务一来就新建线程,线程数随并发无上限上涨。',
+                  '队列长度和拒绝次数是两个必须打点的指标——[[没有它们,参数配错了也看不出来,只能等到 OOM]]。',
                 ],
-                depth:
-                  '为什么说「不丢任务」没有完美答案：`CallerRunsPolicy` 只是把任务转移给调用线程，如果调用线程是 Tomcat 的工作线程，那它就被占用——**问题从「任务丢失」变成了「请求线程被拖住」**。真正的做法是「有界队列 + 拒绝时落盘/入 MQ + 告警」，让丢失变成「延迟处理」。面试里能说清这个 trade-off，比背四个名字有价值得多。',
-                followup: '「`DiscardOldestPolicy` 什么场景能用」——只适合「任务有时效性、旧任务已无意义」的场合，比如实时行情推送、监控采样。用在订单、支付这类场景就是事故。',
-              },
-              {
-                kind: 'compare',
-                title: '四种拒绝策略：丢不丢、谁执行、会不会阻塞',
-                head: ['策略', '行为', '任务会不会执行', '是否阻塞调用方', '风险'],
-                rows: [
-                  ['`AbortPolicy`（默认）', '抛 `RejectedExecutionException`', '不会', '不阻塞', '调用方必须 catch，否则任务丢失且异常向上抛'],
-                  ['`CallerRunsPolicy`', '提交线程自己执行', '**会**', '**会阻塞**', '拖慢调用方；Tomcat 线程被占用会影响吞吐'],
-                  ['`DiscardPolicy`', '静默丢弃', '不会', '不阻塞', '**无任何日志**，最难排查'],
-                  ['`DiscardOldestPolicy`', '丢队首，再提交', '当前任务会，旧任务不会', '不阻塞', '静默丢旧数据'],
-                  ['自定义（落库/MQ）', '持久化后异步重试', '会（延迟）', '视实现', '复杂度高，需保证幂等'],
-                ],
-                note:
-                  '生产环境推荐组合：**有界队列 + `CallerRunsPolicy` 或自定义落库策略 + 队列长度与拒绝次数监控告警**。默认的 `AbortPolicy` 在「提交方是 Web 线程」时会导致 500，必须显式处理。',
-              },
-              {
-                kind: 'question',
-                title: '为什么不推荐用 Executors 快捷方法创建线程池？',
-                questionId: 'java-03-Q43',
-                intent:
-                  '阿里规约里的经典题。要说清三个工厂方法各自的坑，并给出「应该怎么写」。',
-                points: [
-                  '`newFixedThreadPool` / `newSingleThreadExecutor`：用**无界** `LinkedBlockingQueue`（默认 `Integer.MAX_VALUE`）→ 任务无限堆积 → **OOM: Java heap space**',
-                  '`newCachedThreadPool`：`SynchronousQueue` + `maximumPoolSize = Integer.MAX_VALUE` → 来多少任务就建多少线程 → **OOM: unable to create native thread**',
-                  '`newScheduledThreadPool`：`DelayedWorkQueue` 也是无界的 → 同样有堆积 OOM 风险',
-                  '共同问题：**全部隐藏了关键参数**，使用者不知道自己用的是有界还是无界、拒绝策略是什么',
-                  '正确做法：手动 `new ThreadPoolExecutor(...)`，显式指定**有界队列**、**有意义的线程名**、**明确的拒绝策略**',
-                  '补充：无界队列还有一个隐患——**队列里的任务会持有对象引用，阻止 GC**，即使任务早已失去意义',
-                ],
-                depth:
-                  '「为什么无界队列会导致 OOM 而不是拒绝」——因为 `maximumPoolSize` 的检查在入队失败之后（见上一题的第三步）。无界队列永远 `offer` 成功，所以永远走不到扩容与拒绝，池里只有 `corePoolSize` 个线程在慢慢消费，队列无限增长直到堆被打满。**这条链条要能一口气讲完**，它把「七参数」「执行流程」「拒绝策略」三块串起来了。',
-                followup: '「`LinkedBlockingQueue` 不传容量真的是无界吗」——是的，默认 `Integer.MAX_VALUE`（约 21 亿），实际等价于无界。但严格说它是「有界但界极大」，所以 `size()` 返回 `int` 也不会溢出。这个细节能体现你读过源码。',
               },
               {
                 kind: 'diagram',
-                title: '三个工厂方法，三种 OOM 方式',
+                title: '四个工厂方法,四种 OOM 方式',
                 diagram: {
                   type: 'matrix',
                   cols: ['队列', '最大线程数', 'OOM 形态'],
                   rows: [
-                    ['`newFixedThreadPool(n)`', '`LinkedBlockingQueue`（无界）', '= n（永久）', '堆内存：任务无限堆积'],
-                    ['`newSingleThreadExecutor()`', '`LinkedBlockingQueue`（无界）', '= 1', '堆内存：同上，且串行更慢'],
-                    ['`newCachedThreadPool()`', '`SynchronousQueue`（容量 0）', '`Integer.MAX_VALUE`', '本机线程数：每任务一线程'],
-                    ['`newScheduledThreadPool(n)`', '`DelayedWorkQueue`（无界）', '`Integer.MAX_VALUE`', '堆内存：延时任务堆积'],
+                    ['`newFixedThreadPool(n)`', '`LinkedBlockingQueue`（无界）', '= n（永久）', '堆内存:任务无限堆积'],
+                    ['`newSingleThreadExecutor()`', '`LinkedBlockingQueue`（无界）', '= 1', '堆内存:同上,且串行更慢'],
+                    ['`newCachedThreadPool()`', '`SynchronousQueue`（容量 0）', '`Integer.MAX_VALUE`', '本机线程数:每任务一线程'],
+                    ['`newScheduledThreadPool(n)`', '`DelayedWorkQueue`（无界）', '`Integer.MAX_VALUE`', '堆内存:延时任务堆积'],
                   ],
                   caption:
-                    '注意第三行的 OOM 形态完全不同：`CachedThreadPool` 不是堆被打满，而是**创建不出更多 OS 线程**（`unable to create native thread`）。两种 OOM 的排查方向也不同——前者看堆 dump 里的队列，后者看线程数与 `-Xss`。',
-                  note: '结论：四个工厂方法**没有一个适合生产**。它们的定位是「示例与测试」，官方文档也是这么暗示的（`Executors` 的注释强调「需要更灵活配置时请直接用 `ThreadPoolExecutor`」）。',
+                    '注意第三行的 OOM 形态完全不同:`CachedThreadPool` 不是堆被打满,而是**创建不出更多 OS 线程**(`unable to create native thread`)。两种 OOM 的排查方向也不同——前者看堆 dump 里的队列,后者看线程数与 `-Xss`。所以结论是:四个工厂方法**没有一个适合生产**,它们的定位是示例与测试。',
                 },
               },
               {
-                kind: 'question',
-                title: '线程池线程数设置多少合适？CPU 密集型和 IO 密集型怎么算？',
-                questionId: 'java-03-Q44',
-                intent:
-                  '公式要背，但更重要的是说清「公式只是起点，最终看压测」。只报 N+1 会被认为没实践。',
-                points: [
-                  '**CPU 密集型**：`N + 1`（N = 核数）。多出的 1 个用于「偶发的缺页中断或其他原因导致的暂停」时顶上',
-                  '**IO 密集型**：`N × (1 + 平均等待时间 / 平均计算时间)`。因为线程阻塞时不占 CPU，可以多开',
-                  '例：8 核、任务 90% 时间在等 RPC、10% 在算 → `8 × (1 + 0.9/0.1) = 80`',
-                  '**理论公式只是起点**：真实值取决于下游承受能力、内存上限、GC 压力',
-                  '工程做法：**先按公式设初值 → 压测 → 看三个指标调**：CPU 利用率、队列长度、任务平均等待时间',
-                  '判断标准：CPU 打满且队列短 → 合适；CPU 未满但队列持续增长 → 线程太少或下游变慢；CPU 打满且队列长 → 该扩容机器而不是加线程',
-                  '别忘了内存约束：每线程 1MB 栈，1000 线程就是 1GB 栈空间（`-Xss` 可调小）',
+                kind: 'compare',
+                title: '四种拒绝策略:丢不丢、谁执行、会不会阻塞',
+                head: ['策略', '行为', '任务会不会执行', '是否阻塞调用方', '风险'],
+                rows: [
+                  ['`AbortPolicy`（默认）', '抛 `RejectedExecutionException`', '不会', '不阻塞', '调用方必须 catch,否则任务丢失且异常向上抛'],
+                  ['`CallerRunsPolicy`', '提交线程自己执行', '**会**', '**会阻塞**', '拖慢调用方;Tomcat 线程被占用会影响吞吐'],
+                  ['`DiscardPolicy`', '静默丢弃', '不会', '不阻塞', '**无任何日志**,最难排查'],
+                  ['`DiscardOldestPolicy`', '丢队首,再提交', '当前任务会,旧任务不会', '不阻塞', '静默丢旧数据'],
+                  ['自定义（落库 / MQ）', '持久化后异步重试', '会（延迟）', '视实现', '复杂度高,需保证幂等'],
                 ],
-                depth:
-                  '「线程数超过核数为什么还能提升吞吐」的准确解释：线程在**阻塞**时不占 CPU。8 核跑 80 个「90% 时间在等 IO」的线程，任意时刻平均只有 8 个在算，其余 72 个都在等——CPU 利用率刚好饱和。反过来，如果任务是纯计算（无阻塞），80 个线程只会让每个任务都变慢（切换成本），总吞吐不变甚至下降。**所以「线程数」本质是在匹配「阻塞比例」，不是匹配「任务数量」。**',
-                followup: '「怎么知道任务的阻塞比例」——用 APM 或 `async-profiler` 看火焰图里「wall time vs cpu time」的比例；简单办法是在任务里埋点统计「总耗时」与「纯计算耗时」。**这个数据比任何公式都准**。',
+                note:
+                  '这四个策略的差别本质是**三种代价三选一**:丢任务、拖慢调用方、或者增加复杂度。[[没有「不丢也不阻塞」的选项]]——资源有限时总有人要承担。生产上的推荐组合是:有界队列 + `CallerRunsPolicy` 或自定义落库 + 队列长度与拒绝次数告警。',
               },
               {
-                kind: 'question',
-                title: 'execute 和 submit 有什么区别？任务抛异常会怎样？',
-                questionId: 'java-03-Q45',
-                intent:
-                  '最容易踩坑的一题。核心是「submit 会把异常吞进 Future」，这一点很多工作多年的人也不知道。',
-                points: [
-                  '`execute(Runnable)`：无返回值，异常**直接抛出**到线程的 `UncaughtExceptionHandler`（默认打到 `System.err`）',
-                  '`submit(...)`：返回 `Future`，异常被**封装进 `Future`**。不调用 `get()` 就**永远看不到异常**',
-                  '`submit` 可接受 `Runnable` 与 `Callable`；`execute` 只接受 `Runnable`',
-                  '`submit` 内部把任务包成 `FutureTask`，其 `run()` 里用 `try/catch` 捕获所有异常存进 `outcome`，所以异常不会向外传播',
-                  '`Future.get()` 抛出的是 `ExecutionException`（原始异常在 `getCause()` 里）；`get()` 前的异常则是 `InterruptedException` / `TimeoutException`',
-                  '因此用 `submit` 必须：要么 `get()`（阻塞）、要么在任务内部 `try/catch` 兜底、要么重写 `afterExecute` 检查异常',
+                kind: 'concept',
+                title: '线程数怎么估:公式只是起点,压测才是答案',
+                body: [
+                  '先说公式。**CPU 密集型**取「核数 + 1」——多出来的一个用于在偶发页缺失或 GC 时顶上,再多只会增加上下文切换。**IO 密集型**取「核数 ×(1 + 等待时间 / 计算时间)」:如果一次任务里等待占 90%,系数就是 10,8 核可以开到 80。',
+                  '但这个公式有个隐含前提:**任务之间没有共享资源争用**。真实系统里,线程一多就会同时撞上数据库连接池上限、下游限流、锁竞争——此时加线程不但不涨吞吐,还会让延迟恶化。所以[[公式给的是量级,不是数值]];正确做法是先按公式开,再压测找拐点:吞吐不再上升而 P99 开始抬头的那个点,就是这台机器的真实上限。',
                 ],
-                depth:
-                  '「为什么说这是线上事故的常见来源」——因为代码看起来完全正常：`pool.submit(() -> doSomething())`，任务抛了 NPE，但日志里什么都没有，监控也显示「任务已提交」。只有队列长度或在业务指标异常时才被发现。**这是「静默失败」的典型案例**，也是为什么推荐在 `ThreadFactory` 里设 `UncaughtExceptionHandler` **并在任务内部 try/catch**——因为 `UncaughtExceptionHandler` 对 `submit` 提交的任务**也不生效**（异常被 `FutureTask` 吃掉了）。',
-                followup: '「那 `UncaughtExceptionHandler` 什么情况下生效」——只对 `execute` 提交的任务、以及线程内未被捕获的 `Error`。所以它不能替代任务内的 `try/catch`。正确姿势：任务体第一层就 `try { ... } catch (Throwable t) { log.error(...) }`。',
+                points: [
+                  '线程数不是越大越好:每个线程默认占 1MB 栈(由 `-Xss` 决定),1000 个线程就是 1GB 虚拟内存,而且线程切换本身要钱。',
+                  'IO 密集型的 W/C 比要实测:同一个接口在缓存命中与未命中时,等待时间可能差几十倍。',
+                  '不同业务用不同池,不要共用一个大池——一个慢业务占满线程,其它业务一起被拖死,这叫线程饥饿。',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '`submit` 会把异常吞掉,这是最难发现的一类 bug',
+                body: [
+                  '同一段会抛异常的任务,用 `execute` 提交会走到 `UncaughtExceptionHandler`,日志里看得见;用 `submit` 提交则**什么都不打印**。原因不神秘:`submit` 把任务包进 `FutureTask`,`FutureTask.run` 内部 `catch (Throwable)` 把异常存进 `outcome` 字段,等你 `get()` 的时候再以 `ExecutionException` 抛出来。你不 `get`,它就永远不会被人看见。',
+                  '所以[[「任务跑了但没生效,日志也没报错」这类问题,九成是 `submit` 加没有 `get`]]。三条修法按推荐度排:任务内部自己 `try/catch (Throwable)` 兜底(对两种提交方式都有效);`submit` 之后确实 `get()` 并处理 `ExecutionException`;或者重写 `afterExecute` 统一检查。',
+                ],
+                points: [
+                  'catch 要用 `Throwable` 而不是 `Exception`——`Error`(`OutOfMemoryError`、`StackOverflowError`)不是 `Exception` 的子类,漏掉它等于放过最严重的故障。',
+                  '`Future.get()` 不传超时就是无限等待,线程池的问题会变成「调用方卡死」;一定要传超时。',
+                  '别用 `FutureTask` 的 `isDone()` 判断成败——正常完成和异常完成都是 `true`,要看 `isCompletedExceptionally`(JDK 19+)或直接 `get`。',
+                ],
               },
               {
                 kind: 'code',
-                title: '异常去哪了：三种提交方式的对比',
+                title: '异常去哪了:四种提交方式的对比',
                 lang: 'java',
+                version: 'JDK 8+',
                 code:
-                  'ThreadPoolExecutor pool = new ThreadPoolExecutor(\n        2, 2, 0L, TimeUnit.MILLISECONDS,\n        new ArrayBlockingQueue<>(10),\n        r -> {\n            Thread t = new Thread(r, "biz-" + COUNTER.incrementAndGet());\n            t.setUncaughtExceptionHandler((th, e) -> log.error("uncaught in {}", th.getName(), e));\n            return t;\n        },\n        new ThreadPoolExecutor.CallerRunsPolicy());\n\n// ① execute：异常会走到 UncaughtExceptionHandler（能被看到）\npool.execute(() -> { throw new RuntimeException("boom-A"); });\n\n// ② submit 但不 get：异常被 FutureTask 吞掉，日志里【什么都没有】\npool.submit(() -> { throw new RuntimeException("boom-B"); });\n\n// ③ submit + get：异常以 ExecutionException 形式抛出\nFuture<?> f = pool.submit(() -> { throw new RuntimeException("boom-C"); });\ntry {\n    f.get();\n} catch (ExecutionException e) {\n    log.error("task failed", e.getCause());   // 原始异常在 getCause()\n} catch (InterruptedException e) {\n    Thread.currentThread().interrupt();\n}\n\n// ④ 推荐：任务内部自己兜底（对 execute / submit 都有效）\npool.submit(() -> {\n    try {\n        riskyWork();\n    } catch (Throwable t) {                   // 用 Throwable，别漏掉 Error\n        log.error("riskyWork failed", t);\n    }\n});\n\n// ⑤ 兜底加强版：重写 afterExecute 统一检查\nclass TracedPool extends ThreadPoolExecutor {\n    @Override protected void afterExecute(Runnable r, Throwable t) {\n        if (t == null && r instanceof Future<?> f && f.isDone()) {\n            try { f.get(); } catch (ExecutionException e) { t = e.getCause(); }\n            catch (Exception ignore) { }\n        }\n        if (t != null) log.error("task error", t);\n    }\n}',
-                caption:
-                  '② 那一行是本节的「反面教材之王」：代码完全编译通过、运行无报错、日志一片安静，但业务已经错了。**结论：`submit` 只在你要用返回值（或要等结果）时使用；否则用 `execute`，或者在任务内自己 `try/catch`。** ⑤ 的写法是框架级兜底，适合统一治理。',
+                  'ThreadPoolExecutor pool = new ThreadPoolExecutor(\n        2, 2, 0L, TimeUnit.MILLISECONDS,\n        new ArrayBlockingQueue<>(10),\n        r -> {\n            Thread t = new Thread(r, "biz-" + COUNTER.incrementAndGet());\n            t.setUncaughtExceptionHandler((th, e) -> log.error("uncaught in {}", th.getName(), e));\n            return t;\n        },\n        new ThreadPoolExecutor.CallerRunsPolicy());\n\n// ① execute:异常会走到 UncaughtExceptionHandler(能被看到)\npool.execute(() -> { throw new RuntimeException("boom-A"); });\n\n// ② submit 但不 get:异常被 FutureTask 吞掉,日志里【什么都没有】\npool.submit(() -> { throw new RuntimeException("boom-B"); });\n\n// ③ submit + get:异常以 ExecutionException 形式抛出\nFuture<?> f = pool.submit(() -> { throw new RuntimeException("boom-C"); });\ntry {\n    f.get(3, TimeUnit.SECONDS);\n} catch (ExecutionException e) {\n    log.error("task failed", e.getCause());   // 原始异常在 getCause()\n} catch (TimeoutException | InterruptedException e) {\n    f.cancel(true);\n    Thread.currentThread().interrupt();\n}\n\n// ④ 推荐:任务内部自己兜底(对 execute / submit 都有效)\npool.submit(() -> {\n    try {\n        riskyWork();\n    } catch (Throwable t) {                   // 用 Throwable,别漏掉 Error\n        log.error("riskyWork failed", t);\n    }\n});',
                 notes: [
-                  { line: 't.setUncaughtExceptionHandler(...)', text: '只对 `execute` 提交的任务生效。`submit` 的任务异常被 `FutureTask` 捕获，不会外泄到 handler。' },
-                  { line: 'f.get();', text: '阻塞等待，且必须处理三个异常：`InterruptedException`、`ExecutionException`、`TimeoutException`（带超时的 get）。' },
-                  { line: '} catch (Throwable t) {', text: '用 `Throwable` 而非 `Exception`——否则 `OutOfMemoryError`、`NoClassDefFoundError` 会被漏掉。' },
+                  { line: '②', text: '这一行是线上最难查的 bug 来源:**任务失败了,但没有任何日志**。' },
+                  { line: '③', text: '`get` 抛的是 `ExecutionException`,原始异常包在 `getCause()` 里,直接打印会看不到根因。' },
+                  { line: '④', text: '任务内部兜底是唯一「不管怎么提交都不会丢异常」的写法,建议做成团队规范。' },
+                ],
+                caption:
+                  '顺带一个容易忽略的细节:`UncaughtExceptionHandler` 只在 `execute` 路径上生效,因为 `submit` 的异常被 `FutureTask` 接住了,根本没机会冒到线程顶层。',
+              },
+              {
+                kind: 'compare',
+                title: '`shutdown` 与 `shutdownNow`:一个等活干完,一个立刻掀桌',
+                head: ['维度', '`shutdown()`', '`shutdownNow()`'],
+                rows: [
+                  ['状态迁移', '`RUNNING` → `SHUTDOWN`', '`RUNNING` → `STOP`'],
+                  ['收新任务', '拒绝', '拒绝'],
+                  ['队列里的任务', '**继续执行完**', '**取出并作为返回值交还**'],
+                  ['正在执行的任务', '让它跑完', '**调用 `interrupt()` 中断**'],
+                  ['返回值', '无', '`List<Runnable>` 未执行的任务'],
+                  ['适用场景', '优雅停机:先摘流量,再等排空', '快速失败,或配合超时强制收尾'],
+                ],
+                note:
+                  '优雅停机的正确姿势是三步:先从注册中心摘掉自己(不再有新流量)→ `shutdown()` → 在超时窗口内 `awaitTermination()`,超时了才 `shutdownNow()` 兜底。[[直接 `shutdownNow()` 会中断正在写库的任务,可能留下半条数据]]。',
+                caption:
+                  '还有两个细节值得知道:`awaitTermination` 返回 `false` 不代表没停,只代表「超时前没停完」;`interrupt()` 只是设置标志位,**任务里不检查中断标志就不会真的停下来**——所以「优雅关闭」的前提是任务本身可中断。',
+              },
+              {
+                kind: 'concept',
+                title: '动态调参与监控隔离:从「能用」到「敢用」',
+                body: [
+                  '线上流量是变的,参数却是构造时写死的——这对矛盾催生了动态线程池:`ThreadPoolExecutor` 提供了 `setCorePoolSize` / `setMaximumPoolSize` 这些 setter,把它们挂到配置中心上,改配置就能实时生效(扩容会立刻建线程,缩容只影响后续回收)。美团的方案、以及开源的 `DynamicTp`、`Hippo4j` 都是这个思路。',
+                  '但动态调参解决不了「看不见」的问题。真正要打点的是四个值:**活跃线程数、队列长度、拒绝次数、任务耗时分布**。前三个能立刻暴露「闸门卡在哪」,最后一个能暴露「线程是不是被慢任务占着」。',
+                  '隔离则是另一件事:**不同业务必须用不同池**。共用一个池时,一个慢业务能占满所有线程,其它业务连提交都进不去——这不是容量问题,是[[把不同优先级的负载放进了同一个队列]]。',
+                ],
+                points: [
+                  '动态调参要留审计:谁在什么时候把核心数从 8 改成 200,出问题时这行记录能救命。',
+                  '拒绝次数要告警而不是只看板:它是唯一能提前发现「要 OOM 了」的先行指标。',
+                  '每个池都要自定义线程名,`jstack` 里能一眼分清是哪个业务的线程。',
                 ],
               },
               {
                 kind: 'question',
-                title: 'shutdown() 和 shutdownNow() 的区别？如何优雅关闭线程池？',
-                questionId: 'java-03-Q46',
+                title: 'Q41 · 线程池处理任务的执行流程（submit 一个任务后发生了什么）？',
+                questionId: 'java-03-Q41',
                 intent:
-                  '两个方法要说清「状态变到哪、队列怎么办、进行中的任务怎么办」三件事。后半问要给出可落地的四步流程。',
+                  '这题是整章的枢纽。考的不是「能不能背出四个步骤」,而是「知不知道每一步的失败分支」——只答「先核心、再队列、再最大、最后拒绝」是及格,能说出「哪一步会回头复查状态、哪一步会补建线程」才算过关。',
                 points: [
-                  '`shutdown()`：状态 → `SHUTDOWN`。**不接新任务**，但**会执行完队列里已有的任务**；不中断正在执行的',
-                  '`shutdownNow()`：状态 → `STOP`。**不接新任务、不执行队列**，中断正在执行的线程，并**返回队列中未执行的任务列表**',
-                  '`shutdownNow` 的「中断」是协作式的：任务若不响应中断（或忽略 `InterruptedException`），仍会跑完',
-                  '`isShutdown()`：是否已调过关闭；`isTerminated()`：是否**全部**线程已结束',
-                  '`awaitTermination(timeout, unit)`：等待进入 `TERMINATED`，返回是否超时',
-                  '优雅关闭四步：`shutdown()` → `awaitTermination(30s)` → 超时则 `shutdownNow()` → 再 `awaitTermination` 兜底',
-                  '关闭前应先停掉「任务来源」（如注销 MQ 消费者、关掉接收请求的端口），否则一边关一边还在提交',
+                  '**① 核心未满**:`workerCount < corePoolSize` 就新建核心线程执行,这一步**不碰队列**',
+                  '**② 尝试入队**:池仍在 `RUNNING` 且 `offer` 成功就入队;成功后**必须复查**状态(可能刚被关闭),并在线程数为 0 时补建一个非核心线程',
+                  '**③ 入队失败**:说明队列满了,调 `addWorker(cmd, false)` 扩到 `maximumPoolSize`',
+                  '**④ 扩容失败**:线程达上限,交给 `handler` 拒绝',
+                  '**收口**:四步里任何一步成功就返回,所以「队列容量」直接决定「第三步会不会发生」',
                 ],
                 depth:
-                  '为什么 `shutdownNow` 要返回任务列表：那些任务**从未执行过**，调用方可以落库、重投、或记录告警。很多人忽略这个返回值，导致「关闭时丢了一批任务却不知道」。这是「优雅停机」与「丢数据」的分界线。',
-                followup: '「Spring 里怎么优雅停机」——`server.shutdown=graceful`（Spring Boot 2.3+）会先停 Web 容器再销毁 Bean；线程池作为 Bean 加 `@PreDestroy` 调 `shutdown()` + `awaitTermination`。配合 K8s 的 `preStop` 与 `terminationGracePeriodSeconds`，才能做到「滚动发布不丢请求」。',
-              },
-              {
-                kind: 'question',
-                title: '线程池是如何实现线程复用的？核心线程会被回收吗？',
-                questionId: 'java-03-Q47',
-                intent:
-                  '考源码理解。核心是「`runWorker` 的 while 循环 + `getTask`」，以及「核心线程默认不回收」这个默认行为。',
-                points: [
-                  '复用机制：`Worker` 继承 `AQS` 并实现 `Runnable`，其 `run()` 调 `runWorker(this)`',
-                  '`runWorker` 的核心是一个循环：先执行 `firstTask`，然后 `while (task != null || (task = getTask()) != null) { task.run(); }`',
-                  '`getTask()` 从队列取任务：`allowCoreThreadTimeOut || wc > corePoolSize` 时用 `poll(keepAliveTime)`（会超时返回 null），否则用 `take()`（永久阻塞）',
-                  '`getTask()` 返回 null 时循环退出，`processWorkerExit` 移除 worker —— **这就是「线程销毁」的唯一路径**',
-                  '**核心线程默认不回收**（`take()` 永久阻塞），除非 `allowCoreThreadTimeOut(true)`',
-                  '线程不会因为「执行任务抛异常」而销毁——`runWorker` 里 `catch` 后继续循环；只有 `getTask` 返回 null 或线程被中断才退出',
-                  '`Worker` 继承 `AQS` 是为了「用不可重入的独占锁标记线程是否在运行」，防止 `shutdown` 时误中断正在跑任务的线程',
-                ],
-                depth:
-                  '「为什么 `Worker` 要继承 `AQS`」这个细节很少有人答对：它用一个 `state` 为 0/1/-1 的不可重入锁表示「worker 是否持有执行权」。`shutdown` 时 `tryLock` 成功才 `interrupt`——**保证不中断正在执行任务的线程**，只中断空闲等待的。这是「`shutdown` 不中断进行中任务」的实现基础。',
-                followup: '「线程池里的线程会因为空闲太久被杀掉吗」——非核心线程会（`poll` 超时返回 null → 退出）。核心线程默认不会。这就是「池的线程数会在 `corePoolSize` 和 `maximumPoolSize` 之间浮动」的机制来源。',
-              },
-              {
-                kind: 'question',
-                title: '如何动态修改线程池参数？美团/开源界的方案是什么？',
-                questionId: 'java-03-Q48',
-                intent:
-                  '工程实践题。要知道 JDK 本身提供了 setter，但「动态生效」有坑，以及社区方案的思路。',
-                points: [
-                  'JDK 原生支持：`setCorePoolSize(int)`、`setMaximumPoolSize(int)`、`setKeepAliveTime(...)`、`setRejectedExecutionHandler(...)`',
-                  '`setCorePoolSize` 的逻辑：调大则**立即创建新线程**（`addWorker`）；调小则**下次 `getTask` 时**多余的 worker 会因超时或 `wc > corePoolSize` 而退出',
-                  '`setMaximumPoolSize` 只影响「能否继续扩容」，不会立刻销毁多余线程',
-                  '**注意**：`workQueue` 和 `threadFactory` **没有 setter**，运行时无法替换——这是硬限制',
-                  '美团思路（《Java 线程池实现原理及其在美团业务中的实践》）：自定义 `ThreadPoolExecutor`，暴露参数修改能力，配合配置中心（如 MTConfig / Apollo）推送变更',
-  '美团还提出「**动态调参 + 实时监控**」闭环：监控队列长度、活跃线程数、拒绝次数，超阈值自动告警或调参',
-                  'Hippo4j、DynamicTp 等开源方案在此基础上增加了「参数模板、依赖隔离、灰度发布」能力',
-                  '动态调参的前提是**有监控**：没有指标就不知道往哪个方向调，盲目调参可能让问题更糟',
-                ],
-                depth:
-                  '为什么「队列容量」不能动态改：因为 `BlockingQueue` 的容量是构造时固定的（`ArrayBlockingQueue` 的 `capacity` 是 `final`）。社区方案的解法是「自定义一个可调容量的 `ResizableCapacityLinkedBlockingQueue`」——用 `LinkedBlockingQueue` 的 `capacity` 字段（非 final，通过反射或子类暴露）。这也是 Hippo4j 的一个核心改造点。',
-                followup: '「动态调参会有什么风险」——`setCorePoolSize` 调大时会**立刻创建线程**，若一次性调到很大可能引发瞬时资源冲击；调小则线程退出是渐进的。另外调参不会影响**已经在队列里的任务**，它们仍按原逻辑处理。所以调参要有节奏（分批、观察），而不是直接改到目标值。',
-              },
-              {
-                kind: 'question',
-                title: 'corePoolSize 能设为 0 吗？不同阻塞队列对线程池行为有什么影响？',
-                questionId: 'java-03-Q49',
-                intent:
-                  '两个陷阱题。第一问答案是「能，但行为反直觉」；第二问是本节的总收束，把队列与四道闸门串起来。',
-                points: [
-                  '**能设为 0**。此时第一步（`wc < corePoolSize`）永不成立，任务直接入队；入队后复查发现 `workerCount == 0`，才补建一个线程',
-                  '所以 `core = 0` 的行为是「**至少 1 个线程**，且任务先进队列再建线程」——比「先建线程」多一次入队延迟',
-                  '真正的问题：`core = 0` 时无法「预热」，且 `maximumPoolSize` 要等队列满了才生效，突发流量下延迟更高',
-                  '**`SynchronousQueue`（容量 0）**：`offer` 永远失败（没有等待的消费者时）→ 直接走第 ③ 步扩容 → 适合「来多少任务就建多少线程」（`CachedThreadPool`）',
-                  '**`ArrayBlockingQueue(n)`（有界）**：可预期，队列满即扩容、再满即拒绝 → **生产推荐**',
-                  '**`LinkedBlockingQueue()`（无界）**：`offer` 永成功 → `maximumPoolSize` 失效、拒绝策略永不触发 → 堆积到 OOM',
-                  '**`PriorityBlockingQueue`（无界 + 优先级）**：同上，但出队按优先级；注意「低优先级任务可能饿死」',
-                  '**`DelayQueue`（无界 + 延时）**：任务到期才可出队；`take` 会阻塞到最早任务到期',
-                ],
-                depth:
-                  '一张表把「队列选型」与「四道闸门」连起来：**队列容量 = 第 ② 步到第 ③ 步之间的缓冲区大小**。容量 0 意味着没有缓冲（立刻扩容），容量无穷意味着永远不扩容。所以「选队列」等价于「选池的弹性策略」——这是比背「有界好、无界坏」更本质的理解。',
-                followup: '「`core = 0` 且用 `SynchronousQueue` 会怎样」——这正是 `newCachedThreadPool` 的配置（`core=0, max=MAX_VALUE`）。每个任务都直接尝试交给等待的线程，没有等待者就立刻新建线程。**这就是它「弹性无限」的原因，也是它 OOM 的原因。**',
-              },
-              {
-                kind: 'question',
-                title: '生产环境怎么对线程池做监控？不同业务如何隔离？',
-                questionId: 'java-03-Q50',
-                intent:
-                  '工程收口题。要能给出具体指标、具体手段、以及隔离的三种维度。',
-                points: [
-                  '**核心指标**：`getActiveCount()`（活跃线程）、`getQueue().size()`（队列积压）、`getCompletedTaskCount()`（完成数）、`getPoolSize()`（当前线程数）、`getLargestPoolSize()`（历史峰值）',
-                  '**必须加的两个指标**：**队列剩余容量**（`queue.remainingCapacity()`，比纯 size 更能反映「还有多久打满」）与**拒绝次数**（拒绝策略里累加计数器）',
-                  '**采集方式**：定时任务（如 `ScheduledExecutorService` 每 10s）打点到 Micrometer / Prometheus；或用 `ThreadPoolExecutor` 的 `beforeExecute`/`afterExecute` 钩子统计任务耗时',
-                  '**告警线**：队列使用率 > 80%、活跃线程数长期等于 `maximumPoolSize`、拒绝次数 > 0（任何一次拒绝都该告警）',
-                  '**隔离维度一：按业务分池**——订单、支付、通知各自独立池，避免「通知慢拖垮下单」',
-                  '**隔离维度二：按依赖分池**——同一业务内，访问不同下游的调用分开池，防止单个下游故障占满全部线程',
-                  '**隔离维度三：快慢分离**——快速任务与慢速任务分开池，避免慢任务占满后快任务也排队',
-                  '**额外手段**：`Semaphore` 做「信号量隔离」（比线程池更轻量，适合只限流不隔离线程的场景）、`Hystrix`/`Sentinel` 做熔断降级',
-                ],
-                depth:
-                  '「为什么线程池隔离是必须的」——因为它防的是**故障放大**：一个下游变慢 → 线程被长时间占用 → 线程池满 → 队列堆积 → 上游请求超时 → 调用方重试 → 雪崩。分池后，故障被限制在单个池内。这也是「舱壁模式（Bulkhead）」的核心思想：船体分舱，一舱进水不会沉船。',
-                followup: '「监控发现队列持续增长，先做什么」——先看**是不是下游变慢**（对比下游 RT 与错误率），再看**是不是流量真的涨了**（对比 QPS），最后才考虑调参（加线程/加队列）。**加队列只是延后问题**，队列再大也会满；根因往往在「下游 RT 上升」或「有慢任务混进来」。',
+                  '拉开分档的关键是能不能把「队列容量」和「第三步」连起来:普通答法会平铺四个步骤;好答法会指出 `LinkedBlockingQueue` 无界时 `offer` 永远成功、第三步永不触发,于是 `maximumPoolSize` 形同虚设;[[最好的答法会顺带说出「所以 Executors 的工厂方法都不适合生产」,并给出有界队列加自定义拒绝策略的组合]]。',
+                followup:
+                  '追问:如果核心线程数是 0,提交任务时会发生什么?——第一步判定直接跳过,走后两步:入队成功后因为 `workerCount == 0` 会补建一个线程(那个 `addWorker(null, false)` 分支就是为这种配置准备的)。再追一句:那为什么 `newCachedThreadPool` 的核心数是 0 却能立刻创建线程?因为它的队列是 `SynchronousQueue`,入队必然失败,直接走第三步扩容。',
               },
               {
                 kind: 'principle',
-                title: '把线程池收成一张「参数 — 行为」的因果图',
+                title: '收成一张「参数 — 行为」的因果图',
                 body: [
-                  '线程池的题之所以容易答散，是因为它有一堆参数和一堆现象。把「参数改动 → 行为变化」这条因果链记住，任何追问都能顺着推下去。',
+                  '线程池的题之所以容易答散,是因为它有一堆参数和一堆现象。把「参数改动 → 行为变化」这条因果链记住,任何追问都能顺着推下去。',
                 ],
                 steps: [
                   {
-                    title: '队列容量决定「弹性区间」',
+                    title: '① 队列容量决定「弹性区间」',
                     detail:
-                      '容量 0（`SynchronousQueue`）→ 立刻扩容，弹性最大；容量 n → 缓冲区 n 个任务；容量无穷 → 永不扩容，`maximumPoolSize` 失效。**这是最容易出错的一个参数**，也是「为什么不推荐 `Executors`」的根因。',
+                      '容量 0(`SynchronousQueue`)→ 立刻扩容,弹性最大;容量 n → 缓冲区 n 个任务;容量无穷 → 永不扩容,`maximumPoolSize` 失效。**这是最容易配错的一个参数**,也是「为什么不推荐 `Executors`」的根因。',
                   },
                   {
-                    title: '`corePoolSize` 决定「常驻线程」，`maximumPoolSize` 决定「上限」',
+                    title: '② 核心数决定「基线成本」,最大值决定「天花板」',
                     detail:
-                      '两者之间是「弹性区」，靠 `keepAliveTime` 回收。核心线程默认不回收，所以 `corePoolSize` 实际是「池的基线成本」——设太大会白占内存，设太小会让突发流量全靠新建线程。',
+                      '两者之间是弹性区,靠 `keepAliveTime` 回收。核心线程默认不回收,所以 `corePoolSize` 实际是「池的常驻成本」——设太大白占内存,设太小突发全靠新建线程。',
                   },
                   {
-                    title: '拒绝策略决定「满了之后」',
+                    title: '③ 拒绝策略决定「满了之后」',
                     detail:
-                      '满了意味着「队列满 + 线程达上限」。此时的选择只有四种：抛异常（让调用方感知）、调用方自己跑（背压）、丢弃（数据丢失）、落库重试（延迟处理）。**没有「不丢也不阻塞」的选项**——这是资源有限的必然。',
+                      '满了意味着队列满且线程达上限。此时只有四种选择:抛异常(让调用方感知)、调用方自己跑(背压)、丢弃(丢数据)、落库重试(延迟)。**没有「不丢也不阻塞」的选项**——这是资源有限的必然。',
                   },
                   {
-                    title: '线程工厂决定「可观测性」',
+                    title: '④ 线程工厂决定「可观测性」',
                     detail:
-                      '默认线程名 `pool-N-thread-M` 在 `jstack` 里毫无信息量。自定义命名（带业务前缀）、设 `UncaughtExceptionHandler`、决定是否守护线程——这三件事在排查线上问题时价值极高。',
+                      '默认线程名在 `jstack` 里毫无信息量。自定义命名、设 `UncaughtExceptionHandler`、决定是否守护线程——这三件事在排查线上问题时价值极高。',
                   },
                   {
-                    title: '监控与隔离决定「能不能发现和限制问题」',
+                    title: '⑤ 监控与隔离决定「能不能发现和限制问题」',
                     detail:
-                      '没有监控，参数调错也不知道；没有隔离，一个业务的故障会传染所有业务。这两条是「从能用到可用」的分界线，也是面试里区分「写过 demo」和「上过生产」的关键。',
+                      '没有监控,参数调错也不知道;没有隔离,一个业务的故障会传染所有业务。这两条是「从能用到可用」的分界线,也是面试里区分「写过 demo」和「上过生产」的地方。',
                   },
                 ],
                 takeaway:
-                  '一句话收口：**线程池 = 一个队列 + 一组线程 + 三道闸门（核心数 / 队列容量 / 最大值）+ 一个兜底策略。** 所有「为什么会 OOM」「为什么拒绝策略不触发」「为什么线程数上不去」的问题，都能从「任务走的是哪道闸门」推出来。',
+                  '一句话收口:**线程池 = 一个队列 + 一组线程 + 四道闸门(核心数 / 队列容量 / 最大值 / 拒绝策略)。** 所有「为什么会 OOM」「为什么拒绝不触发」「为什么线程数上不去」的问题,都能从「任务走的是哪道闸门」推出来。',
               },
-            ],
-            outline: [
-              '七参数 + ctl（高 3 位状态 / 低 29 位线程数）；队列容量决定池的弹性区间',
-              '执行顺序：核心线程 → 入队 → 扩到最大 → 拒绝；无界队列会让最大线程数失效',
-              'Executors 四个工厂方法都不适合生产：无界队列堆 OOM，CachedThreadPool 线程爆炸',
-              'CPU 密集 N+1，IO 密集 N×(1+W/C)；最终以压测与 CPU/队列指标为准',
-              'submit 会把异常吞进 Future，不 get 就看不到；shutdown 跑完队列，shutdownNow 中断并返回任务',
-            ],
-            pitfalls: [
-              '用 Executors.newFixedThreadPool：无界队列导致 maximumPoolSize 失效并最终 OOM',
-              '用 submit 提交任务却不 get、不 try/catch：任务抛异常但日志里什么都没有',
-              '只设核心线程数不管队列容量：队列无界等于没有背压，有界但过小会导致大量拒绝',
             ],
           },
         },
@@ -2811,57 +2617,72 @@ export default {
         },
         {
           id: 'juc-tools',
-          title: 'JUC 工具类与并发容器',
-          kind: 'concept',
+          title: '同步工具与并发容器',
+          minutes: 50,
           sources: [
             { topic: 'java-03', chapters: ['JUC 并发工具类'] },
             { topic: 'java-03', chapters: ['并发容器'] },
           ],
           content: {
             intro:
-              '`CountDownLatch`、`CyclicBarrier`、`Semaphore` 三个工具经常被混着问，区别其实在语义：一个**等别人到齐**、一个**等彼此到齐**、一个**控制同时进入的数量**。它们大多建在 AQS 的共享模式上，所以理解了 AQS，这一节只是「换一种 `state` 语义」。后半节转向并发容器：`ConcurrentHashMap` 1.8 的 `put` 流程、`CopyOnWriteArrayList` 的写时复制、`BlockingQueue` 的实现选择。两块放一起讲，是因为它们常常组合出现——「用 `CountDownLatch` 等 3 个线程跑完再汇总」本身就离不开线程池。',
+              '这一课横跨两块:三个「等待」工具(Latch / Barrier / Semaphore)和三族并发容器(CHM / COW / BlockingQueue)。它们看起来是两堆 API,其实各只有一条主线——工具的主线是**「在等什么」**(等别人做完、等彼此到齐、等有许可),容器的主线是**「用哪种代价换掉锁」**(细粒度锁、写时复制、CAS、阻塞). 抓住这两条,剩下的都是推论。',
+            outline: [
+              '`CountDownLatch` 等别人(一次性)、`CyclicBarrier` 等彼此(可循环)、`Semaphore` 控数量',
+              '`CountDownLatch` 与 `Semaphore` 都基于 AQS 共享模式,`state` 分别是「剩余计数」与「可用许可」',
+              'CHM 1.8 空桶 CAS、非空桶 `synchronized` 锁桶首;扩容多线程协作;`size()` 用 `CounterCell` 分片求和',
+              'CHM 1.7 分段锁并发度固定且内存浪费;1.8 锁粒度细到单桶,并发度随扩容增长',
+              'COW 写时复制整个数组,读完全无锁;内存翻倍、写昂贵、迭代器看不到新元素',
+            ],
+            pitfalls: [
+              '把 `CountDownLatch` 当可复用屏障:计数归零后永久放行,第二轮 `await()` 直接通过',
+              '用并发容器做组合操作:`if (!map.containsKey(k)) map.put(k, v)` 依然有竞态,要用 `putIfAbsent`',
+              '以为 COW 适合「写多读少」:它每次写都复制整个数组,写多的场景是灾难',
+            ],
             sections: [
               {
-                kind: 'concept',
-                title: '三个工具，三种「等待」',
+                kind: 'why',
+                title: '初始化只跑了一次,第二轮却直接放行了',
                 body: [
-                  '**`CountDownLatch` 等的是「别人做完事」**：一个或多个线程在 `await()` 上等，其他线程每完成一件事就 `countDown()`。计数到 0，所有等待者一起放行。注意方向：**等待者不干活，干活者不等待**。典型场景是「主线程等 N 个子任务初始化完成」。',
-                  '**`CyclicBarrier` 等的是「彼此到齐」**：N 个线程各自跑到 `await()`，最后一个到达的线程会执行一个可选的回调（`barrierCommand`），然后**所有线程一起继续**。它的特点是**可以循环使用**（`reset()` 或自动进入下一代），适合「分阶段计算，每阶段结束要同步一次」。',
-                  '**`Semaphore` 管的不是「等」，而是「同时能有多少个」**：`acquire()` 拿许可、`release()` 还许可。许可为 0 时 `acquire` 阻塞。它是**限流器**，不是屏障——拿到许可的线程之间不需要彼此等待，各自跑各自的。',
-                  '一个常被问的差别：`CountDownLatch` 的计数**只能减不能加、到 0 就不能重置**（所以叫「一次性」）；`CyclicBarrier` 会自动进入下一代（计数重置），所以叫「循环栅栏」。这个「能不能复用」是最容易记混的一点。',
+                  '一个定时任务每五分钟跑一轮:先并发拉取五个数据源,再汇总。第一轮完全正常;从第二轮开始,汇总时频繁抛空指针,而日志里**看不到任何「拉取」记录**——那五个任务像是没跑。',
+                ],
+                code: {
+                  language: 'java',
+                  code:
+                    '// 只创建了一次,每轮复用\nprivate final CountDownLatch latch = new CountDownLatch(5);\n\nvoid runRound() throws InterruptedException {\n    for (int i = 0; i < 5; i++) {\n        pool.execute(() -> {\n            try { fetch(i); } finally { latch.countDown(); }\n        });\n    }\n    latch.await();          // 第二轮:立刻返回,压根没等\n    merge();                // ← 此时数据还是空的\n}\n\n// 现场\n// 第 1 轮:正常,await 阻塞到 5 个任务全部完成\n// 第 2 轮:await 立刻返回(耗时 0ms),merge 拿到 null\n// countDown 调用次数:第 3 轮后就没再打印过',
+                  caption: '注意最后一行:`countDown` 在第 3 轮之后再没被调用过——因为任务还没提交完,`merge` 已经跑完并抛异常了。',
+                },
+                wrong: [
+                  '**猜法一:那五个任务没被提交。** 但线程池的活跃数在每轮开始时确实涨了,任务提交是正常的,只是提交完 `await` 就不再等了。',
+                  '**猜法二:`await` 抛了中断异常被吞掉。** 没有中断记录;而且现象是「立刻返回」,不是「抛异常」。',
+                  '**猜法三:`countDown` 少调了一次,所以计数没到 0。** 正好相反——计数早就到 0 了,**所以再也不会等**。',
+                ],
+                real:
+                  '真因是 `CountDownLatch` 是**一次性**的:计数减到 0 之后,`state` 永久停在 0,[[之后所有 `await()` 都直接返回]],不会重置、也不能加回去。所以第二轮一进入 `await` 就放行,而那时五个任务刚提交、一个都没完成。这个 API 的语义是「等一件事发生一次」,不是「每轮同步一次」。',
+                reveal:
+                  '要「每轮都同步一次」,得用 `CyclicBarrier`(可循环)或每轮新建一个 `CountDownLatch`。而这一选择背后,是三个工具**各在等不同东西**:等别人做完、等彼此到齐、等有许可。分不清这一点,API 就会用错。',
+              },
+              {
+                kind: 'concept',
+                title: '三个工具,三种「等待」',
+                body: [
+                  '**`CountDownLatch` 等的是「别人做完事」**:一个或多个线程在 `await()` 上等,其他线程每完成一件事就 `countDown()`。计数到 0,所有等待者一起放行。注意方向:**等待者不干活,干活者不等待**。典型场景是「主线程等 N 个子任务初始化完成」。',
+                  '**`CyclicBarrier` 等的是「彼此到齐」**:N 个线程各自跑到 `await()`,最后一个到达的线程会执行一个可选的回调(`barrierCommand`),然后**所有线程一起继续**。它的特点是**可以循环使用**(自动进入下一代),适合「分阶段计算,每阶段结束要同步一次」。',
+                  '**`Semaphore` 管的不是「等」,而是「同时能有多少个」**:`acquire()` 拿许可、`release()` 还许可,许可为 0 时 `acquire` 阻塞。它是**限流器**,不是屏障——拿到许可的线程之间不需要彼此等待,各跑各的。',
+                  '最容易记混的一点:`CountDownLatch` 的计数**只能减不能加、到 0 不能重置**(所以叫「一次性」);`CyclicBarrier` 会自动进入下一代(计数重置)。[[判断用哪个,先问「这个同步要做几次」]]——一次用 Latch,每轮都要用 Barrier。',
                 ],
                 term: {
                   name: '屏障（Barrier）vs 闩锁（Latch）',
-                  def: 'Latch 是「等到计数归零就永久打开」，一次性；Barrier 是「等到 N 方到齐就打开，然后重置进入下一代」，可循环。前者的等待者与倒计数者是两组线程，后者是同一组线程互相等待。',
+                  def: 'Latch 是「等到计数归零就永久打开」,一次性;Barrier 是「等到 N 方到齐就打开,然后重置进入下一代」,可循环。前者是「等事件」,后者是「等集合」。',
                 },
                 points: [
-                  '`CountDownLatch`：等别人做完（等待者与执行者分离），一次性',
-                  '`CyclicBarrier`：等彼此到齐（同一组线程互相等），可循环，最后到达者执行回调',
-                  '`Semaphore`：控制并发数量（不是屏障），`acquire`/`release` 许可',
-                  '三者都可设置超时（`await(timeout)` / `tryAcquire(timeout)`），生产环境应总是设超时',
+                  '`CountDownLatch` 的 `await(timeout)` 返回 `false` 表示超时,**不会抛异常**——忘了检查返回值是最常见的漏判。',
+                  '`CyclicBarrier` 的 `barrierCommand` 由**最后到达的那个线程**执行,不是专门起一个线程;回调里抛异常会让栅栏进入 `Broken` 状态。',
+                  '`Semaphore` 的 `release()` 不必由 `acquire()` 的线程调用(可以跨线程还),这个灵活性是把双刃剑——还多了许可数不会报错。',
                 ],
-              },
-              {
-                kind: 'question',
-                title: 'CountDownLatch、CyclicBarrier、Semaphore 的区别？',
-                questionId: 'java-03-Q56',
-                intent:
-                  '高频对比题。要按「等谁 / 能不能复用 / 底层是什么」三个维度说清，别只背场景。',
-                points: [
-                  '**`CountDownLatch`**：等**其他线程**完成任务。`await()` 阻塞，`countDown()` 减计数，到 0 全部放行。**一次性**，不可重置',
-                  '**`CyclicBarrier`**：等**彼此**到齐。N 个线程各自 `await()`，最后一个到达者执行 `barrierCommand`，然后全部继续。**可循环**',
-                  '**`Semaphore`**：控制**同时访问的数量**。`acquire()` 拿许可（可多个），`release()` 归还；不是屏障，许可持有者之间不互相等待',
-                  '**底层**：`CountDownLatch` / `Semaphore` 基于 AQS **共享模式**（`state` = 计数 / 许可数）；`CyclicBarrier` 基于 `ReentrantLock` + `Condition`（`state` 概念不适用）',
-                  '**异常处理**：`CyclicBarrier` 有一个线程被中断或超时，栅栏会 `broken`，其他线程抛 `BrokenBarrierException`；`CountDownLatch` 没有「破损」概念',
-                  '**典型场景**：`CountDownLatch` = 主线程等子任务初始化完；`CyclicBarrier` = 分阶段计算每阶段同步；`Semaphore` = 接口限流 / 连接池',
-                ],
-                depth:
-                  '「为什么 `CountDownLatch` 不能重置」——因为它的 `state` 一旦减到 0，AQS 的共享模式会让**所有** `acquireShared` 立即成功（`state == 0` 直接返回成功）。要「重置」就得把 `state` 加回去，但那些已经在 `await` 上被唤醒的线程无法「重新等待」——语义上做不到。所以 JDK 干脆不给重置，需要循环就用 `CyclicBarrier` 或 `Phaser`。',
-                followup: '「`Semaphore` 能当锁用吗」——`new Semaphore(1)` 确实能实现互斥，但它**不记录持有者**，所以任何线程都能 `release`（甚至没 `acquire` 过），也就不能重入。要「互斥 + 可重入」必须用 `ReentrantLock`。',
               },
               {
                 kind: 'diagram',
-                title: '三者的语义差别：一张表定清',
+                title: '五个工具的语义差别:一张表定清',
                 diagram: {
                   type: 'matrix',
                   cols: ['在等什么', '能否复用', '底层实现'],
@@ -2869,18 +2690,18 @@ export default {
                     ['`CountDownLatch`', '等别人把计数减到 0', '**不能**（一次性）', 'AQS 共享模式，`state` = 计数'],
                     ['`CyclicBarrier`', '等彼此都到齐（N 方）', '**能**（自动进入下一代）', '`ReentrantLock` + `Condition` + `parties`'],
                     ['`Semaphore`', '等有可用许可（限流）', '能（许可可反复借还）', 'AQS 共享模式，`state` = 许可数'],
-                    ['`Phaser`', '等某个阶段的所有参与者', '能，且可动态增减参与者', '内部用 `state` 拆成 phase + parties'],
-                    ['`Exchanger`', '等另一个线程来交换数据', '能（一次交换一轮）', '`Slot` / `Node` + CAS + `park`'],
+                    ['`Phaser`', '等某个阶段的所有参与者', '能，且可动态增减参与者', '内部把 `state` 拆成 phase + parties'],
+                    ['`Exchanger`', '等另一个线程来交换数据', '能（一轮一次交换）', '`Slot` / `Node` + CAS + `park`'],
                   ],
                   caption:
-                    '读表的顺序是「在等什么」——这一列决定了其他所有列。特别注意 `CyclicBarrier` 是唯一**不用 AQS** 的：因为它需要「最后一个到达者执行回调 + 全部一起放行 + 重置」这套复杂语义，用 `ReentrantLock` + `Condition` 表达更直接。',
+                    '读表的顺序是「在等什么」——这一列决定了其他所有列。特别注意 `CyclicBarrier` 是唯一**不用 AQS** 的:因为它需要「最后一个到达者执行回调 + 全部一起放行 + 重置」这套复杂语义,用 `ReentrantLock` + `Condition` 表达更直接。',
                 },
               },
               {
                 kind: 'analogy',
                 title: '等快递、集合发车、停车场车位',
                 text:
-                  '**`CountDownLatch` 像等快递**：你（主线程）在家等，5 个包裹（子任务）陆续到，每到一个划掉一个（`countDown`），**5 个全到才出门**。包裹不会因为你等就变快，你也只需等这一次——明天再等就得重新下单（不能重置）。**`CyclicBarrier` 像旅行团集合发车**：10 个人（10 个线程）各自逛，导游说「都到齐了才发车」，**最后一个上车的人负责关门**（`barrierCommand`），然后车开往下一站（下一代）。到下一站又要重新集合。**`Semaphore` 像停车场车位**：只有 5 个车位，**第 6 辆车只能在门口等**（`acquire` 阻塞），有车走了（`release`）才能进。车位上的车之间不需要互相等，各停各的。',
+                  '**`CountDownLatch` 像等快递**:你(主线程)在家等,5 个包裹(子任务)陆续到,每到一个划掉一个(`countDown`),**5 个全到才出门**。包裹不会因为你等就变快,你也只需等这一次——明天再等就得重新下单(不能重置)。**`CyclicBarrier` 像旅行团集合发车**:10 个人各自逛,导游说「都到齐了才发车」,**最后一个上车的人负责关门**(`barrierCommand`),然后车开往下一站(下一代)。到下一站又要重新集合。**`Semaphore` 像停车场车位**:只有 5 个车位,**第 6 辆车只能在门口等**(`acquire` 阻塞),有车走了(`release`)才能进。车位上的车之间不需要互相等,各停各的。',
                 mapping: [
                   { real: '你在家等 5 个包裹', tech: '`await()` 阻塞的主线程' },
                   { real: '每到一个包裹划掉一个', tech: '`countDown()` 减 `state`' },
@@ -2890,442 +2711,389 @@ export default {
                   { real: '到下一站重新集合', tech: '自动进入下一代（可循环）' },
                   { real: '只有 5 个车位', tech: '`new Semaphore(5)`' },
                   { real: '第 6 辆车在门口等', tech: '`acquire()` 阻塞' },
-                  { real: '有车走了才能进', tech: '`release()` 归还许可' },
+                  { real: '有车走了才能进，车位上的车互不相干', tech: '`release()` 释放许可；线程之间无屏障关系' },
                 ],
                 limit:
-                  '类比到「失败场景」就不成立了：现实中「一个包裹丢了」你还可以继续等别的，而 `CountDownLatch` 的 `countDown` 若因异常漏调，`await` 会**永久挂住**（所以必须写在 `finally` 里）；旅行团里「有人走丢了」，现实中导游可以决定发车，而 `CyclicBarrier` 一旦某个线程中断/超时，栅栏就**broken**，所有等待者抛 `BrokenBarrierException`——没有「部分人继续走」的选项。',
-              },
-              {
-                kind: 'question',
-                title: 'CountDownLatch 和 Semaphore 的底层原理？',
-                questionId: 'java-03-Q57',
-                intent:
-                  '落到 AQS 共享模式。要能说清「state 代表什么」「哪个方法对应 acquireShared / releaseShared」。',
-                points: [
-                  '`CountDownLatch`：内部 `Sync extends AbstractQueuedSynchronizer`，`state` = 剩余计数',
-                  '`countDown()` → `releaseShared(1)` → `tryReleaseShared` 用 CAS 把 `state - 1`，减到 0 返回 true → 唤醒所有等待者',
-                  '`await()` → `acquireSharedInterruptibly(1)` → `tryAcquireShared` 返回 `state == 0 ? 1 : -1`，**只有一个线程能拿到 state 时全部放行**',
-                  '关键：`tryAcquireShared` 返回正数表示「成功且后继也能成功」——这就实现了「计数归零后所有等待者一起放行」的广播效果',
-                  '`Semaphore`：`state` = 剩余许可数。`acquire()` → `tryAcquireShared(-1)` CAS 减；`release()` → `tryReleaseShared` CAS 加',
-                  '`Semaphore` 支持一次拿多个许可（`acquire(n)`），也支持公平/非公平（构造器第二参数）',
-                  '`CountDownLatch` 没有公平性选项，因为它的 `state` 只减不加，不存在「插队」问题',
-                ],
-                depth:
-                  '`CountDownLatch.tryAcquireShared` 返回 `1` 而不是 `0` 的用意：返回 `0` 表示「我成功了，但后继不一定能成功」，AQS 就不会继续向后传播唤醒；返回 `1` 表示「我成功了，后继也可能成功」，AQS 会**继续唤醒下一个**。这就是「一次 `countDown` 让所有 `await` 者同时醒来」的实现机制——**靠传播，而不是靠遍历唤醒**。',
-                followup: '「`CountDownLatch.await` 能被中断吗」——`await()` 可以（抛 `InterruptedException`），`awaitUninterruptibly()` 不行。所以「既想等又不想被中断」用后者，但要注意它可能永久阻塞。',
+                  '类比到「公平性」就失效了:现实停车场先到先得,而 `Semaphore` 默认是**非公平**的(新来的线程可能插队抢到刚释放的许可),要公平必须显式 `new Semaphore(n, true)`,代价是吞吐下降。同理 `ReentrantLock` 默认也不公平。',
               },
               {
                 kind: 'code',
                 title: '三个工具的典型写法',
                 lang: 'java',
+                version: 'JDK 8+',
                 code:
-                  '// ① CountDownLatch：主线程等 3 个服务初始化完成\nCountDownLatch latch = new CountDownLatch(3);\nfor (String svc : List.of("db", "cache", "mq")) {\n    pool.execute(() -> {\n        try {\n            init(svc);\n        } catch (Exception e) {\n            log.error("init failed: " + svc, e);\n        } finally {\n            latch.countDown();          // ← 必须 finally，否则异常会导致永久挂住\n        }\n    });\n}\nlatch.await(30, TimeUnit.SECONDS);    // 生产环境必带超时\nSystem.out.println("all ready, q=" + latch.getCount());   // 0\n\n// ② CyclicBarrier：分两阶段计算，每阶段同步一次\nCyclicBarrier barrier = new CyclicBarrier(3, () ->\n        System.out.println("--- 全部到齐，本阶段结束 ---"));\nfor (int i = 0; i < 3; i++) {\n    final int id = i;\n    pool.execute(() -> {\n        try {\n            phaseOne(id);\n            barrier.await();             // 等其他人做完 phaseOne\n            phaseTwo(id);                // 此时所有线程都完成了 phaseOne\n            barrier.await();             // 等其他人做完 phaseTwo\n        } catch (BrokenBarrierException | InterruptedException e) {\n            Thread.currentThread().interrupt();\n        }\n    });\n}\n\n// ③ Semaphore：限制同时访问下游的并发数\nSemaphore permits = new Semaphore(5);   // 最多 5 个并发\nfor (int i = 0; i < 100; i++) {\n    pool.execute(() -> {\n        boolean ok = false;\n        try {\n            if (!permits.tryAcquire(1, TimeUnit.SECONDS)) {   // 带超时，别无限等\n                log.warn("限流拒绝");\n                return;\n            }\n            ok = true;\n            callDownstream();\n        } catch (InterruptedException e) {\n            Thread.currentThread().interrupt();\n        } finally {\n            if (ok) permits.release();       // ← 只有真正拿到许可才还\n        }\n    });\n}',
-                caption:
-                  '三段代码里最重要的都是 `finally`：`countDown` 漏调会导致永久挂住，`release` 漏调会导致许可泄漏（最终没人能拿到）。**「许可泄漏」比「计数少减」更隐蔽**——它表现为「限流器逐渐变严格，最后完全卡死」，而日志里什么都没有。',
+                  '// ① CountDownLatch:主线程等 5 个子任务初始化完成(一次性)\nCountDownLatch latch = new CountDownLatch(5);\nfor (int i = 0; i < 5; i++) {\n    pool.execute(() -> {\n        try { initPart(); } finally { latch.countDown(); }   // 放 finally,防止异常导致永久阻塞\n    });\n}\nif (!latch.await(3, TimeUnit.SECONDS)) {                  // 一定要带超时,并检查返回值\n    log.warn("init timeout");\n}\n\n// ② CyclicBarrier:分阶段计算,每阶段结束同步一次(可循环)\nCyclicBarrier barrier = new CyclicBarrier(4, () -> log.info("阶段完成,进入下一轮"));\nfor (int i = 0; i < 4; i++) {\n    pool.execute(() -> {\n        for (int phase = 0; phase < 3; phase++) {\n            doPhaseWork(phase);\n            barrier.await();       // 4 方到齐才继续,自动进入下一代\n        }\n    });\n}\n\n// ③ Semaphore:限制同时访问下游的并发数(限流)\nSemaphore permits = new Semaphore(10, true);                   // true = 公平模式\nvoid callDownstream() throws InterruptedException {\n    permits.acquire();\n    try {\n        doHttp();\n    } finally {\n        permits.release();      // 必须 finally,否则泄漏许可\n    }\n}\n\n// ④ 每轮都要同步 → 用 CyclicBarrier 或每轮新建 Latch,绝不复用同一个 Latch\nfor (int round = 0; round < 100; round++) {\n    CountDownLatch perRound = new CountDownLatch(5);            // ← 关键:每轮新建\n    submitAll(perRound);\n    perRound.await();\n}',
                 notes: [
-                  { line: 'latch.countDown();  // 必须 finally', text: '如果 `init(svc)` 抛异常且没 `finally`，`await` 会永远等下去。这是 `CountDownLatch` 最常见的事故形态。' },
-                  { line: 'barrier.await();', text: '抛 `InterruptedException` 与 `BrokenBarrierException`。后者表示「栅栏被别的线程打破了」，此时整轮计算作废，不能重试当前阶段。' },
-                  { line: 'if (ok) permits.release();', text: '只在 `tryAcquire` 成功后才 `release`。若在 `finally` 里无条件 `release`，超时没拿到的分支会「凭空多还一个许可」，限流就失效了。' },
+                  { line: 'latch.countDown();', text: '放在 `finally` 里:任务抛异常也必须减计数,否则 `await` 会等满超时。' },
+                  { line: 'latch.await(3, TimeUnit.SECONDS)', text: '返回 `false` 表示超时但**不抛异常**,不检查返回值等于没处理超时。' },
+                  { line: 'permits.release();', text: '`release` 放在 `finally`,否则一次异常就永久少一个许可,最终所有线程卡死。' },
+                  { line: 'new CountDownLatch(5)', text: '「每轮新建」是修复一次性语义的两种方式之一(另一种是换 `CyclicBarrier`)。' },
                 ],
-              },
-              {
-                kind: 'question',
-                title: 'Exchanger 和 Phaser 了解吗？',
-                questionId: 'java-03-Q58',
-                intent:
-                  '两个冷门但容易问到的类。答出「两两交换」和「可重用的多阶段栅栏」就够了，能补充限制更好。',
-                points: [
-                  '**`Exchanger<V>`**：两个线程在 `exchange(v)` 处**交换数据**，双方都到达才一起返回对方的值。适合「生产者与消费者成对交换缓冲区」、遗传算法、流水线',
-                  '`Exchanger` 的 `exchange` 只支持**两方**；三方以上同时到达的行为是「随机两两配对」，语义上不保证谁和谁配',
-                  '实现：内部 `Slot` / `Node` + CAS + `park/unpark`，不用 AQS',
-                  '**`Phaser`**：可重用的**多阶段栅栏**，支持**动态注册/注销参与者**（`register` / `arriveAndDeregister`）',
-                  '`Phaser` 可以看作「`CountDownLatch` + `CyclicBarrier` 的超集」：既能等（`arriveAndAwaitAdvance`）、又能分阶段（phase 递增）、还能增减参与者',
-                  '`Phaser` 的关键方法：`arrive()`（到达但不等待）、`arriveAndAwaitAdvance()`（到达并等全到）、`arriveAndDeregister()`（到达并退出）',
-                  '`Phaser` 的 `state` 被拆成「phase（高 32 位）+ parties（低 16 位）+ unarrived（次 16 位）」——又是一个「一个 long 塞多个字段」的设计',
-                ],
-                depth:
-                  '「`Phaser` 的典型用途」——分阶段且**参与者数量会变**的并行计算。比如「第一阶段 10 个任务，第二阶段只需要其中 3 个继续」：`CyclicBarrier` 必须固定 parties，做不到；`Phaser` 用 `arriveAndDeregister()` 让 7 个线程退出，剩 3 个继续下一阶段。这是它不可替代的场景。',
-                followup: '「`Exchanger` 会不会死锁」——会。如果只有一方调 `exchange`，它会一直等（或超时抛 `TimeoutException`）。且 `Exchanger` 是**可重用**的，但每次交换要求双方「同时到达同一个配对点」，所以任务负载不均时容易长时间等待。',
-              },
-              {
-                kind: 'question',
-                title: '场景题：3 个线程并发执行、1 个线程等它们全部完成后汇总，怎么做？',
-                questionId: 'java-03-Q59',
-                intent:
-                  '场景题，考「能给出几种方案并说清取舍」。只答 `CountDownLatch` 不够，要能说出 `CompletableFuture` / `invokeAll` 两种更现代的写法。',
-                points: [
-                  '**方案一：`CountDownLatch`** —— `new CountDownLatch(3)`，3 个子线程 `finally` 里 `countDown`，主线程 `await(超时)` 后汇总。最直观，兼容 JDK 5+',
-                  '**方案二：`CompletableFuture.allOf`** —— `allOf(f1, f2, f3).join()`，天然支持「取每个结果」「异常传播」，**推荐用于新代码**',
-                  '**方案三：`ExecutorService.invokeAll(tasks)`** —— 一次提交一组 `Callable`，返回 `List<Future>`，`invokeAll` 本身就会等全部完成',
-                  '**方案四：`CyclicBarrier`** —— 用 4 方栅栏（3 个子任务 + 1 个汇总），但注意栅栏里「汇总」会和子任务**同时被放行**，不是「汇总等它们」，语义不自然，**不推荐**',
-                  '**方案五：`Phaser`** —— 3 个任务 `arriveAndAwaitAdvance`，汇总线程 `register` 后也在同一 phase 等待；适合阶段更多的场景',
-                  '关键细节：所有方案都必须**处理超时**与**异常**——某个子任务挂了不能导致汇总永远等下去',
-                ],
-                depth:
-                  '为什么「`CyclicBarrier` 不适合这个场景」值得说清楚：`CyclicBarrier` 的语义是「所有参与者互相等，然后一起走」，它**没有「等待者」这个角色**——第 4 个线程（汇总）也会被当作参与者，它到达后如果另外 3 个还没到，它也在等；3 个到了之后，**4 个一起放行**，此时汇总线程跑的同时子任务可能还在跑自己的后续代码。要「严格等子任务完全结束」，用 `CountDownLatch` 或 `allOf` 才是对的。',
-                followup: '「如果 3 个任务里有 1 个失败怎么办」——`CountDownLatch` 方案需要自己在子线程里捕获异常并记录（否则 `countDown` 可能漏调）；`CompletableFuture.allOf` 在 `join` 时抛 `CompletionException`，但**只会抛出其中一个**异常，要看全部需要逐个 `handle`。这是 `allOf` 的一个常见坑。',
-              },
-              {
-                kind: 'code',
-                title: '同一个场景，两种现代写法',
-                lang: 'java',
-                code:
-                  '// ◆ 方案二：CompletableFuture.allOf（推荐）\npublic Report aggregate() {\n    CompletableFuture<PartA> fa = CompletableFuture.supplyAsync(this::loadA, pool);\n    CompletableFuture<PartB> fb = CompletableFuture.supplyAsync(this::loadB, pool);\n    CompletableFuture<PartC> fc = CompletableFuture.supplyAsync(this::loadC, pool);\n\n    CompletableFuture<Void> all = CompletableFuture.allOf(fa, fb, fc);\n    return all.thenApply(v -> new Report(\n                    fa.join(), fb.join(), fc.join()))   // allOf 完成后 join 不会阻塞\n              .orTimeout(3, TimeUnit.SECONDS)               // 整体超时\n              .exceptionally(e -> Report.fallback(e))       // 任一失败则降级\n              .join();\n}\n\n// ◆ 方案三：invokeAll（一次提交一批，天然等全部完成）\npublic Report aggregate2() throws InterruptedException {\n    List<Callable<Object>> tasks = List.of(\n            this::loadA, this::loadB, this::loadC);\n    List<Future<Object>> futures = pool.invokeAll(tasks, 3, TimeUnit.SECONDS);\n    // invokeAll 返回时所有任务都已结束（或被取消）\n    Object[] parts = new Object[3];\n    for (int i = 0; i < futures.size(); i++) {\n        Future<Object> f = futures.get(i);\n        parts[i] = f.isCancelled() ? null : f.get();   // 超时会被 cancel\n    }\n    return new Report(parts[0], parts[1], parts[2]);\n}\n\n// ◆ 方案一：CountDownLatch（最朴素，兼容性最好）\npublic Report aggregate3() throws InterruptedException {\n    CountDownLatch latch = new CountDownLatch(3);\n    AtomicReference<PartA> a = new AtomicReference<>();\n    pool.execute(() -> { try { a.set(loadA()); } finally { latch.countDown(); } });\n    pool.execute(() -> { try { /* loadB */ } finally { latch.countDown(); } });\n    pool.execute(() -> { try { /* loadC */ } finally { latch.countDown(); } });\n    if (!latch.await(3, TimeUnit.SECONDS)) {\n        log.warn("timeout, use partial result");\n    }\n    return new Report(a.get(), null, null);\n}',
                 caption:
-                  '三种写法的取舍：`allOf` 最表达力强（能组合、能链式降级），但异常处理要小心；`invokeAll` 最省事（一次调用搞定「提交 + 等待 + 超时取消」），但不支持不同返回类型（都是 `Future<Object>`）；`CountDownLatch` 最底层，需要自己管理结果容器（`AtomicReference` 之类）。**新代码优先 `allOf`。**',
-                notes: [
-                  { line: 'fa.join(), fb.join(), fc.join()', text: '在 `allOf` 的 `thenApply` 里 `join` 不会阻塞——因为 `allOf` 保证三个都已完成。这是写法上的关键便利。' },
-                  { line: '.orTimeout(3, TimeUnit.SECONDS)', text: 'JDK 9+ 的方法，超时后以 `TimeoutException` 完成。JDK 8 需自己用 `ScheduledExecutorService` 实现。' },
-                  { line: 'pool.invokeAll(tasks, 3, TimeUnit.SECONDS)', text: '超时的任务会被 `cancel(true)`（尝试中断），所以返回的 `Future` 可能 `isCancelled()` 为 true。' },
+                  '四个片段里藏着三条纪律:`countDown` 与 `release` 都必须在 `finally` 里、`await` 必须带超时并检查返回值、**`Latch` 不复用**。这三条对应线上最常见的三类「偶发卡死」。',
+              },
+              {
+                kind: 'concept',
+                title: '为什么 `Latch` 与 `Semaphore` 都基于 AQS',
+                body: [
+                  '这两个工具的共性很清楚:都是「**有一个整数状态,多个线程等它变成某个样子**」。`CountDownLatch` 的 `state` 是「还剩几个」,归零就放行;`Semaphore` 的 `state` 是「还剩几个许可」,大于零就能拿。它们都用 AQS 的**共享模式**(`tryAcquireShared` / `tryReleaseShared`),因为允许多个线程同时通过。',
+                  '`CountDownLatch.Sync` 里的 `tryAcquireShared` 只有一句:`return (getState() == 0) ? 1 : -1;`——**等于 0 就成功,否则排队等待**。`countDown()` 就是 `releaseShared(1)`,内部 CAS 把 `state` 减一,减到 0 时唤醒队列里所有等待者。[[一次性就体现在这里:`state` 减到 0 之后没有任何代码能把它加回去]]。',
+                  '`Semaphore` 的差异只在「能不能加回去」:`tryReleaseShared` 会 CAS 把 `state` 加一,所以许可可以反复借还。这也是它可复用的原因。对比之下 `CyclicBarrier` 必须自己维护 `parties` 与「第几代」(`generation`),所以它选了 `ReentrantLock` + `Condition` 这条路。',
+                ],
+                points: [
+                  'AQS 的共享模式允许「一次唤醒多个」,独占模式(`ReentrantLock`)只唤醒一个——这是选共享还是独占的唯一依据。',
+                  '`CountDownLatch` 的 `getCount()` 就是 `state`;调试时打印它,能立刻知道「还差几件事」。',
+                  '`Semaphore(1)` 就是一个非重入的互斥锁;它和 `ReentrantLock` 的差别在于**不可重入**——同一线程再 `acquire` 会死锁。',
                 ],
               },
               {
                 kind: 'concept',
-                title: '并发容器：三条线，各自的「无锁」策略',
+                title: '`Exchanger` 与 `Phaser`:两个不那么常用的补位',
                 body: [
-                  '`java.util.concurrent` 里的容器不是「给老容器加锁」，而是**换一种数据结构**来避免锁。按用途分三条线：`Map`（`ConcurrentHashMap` / `ConcurrentSkipListMap`）、`List`/`Set`（`CopyOnWriteArrayList` / `CopyOnWriteArraySet`）、`Queue`（`BlockingQueue` 家族 / `ConcurrentLinkedQueue`）。',
-                  '它们的「并发策略」只有四种，认清策略就认清了容器：**① 细粒度锁**（`ConcurrentHashMap` 锁单个桶）、**② 写时复制**（`CopyOnWrite*` 写时复制整个数组）、**③ 无锁 CAS**（`ConcurrentLinkedQueue`、`ConcurrentSkipListMap` 的插入）、**④ 阻塞队列**（`BlockingQueue` 用锁 + Condition 实现生产者消费者）。',
-                  '一个反直觉的结论：**并发容器只保证「单个操作」的原子性，不保证「组合操作」**。`if (!map.containsKey(k)) map.put(k, v)` 仍然有竞态，必须用 `putIfAbsent` / `computeIfAbsent`。这是「用并发容器却依然线程不安全」的最主要原因。',
-                  '另外要注意：并发容器的**迭代器都是弱一致**的（`weakly consistent`），不抛 `ConcurrentModificationException`，但也不保证看到全部修改。所以「遍历时统计元素个数」这类操作得到的是近似值。',
+                  '`Exchanger` 做的是「**两方配对交换**」:两个线程各自调用 `exchange(v)`,都到齐后互相拿到对方的对象。典型用法是「生产者填充缓冲区、消费者取走空缓冲区」的双缓冲:两边交换一次,就完成了一轮数据传递。它是**一对一**的,三方以上用不了。',
+                  '`Phaser` 是 `CountDownLatch` 与 `CyclicBarrier` 的合体:**可循环**(像 Barrier)、**可动态增减参与者**(两者都不行)、**可分阶段**(`arriveAndAwaitAdvance` 推进 phase)。适合「任务数在运行中会变」的场景,比如 fork-join 的变体或分阶段流水线。',
+                  '面试里这两个通常只要求「知道有这么个东西 + 一句话说清用途」。真正要能说清的是**选型路径**:一次性等事件 → `CountDownLatch`;固定 N 方循环同步 → `CyclicBarrier`;限并发 → `Semaphore`;要动态增减参与方 → `Phaser`;两线程换数据 → `Exchanger`。',
+                ],
+                points: [
+                  '`Phaser` 的参与者要 `register()` / `arriveAndDeregister()`,忘了注销会让阶段永远推进不了。',
+                  '`Exchanger` 的 `exchange` 也会阻塞,同样应优先用带超时的重载。',
+                  '这五个工具都不是「锁」,它们**不保护共享数据**,只做线程间的时序协调——数据安全仍要靠 `volatile`、原子类或锁。',
+                ],
+              },
+              {
+                kind: 'code',
+                title: '同一个场景,两种写法:3 个任务并行、1 个汇总',
+                lang: 'java',
+                version: 'JDK 8+',
+                code:
+                  '// 场景:3 个线程并发执行,主线程等它们全部完成后汇总\n\n// 写法一:CountDownLatch(JDK 5 起,最直观)\nCountDownLatch latch = new CountDownLatch(3);\nList<Future<?>> futures = new ArrayList<>();\nfor (int i = 0; i < 3; i++) {\n    futures.add(pool.submit(() -> {\n        try { return doPart(); }\n        finally { latch.countDown(); }\n    }));\n}\nlatch.await(5, TimeUnit.SECONDS);\nmerge(futures);\n\n// 写法二:CompletableFuture(JDK 8 起,能拿到结果与异常,推荐)\nCompletableFuture<Void> all = CompletableFuture.allOf(\n        CompletableFuture.supplyAsync(this::partA, pool),\n        CompletableFuture.supplyAsync(this::partB, pool),\n        CompletableFuture.supplyAsync(this::partC, pool));\nall.orTimeout(5, TimeUnit.SECONDS)          // 超时控制\n   .whenComplete((v, e) -> {\n       if (e != null) log.error("one part failed", e);\n       merge();\n   });',
+                notes: [
+                  { line: 'latch.countDown();', text: '`Latch` 版本拿不到子任务的结果与异常,必须自己收集 `Future` 再 `get`——这是它相对 `CompletableFuture` 的主要劣势。' },
+                  { line: 'CompletableFuture.allOf', text: '`allOf` 返回的 future 在**任一子任务异常时**也会异常完成,`e` 就是那个异常。' },
+                  { line: 'orTimeout', text: 'JDK 9 起才有;JDK 8 用 `get(timeout)` 或 `completeOnTimeout` 的等价写法。' },
+                ],
+                caption:
+                  '这题的正确答法是**先说两种写法,再说选择依据**:只需要「等完成」用 `Latch` 足够;需要「拿结果、聚合异常、超时控制」就用 `CompletableFuture`。[[能说出「为什么后者更好」而不是「后者更新」,才是懂了]]。',
+              },
+              {
+                kind: 'concept',
+                title: '并发容器:三条线,四种「换掉锁」的策略',
+                body: [
+                  '`java.util.concurrent` 里的容器不是「给老容器加锁」,而是**换一种数据结构**来避免锁。按用途分三条线:`Map`(`ConcurrentHashMap` / `ConcurrentSkipListMap`)、`List`/`Set`(`CopyOnWriteArrayList`)、`Queue`(`BlockingQueue` 家族 / `ConcurrentLinkedQueue`)。',
+                  '它们的并发策略只有四种,认清策略就认清了容器:**① 细粒度锁**(`ConcurrentHashMap` 锁单个桶)、**② 写时复制**(`CopyOnWrite*` 写时复制整个数组)、**③ 无锁 CAS**(`ConcurrentLinkedQueue`、`ConcurrentSkipListMap` 的插入)、**④ 锁 + 条件队列**(`BlockingQueue` 实现生产者消费者)。',
+                  '一条反直觉的结论:**并发容器只保证「单个操作」的原子性,不保证「组合操作」**。`if (!map.containsKey(k)) map.put(k, v)` 仍然有竞态,必须用 `putIfAbsent` / `computeIfAbsent`。[[这是「用了并发容器却依然线程不安全」的最主要原因]]。',
+                  '另外,并发容器的**迭代器都是弱一致**的:不抛 `ConcurrentModificationException`,但也不保证看到全部修改。所以「遍历时统计元素个数」得到的是近似值——它换来的好处是**遍历时不需要加锁、不会阻塞写**。',
                 ],
                 term: {
                   name: '弱一致性迭代器',
-                  def: '遍历过程中不抛 ConcurrentModificationException，能反映「遍历开始后发生的部分修改」，但不保证看到全部，也不保证是某一时刻的快照。ConcurrentHashMap、ConcurrentLinkedQueue 都是这种语义。',
+                  def: '遍历过程中不抛 ConcurrentModificationException,能反映「遍历开始后发生的部分修改」,但不保证看到全部。代价小(不加锁),代价是结果只是近似快照。',
                 },
                 points: [
-                  '四种并发策略：细粒度锁（CHM）、写时复制（COW）、无锁 CAS（CLQ）、阻塞队列（BQ）',
-                  '并发容器只保证单操作原子，**组合操作仍需** `putIfAbsent` / `computeIfAbsent` / `merge`',
-                  '迭代器弱一致：不抛 CME，但也不保证看到全部修改',
-                  '`BlockingQueue` 是「并发 + 阻塞 + 通信」三合一，生产者消费者的标准答案',
+                  '`Collections.synchronizedMap` 是「老容器 + 一把大锁」,并发度 1;`ConcurrentHashMap` 并发度约等于桶数。',
+                  '`ConcurrentHashMap` 不允许 `null` 键值——不是洁癖,而是**无法区分「不存在」与「值为 null」**,并发下这个歧义无法安全处理。',
+                  '`size()` 在并发下只能是近似值(下面会讲为什么),要精确计数得自己在业务层维护。',
                 ],
               },
               {
-                kind: 'question',
-                title: 'ConcurrentHashMap 在 JDK 8 中是如何保证线程安全的？put 流程说一下',
-                questionId: 'java-03-Q60',
-                intent:
-                  '本节最核心的一题。必须能按步骤讲完 `put`，并强调「空桶用 CAS、非空桶用 synchronized 锁桶首」。',
-                points: [
-                  '① 计算 `spread(h)`：`(h ^ (h >>> 16)) & HASH_BITS`，高位参与运算并清掉符号位（负数 hash 保留特殊用途：`MOVED = -1`、`TREEBIN = -2`）',
-                  '② `table` 为 null → `initTable()`：用 CAS 把 `sizeCtl` 从负数（表示「正在初始化」）改成容量值，**只有一个线程能初始化**，其余 `yield` 自旋等待',
-                  '③ 定位桶 `i = (n - 1) & hash`，**桶为空 → 直接 `casTabAt` 插入**（无锁，第一步 CAS）',
-                  '④ 桶首节点 `hash == MOVED(-1)` → 说明正在**扩容**，当前线程去**帮忙迁移**（`helpTransfer`）',
-                  '⑤ 否则 `synchronized (f)` **锁住桶首节点**，在链表/红黑树里查找：key 存在则覆盖 value，不存在则尾插（链表）或插入红黑树',
-                  '⑥ `addCount(1, binCount)`：更新计数（`baseCount` + `CounterCell[]`，类似 `LongAdder`），并检查是否需要扩容（`sizeCtl` 阈值）',
-                  '⑦ 链表长度 ≥ 8 且 table 容量 ≥ 64 → `treeifyBin` 转红黑树；容量 < 64 时优先扩容（因为小表转树不划算）',
+                kind: 'concept',
+                title: 'CHM 1.8 的 put:空桶 CAS、非空桶锁桶首',
+                body: [
+                  '`ConcurrentHashMap`(CHM)的 `put` 流程可以拆成五步:**① 计算 hash 并定位桶**——`(n - 1) & hash`,与 `HashMap` 一致;**② 桶为空**——用 CAS 直接把新节点放进桶首,不加锁;**③ 桶非空**——`synchronized` 锁住**这个桶的头节点**,再遍历链表/红黑树插入;**④ 判断是否需要树化**——链表长度到 8 且容量 ≥ 64 时转红黑树;**⑤ 检查扩容**——`addCount` 里累加计数并判断是否触发 `transfer`。',
+                  '这套设计的关键在于「**只在有冲突时才加锁,且只锁一个桶**」:空桶插入是纯 CAS,完全不阻塞;有冲突时才退化为桶级互斥。[[锁的粒度从「一段」缩到「一个桶首节点」,并发度随容量增长]]——这就是它比 1.7 快的根本原因。',
+                  '`size()` 的实现也值得说:它维护一个 `baseCount` 加一个 `CounterCell[]` 数组。低竞争时 CAS 更新 `baseCount`;一旦 CAS 失败(说明有竞争),就把增量记到当前线程对应的 `CounterCell` 里,分散热点。`size()` 时把 `baseCount` 与所有 `Cell` 求和——[[求和过程不加锁,所以结果是近似值]]。这个思路和 `LongAdder` 完全一样。',
+                  '扩容也做了并发化:1.8 允许多个线程**协作迁移**,每个线程按 stride 领一段桶去搬,搬完的桶放一个 `ForwardingNode` 占位,其他线程看到它就跳到新表。所以扩容不再是「一个线程搬几百万元素、其他全卡住」。',
                 ],
-                depth:
-                  '「为什么 1.8 用 `synchronized` 而不是 `ReentrantLock`」——三个理由：① 锁粒度已经是「单个桶」，竞争极低，`synchronized` 的锁升级在低竞争下开销更小；② 少一个对象（`ReentrantLock` 要额外分配），内存更省；③ `synchronized` 不会忘记解锁，代码更简洁。**这是「JDK 6 之后 synchronized 已优化」的直接体现**，也是面试里很好的加分点。',
-                followup: '「`sizeCtl` 有几种取值」——`0`：默认（还未初始化）；`-1`：正在初始化；`-N`：正在扩容，有 `N-1` 个线程在帮忙；正数：扩容阈值（容量 × 0.75）。这个「一个字段表达多种状态」和线程池的 `ctl` 是同一套思路。',
-              },
-              {
-                kind: 'question',
-                title: '为什么 JDK 8 要放弃分段锁？size() 是怎么实现的？',
-                questionId: 'java-03-Q61',
-                intent:
-                  '两个点：分段锁的缺陷（并发度固定 + 内存浪费），以及 `size()` 从「两次遍历」变成「CounterCell 求和」。',
                 points: [
-                  'JDK 7 是 **Segment 数组 + HashEntry 数组**，每个 Segment 继承 `ReentrantLock`，锁粒度是「一个 Segment」（默认 16 个，即并发度 16）',
-                  '缺陷一：**并发度固定**——初始 16 个 Segment 就无法再增加，高并发下仍然会争同一个 Segment',
-                  '缺陷二：**内存浪费**——即使表很小，也要分配 16 个 Segment（每个都是 `ReentrantLock` 对象）',
-                  '缺陷三：**锁粒度粗**——一个 Segment 管若干个桶，改一个桶就锁住一片',
-                  'JDK 8 改为「**Node 数组 + 链表 + 红黑树**」，锁粒度细到**单个桶首节点**，并发度 ≈ 桶数量（可随扩容增长）',
-                  '`size()` 在 JDK 7 是「先无锁试算两次（累加各 Segment 的 `count`），不一致则全部加锁再算」——最坏要锁全表',
-                  '`size()` 在 JDK 8 改为 **`baseCount` + `CounterCell[]` 分片累加**（借鉴 `LongAdder`）：`sumCount()` 遍历所有 Cell 求和，**不加锁**',
-                  '代价：`size()` 是**近似值**（并发累加时可能偏小），这是「用精确性换吞吐」的取舍',
+                  '树化阈值是 8 而退化阈值是 6,中间留了缓冲,避免在阈值附近反复转换。',
+                  '`synchronized` 锁的是桶首节点对象,所以**桶首一变(如树化),锁对象也跟着变**——这也是为什么迁移时要放 `ForwardingNode`。',
+                  '`computeIfAbsent` 在 CHM 里是原子的,但**回调里不要做耗时操作**:它会持有桶锁,阻塞该桶上的其他写。',
+                  'JDK 8 的 CHM 没有分段锁了,但 `concurrencyLevel` 参数还在——它只影响初始容量,不再表示并发度。',
                 ],
-                depth:
-                  '为什么 `baseCount` 要加 `CounterCell[]`：如果所有线程都 CAS 同一个 `baseCount`，高并发下会大量失败重试（热点）。用 Cell 数组 + 线程 probe 分散后，每个线程打不同的 Cell，最后求和——这就是 `LongAdder` 的做法，`ConcurrentHashMap` 直接内联了一份（`Striped64` 的简化版，没有继承）。',
-                followup: '「为什么 1.7 的 `size()` 要「试两次再全锁」」——因为它想让「无竞争时的调用」完全无锁。做法是「先累加两次，若两次结果相同就认为没有并发修改，直接返回」；不同则说明有人在改，必须加锁。这是一个很实用的「乐观 + 校验」技巧。',
               },
               {
                 kind: 'diagram',
-                title: 'CHM 两代结构：从「锁一段」到「锁一桶」',
-                diagram: {
-                  type: 'split',
-                  left: {
-                    title: 'JDK 7：Segment 分段锁',
-                    tone: 'warn',
-                    items: [
-                      'Segment[16] 数组，每个继承 ReentrantLock',
-                      '每个 Segment 内含一个 HashEntry 数组',
-                      '并发度 = Segment 数量（默认 16，固定）',
-                      '锁粒度：一个 Segment（管若干桶）',
-                      'size()：两次无锁试算，不一致则锁全表',
-                      '内存：表很小也要 16 个 Lock 对象',
-                    ],
-                  },
-                  right: {
-                    title: 'JDK 8：桶级锁 + CAS',
-                    tone: 'good',
-                    items: [
-                      'Node[] 数组 + 链表 + 红黑树（同 HashMap）',
-                      '空桶：CAS 插入（无锁）',
-                      '非空桶：synchronized 锁桶首节点',
-                      '并发度 ≈ 桶数量，随扩容增长',
-                      'size()：baseCount + CounterCell[] 分片求和',
-                      '扩容：多线程协同迁移（helpTransfer）',
-                    ],
-                  },
-                  caption:
-                    '两代的核心差别是**锁的粒度从「一段」变成「一个桶」**，同时把「无竞争路径」做到了完全无锁（CAS）。注意右边第 6 条：JDK 8 的扩容是**协作式**的——发现 `MOVED` 就帮忙迁移，把「扩容」这个原本要 STW 的操作拆成了多个线程并行做。',
-                },
-              },
-              {
-                kind: 'question',
-                title: 'CopyOnWriteArrayList 的原理？有什么优缺点？',
-                questionId: 'java-03-Q62',
-                intent:
-                  '核心是「写时复制整个数组 + 读完全无锁」。优缺点都要说，尤其是「内存翻倍」与「迭代器看不到新元素」。',
-                points: [
-                  '写操作（`add`/`set`/`remove`）：**加 `ReentrantLock`** → 复制出一个新数组（长度 ±1）→ 在新数组上修改 → 把 `volatile array` 指向新数组',
-                  '读操作（`get`/`iterator`）：**完全无锁**，直接读 `array` 引用（`volatile` 保证可见性）',
-                  '优点一：**读性能极高**，且读之间无任何同步',
-                  '优点二：**读写不互斥**——读线程永远能读到一个完整一致的数组（要么旧数组要么新数组）',
-                  '优点三：**迭代器不会抛 CME**，因为它遍历的是创建时的那份数组快照',
-                  '缺点一：**内存开销**——每次写都要复制整个数组，瞬时内存翻倍；数组很大时很痛',
-                  '缺点二：**写性能差**——O(n) 复制，且写写互斥',
-                  '缺点三：**数据最终一致但非实时**——迭代器看不到遍历开始后的修改',
-                  '缺点四：`iterator().remove()` 抛 `UnsupportedOperationException`，必须用 `list.remove()`',
-                  '适用：**读极多、写极少**（监听器列表、黑白名单、配置快照）；不适用：写频繁或数组很大',
-                ],
-                depth:
-                  '为什么它「读不需要 volatile 读的代价」——因为 `array` 字段本身是 `volatile`，读它会走 volatile 语义（禁止重排、保证可见），但没有锁、没有 CAS、没有缓存行争抢。所以它的读成本 ≈ 一次普通数组访问 + 一次 volatile 读，比 `synchronized` 快得多。这也是「读多写少」场景的最佳解。',
-                followup: '「`CopyOnWriteArraySet` 怎么实现的」——内部就是一个 `CopyOnWriteArrayList`，`add` 前先 `contains` 判断（`addIfAbsent`），O(n) 查找。所以元素多时性能很差，它只适合「元素少且读多」的集合。',
-              },
-              {
-                kind: 'question',
-                title: 'ArrayBlockingQueue 和 LinkedBlockingQueue 的区别？',
-                questionId: 'java-03-Q63',
-                intent:
-                  '在并发课里的重点不是「数组 vs 链表」，而是「一把锁 vs 两把锁」带来的吞吐差异，以及「必须指定容量 vs 默认无界」的稳定性差异。',
-                points: [
-                  '**结构**：`ArrayBlockingQueue` 用定长数组 + `putIndex`/`takeIndex` 循环；`LinkedBlockingQueue` 用链表 + 按需 `new Node`',
-                  '**锁**：前者**一把锁**（`ReentrantLock`）管入队出队，互斥；后者**两把锁**（`putLock` / `takeLock`），入队与出队可并行',
-                  '**计数**：前者 `int count`（同一把锁保护）；后者 `AtomicInteger count`（两把锁都要读写它）',
-                  '**容量**：前者**必须指定**；后者构造器可不传，默认 `Integer.MAX_VALUE`（≈ 无界，易堆积 OOM）',
-                  '**内存**：前者预先分配整个数组（空时也占满）；后者按元素分配 Node（含 `next` 引用，单元素开销更大）',
-                  '**吞吐**：高并发生产消费场景下 `LinkedBlockingQueue` 更高（两把锁分离了入队与出队的竞争）',
-                  '**选型**：要稳定可预测 → `ArrayBlockingQueue`；要吞吐且能明确容量 → `LinkedBlockingQueue` 但**必须传容量**',
-                ],
-                depth:
-                  '为什么 `LinkedBlockingQueue` 能用两把锁：队首与队尾是**不同节点**，一个线程改 `head.next`、另一个改 `tail.next`，只要计数用 `AtomicInteger` 协调，就不会互相干扰。而循环数组的 `putIndex`/`takeIndex` 在「满/空」判定上相互依赖（判断满要看对方位置），难以拆锁。**这是「数据结构决定并发粒度」的经典案例**——在集合课程里我们从「缓存局部性」角度比过，这里从「锁粒度」角度再看一次，两个视角合起来才是完整的。',
-              },
-              {
-                kind: 'question',
-                title: 'BlockingQueue 的常用方法分几类？',
-                questionId: 'java-03-Q64',
-                intent:
-                  '考 API 设计的「四象限」：抛异常 / 返回特殊值 / 阻塞 / 超时。能画出这张表就说明真用过。',
-                points: [
-                  '按「失败时怎么办」分四类，每类对应三个操作（插入 / 移除 / 检查）',
-                  '**抛异常**：`add(e)` / `remove()` / `element()`',
-                  '**返回特殊值**：`offer(e)` → false / `poll()` → null / `peek()` → null',
-                  '**阻塞**：`put(e)` / `take()`（无超时，可能永久阻塞）',
-                  '**超时**：`offer(e, t, unit)` / `poll(t, unit)`（返回 false / null 表示超时）',
-                  '为什么没有「阻塞版的检查」：`peek` 不会因为队列空而失败——它返回 null 就是「空」的答案，没有等的必要',
-                  '`BlockingQueue` 不允许 `null` 元素（`null` 被用作 `poll` 的「空」返回值，无法区分）',
-                  '`LinkedBlockingDeque` 在此之上补齐十二个双端方法（`putFirst`/`takeLast` 等）',
-                ],
-                depth:
-                  '「`put` 和 `offer(t)` 该用哪个」——`put` 会无限阻塞，一旦消费者挂了，生产者线程就永久卡住（线程池里就是线程泄漏）。**生产环境应该优先用 `offer(e, t, unit)`**：超时就返回 false，让你有机会降级、告警或丢弃。这和「所有等待都该带超时」是同一条工程原则。',
-              },
-              {
-                kind: 'diagram',
-                title: 'BlockingQueue 的四象限',
+                title: 'CHM 两代结构:从「锁一段」到「锁一桶」',
                 diagram: {
                   type: 'matrix',
-                  cols: ['插入', '移除', '检查'],
+                  cols: ['并发单位', '并发度', '主要代价'],
                   rows: [
-                    ['**抛异常**', '`add(e)` → `IllegalStateException`', '`remove()` → `NoSuchElementException`', '`element()` → 同上'],
-                    ['**返回特殊值**', '`offer(e)` → `false`', '`poll()` → `null`', '`peek()` → `null`'],
-                    ['**阻塞（无超时）**', '`put(e)`', '`take()`', '—（无意义）'],
-                    ['**阻塞（带超时）**', '`offer(e, t, unit)`', '`poll(t, unit)`', '—（无意义）'],
+                    ['JDK 1.7（Segment 分段锁）', '一个 `Segment`（默认 16 段）', '**固定 16**，与容量无关', '段内仍是一把锁；每段是一个小 HashMap，内存浪费'],
+                    ['JDK 1.8（桶级锁 + CAS）', '一个桶的头节点', '约等于桶数，**随扩容增长**', '空桶 CAS 有失败重试；树化与迁移逻辑复杂'],
+                    ['JDK 1.8 扩容', '多个线程协作迁移', '不阻塞正常读写', '迁移期间要处理 `ForwardingNode` 的转发'],
+                    ['JDK 1.8 `size()`', '`baseCount` + `CounterCell[]`', '近似值', '求和不加锁，并发下可能偏小'],
                   ],
                   caption:
-                    '记忆方式：**横着看是「同一个操作的不同失败策略」，竖着看是「失败策略的四种强度」**。生产代码里最常用的是右下区域（`offer(e,t,u)` / `poll(t,u)`）——**带超时的阻塞**是唯一既不会丢任务、又不会永久卡死的选择。',
-                  note: '注意「检查」列只有两行：`peek` 本身就是「看一眼，没有就返回 null」，不存在「阻塞等待有元素再 peek」的需求。',
+                    '「为什么 1.8 要放弃分段锁」的答案就在第二列:分段锁的并发度**在创建时就定死为 16**,之后再扩容也不会变——容量涨到一亿,还是只有 16 个线程能同时写。而桶级锁的并发度天然跟着桶数走,容量翻倍并发度也翻倍。[[固定并发度是分段锁最大的设计缺陷,不是「锁太多太重」]]。',
                 },
+              },
+              {
+                kind: 'concept',
+                title: 'COW:写时复制整个数组的代价与用途',
+                body: [
+                  '`CopyOnWriteArrayList` 的做法很极端:**读完全不加锁,直接读当前数组;写时复制一份新数组,改完再把引用指过去**。因为数组引用是 `volatile` 的,读线程要么看到旧的、要么看到新的,永远不会看到「改了一半」的数组。',
+                  '代价也很直接:**每次写都要复制整个数组**——元素一万个就是一万次引用拷贝,写越频繁越亏;**内存会短暂翻倍**(旧数组要等没有读者引用才能回收);**迭代器看不到新元素**,因为它在创建时就抓住了当时那个数组的快照。',
+                  '所以它的适用条件非常窄:**读远多于写、元素数量不大、且能接受「读到的可能是旧数据」**。典型场景是监听器列表、白名单、配置项——这些地方写操作一天几次,读却是每请求一次。[[把它当通用 List 用是典型的误用]]。',
+                ],
+                points: [
+                  'COW 的写操作是 `ReentrantLock` 保护的,所以多个写之间是串行的——它优化的是读,不是写。',
+                  '迭代器是「快照」语义:`iterator` 拿到的元素不会变,也不会抛 `ConcurrentModificationException`,但 `remove` 不支持。',
+                  '`CopyOnWriteArraySet` 就是内部用 COW List 加 `addIfAbsent` 去重,元素多时 `add` 是 O(n)。',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '`BlockingQueue` 的四个象限:同一个动作,四种失败方式',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['队列满（入队）', '队列空（出队）'],
+                  rows: [
+                    ['**抛异常**', '`add(e)` → `IllegalStateException`', '`remove()` → `NoSuchElementException`'],
+                    ['**返回特殊值**', '`offer(e)` → `false`', '`poll()` → `null`'],
+                    ['**阻塞**', '`put(e)` → 一直等', '`take()` → 一直等'],
+                    ['**带超时**', '`offer(e, t, u)` → `false`', '`poll(t, u)` → `null`'],
+                  ],
+                  caption:
+                    '同一件事(入队/出队)有四种语义,选错就是线上事故:用 `add` 做生产者,队列一满就抛异常打挂线程;用 `poll` 做消费者的循环条件,队列空了就疯狂空转(返回 `null` 而不是等)。[[生产环境首选「带超时」那一行]]——它既有背压,又不会永久卡死。',
+                },
+              },
+              {
+                kind: 'concept',
+                title: '`ArrayBlockingQueue` 与 `LinkedBlockingQueue`:一个数组,一个链表',
+                body: [
+                  '两者的差别不只是「数组 vs 链表」,而是**锁的个数**:`ArrayBlockingQueue` 用**一把锁**同时管入队与出队(`notEmpty` / `notFull` 两个条件队列挂在同一把锁上),所以生产者和消费者会互相竞争;`LinkedBlockingQueue` 用**两把锁**(`putLock` / `takeLock`),入队与出队可以真正并行,只在「队列从空变非空」或「从满变非满」时才需要同时持两把锁。',
+                  '这个差异带来实际后果:**`ArrayBlockingQueue` 必须指定容量**(构造器强制),天然有界,是安全的选择;**`LinkedBlockingQueue` 可以不指定容量,默认 `Integer.MAX_VALUE`**——这就是 `Executors.newFixedThreadPool` 会 OOM 的根源。',
+                  '还有一个常被忽略的点:**`LinkedBlockingQueue` 每个节点都要额外分配一个 `Node` 对象**,元素多时内存开销与 GC 压力都比数组大;而 `ArrayBlockingQueue` 预分配数组,内存紧凑但**容量固定不可变**。',
+                ],
+                points: [
+                  '`ArrayBlockingQueue` 支持公平锁(构造器第二参),但公平会显著降低吞吐。',
+                  '`SynchronousQueue` 容量为 0:每个 `put` 必须等到一个 `take`,它不存元素,只做交接——`CachedThreadPool` 用它实现「来一个任务就交一个线程」。',
+                  '`PriorityBlockingQueue` 无界且按优先级出队,`DelayQueue` 按到期时间出队,两者都常用于内部调度,不要拿来做业务队列。',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'Q60 · ConcurrentHashMap 在 JDK 8 中是如何保证线程安全的？put 流程说一下',
+                questionId: 'java-03-Q60',
+                intent:
+                  '这题考的是「能不能把一个并发数据结构讲成一条可执行的路径」。只答「用了 CAS 和 synchronized」是及格;能把 put 的五步说全、并指出「哪一步加锁、为什么此时才加锁」才算过关。',
+                points: [
+                  '**① 定位桶**:`(n - 1) & hash`,与 `HashMap` 一致;`hash` 做了高低位异或扰动',
+                  '**② 空桶**:CAS 放入新节点,**完全不加锁**——这是最快路径,也是绝大多数插入的实际路径',
+                  '**③ 非空桶**:`synchronized` 锁住**桶的头节点**,再遍历链表(或红黑树)插入或更新',
+                  '**④ 树化**:链表长度 ≥ 8 且容量 ≥ 64 转为红黑树;容量不足 64 时优先扩容',
+                  '**⑤ 计数与扩容**:`addCount` 更新 `baseCount` 或 `CounterCell`,并判断是否触发多线程协作迁移',
+                  '**收口**:锁粒度是「一个桶」,不是「一段」,所以并发度随容量增长——这是相对 1.7 分段锁的本质改进',
+                ],
+                depth:
+                  '拉开分档的是两个细节:一是「**为什么空桶可以用 CAS、非空桶必须加锁**」——因为空桶的插入是「从 null 到 node」的单点替换,而插入链表要改前驱的 `next`,涉及多个字段;二是「`size()` 为什么是近似值」——`CounterCell` 求和时没有加锁。[[能主动补上 `size()` 的实现,说明真的读过源码而不是背了流程]]。',
+                followup:
+                  '追问:那 `get` 需要加锁吗?——不需要。`Node` 的 `val` 与 `next` 都用 `volatile` 修饰,保证可见性;而且 `get` 读到的是「某个瞬间的快照」,即使期间有扩容或树化,也能通过 `ForwardingNode` 找到新表。再追一句:为什么 CHM 不允许 `null`?因为 `get` 返回 `null` 就无法区分「键不存在」与「值为 `null`」,而这个歧义在并发场景下无法安全消除。',
               },
               {
                 kind: 'principle',
-                title: '工具与容器的选型三问',
+                title: '选型三问:工具与容器的共同判断法',
                 body: [
-                  '这一节东西多，但选型其实只有三个问题。答完这三问，用哪个类就定了。',
+                  '这一课有两堆 API,但选型逻辑是同一套——问三个问题,答案就唯一了。',
                 ],
                 steps: [
                   {
-                    title: '第一问：我是「等」还是「限」？',
+                    title: '① 要解决的是「时序协调」还是「数据安全」？',
                     detail:
-                      '等 → 屏障类（`CountDownLatch` 等别人、`CyclicBarrier` 等彼此、`Phaser` 等某阶段）。限 → 许可类（`Semaphore`）。这一问把工具类分成两半，后面就不会混。',
+                      '`Latch` / `Barrier` / `Semaphore` / `Phaser` 都是**时序协调**,它们不保护任何数据;共享数据的可见性与原子性仍要靠 `volatile`、原子类或锁。[[把 `Semaphore` 当锁用、指望它保护共享变量,是最常见的一类误用]]。',
                   },
                   {
-                    title: '第二问：读多还是写多？',
+                    title: '② 协调要做几次？一次还是每轮？',
                     detail:
-                      '读远多于写（且数组不大）→ `CopyOnWriteArrayList`（读无锁）；读写均衡 → `ConcurrentHashMap`（细粒度锁）；写多且要顺序 → 普通容器 + 外部锁，或用 `ConcurrentLinkedQueue`。这一问决定用哪种并发策略（写时复制 / 细粒度锁 / CAS）。',
+                      '一次 → `CountDownLatch`;每轮 → `CyclicBarrier`(固定方数)或 `Phaser`(方数会变);限并发 → `Semaphore`。判据是「这个同步点会经过几次」,答错就会掉进「`Latch` 复用」那个坑。',
                   },
                   {
-                    title: '第三问：要不要「阻塞 + 通信」？',
+                    title: '③ 容器是读多还是写多？单操作还是组合操作？',
                     detail:
-                      '要「生产慢了我等、消费慢了我等」→ `BlockingQueue`，并按「有无界 + 几把锁」选具体实现。不要阻塞（只是多线程共享）→ 上面的 `Map`/`List` 就够了。这一问决定要不要引入「阻塞语义」。',
+                      '读远多于写 → `CopyOnWrite*`;读写都频繁且有冲突 → `ConcurrentHashMap`;需要生产消费 → `BlockingQueue`(优先带超时的方法)。而只要涉及「先查再改」,就必须用 `computeIfAbsent` / `putIfAbsent` —— 并发容器不保证组合操作的原子性。',
                   },
                   {
-                    title: '别忘了所有场景都适用的两条铁律',
+                    title: '④ 最后一条:永远给等待加超时',
                     detail:
-                      '① **组合操作要换原子 API**——`putIfAbsent` / `computeIfAbsent` / `merge`，不要「先查再写」；② **所有等待都要带超时**——`await(t)` / `tryAcquire(t)` / `offer(e,t,u)`，因为「永久阻塞」在生产环境等于「线程泄漏」。',
+                      '`await(timeout)`、`tryAcquire(timeout)`、`offer(e, t, u)`、`poll(t, u)` —— 无超时的等待在线上就是「偶发卡死」的来源。[[加超时不是为了性能,是为了让故障可见]]:超时能打日志告警,永久阻塞只能等重启。',
                   },
                 ],
                 takeaway:
-                  '一句话收口：**工具类解决「线程之间怎么协调」，并发容器解决「数据怎么安全共享」。** 前者的选型看「等谁」，后者的选型看「读写比 + 要不要阻塞」。两条线都记住「带超时」和「组合操作用原子 API」，就不会出大错。',
+                  '一句话收口:**工具管「什么时候继续」,容器管「怎么安全地共享」,两者都不替代锁。** 所有选型问题都能归结为「协调几次」「读写比例」「是否组合操作」三个判断,再加上一条纪律——**等待必须有超时**。',
               },
-            ],
-            outline: [
-              'CountDownLatch 等别人（一次性）、CyclicBarrier 等彼此（可循环）、Semaphore 控数量',
-              'CHM 1.8 空桶 CAS、非空桶 synchronized 锁桶首；扩容多线程协作；size 用 CounterCell 分片求和',
-              'CHM 1.7 分段锁并发度固定且内存浪费；1.8 锁粒度细到单桶，并发度随扩容增长',
-              'COW 写时复制整个数组，读完全无锁；内存翻倍、写昂贵、迭代器看不到新元素',
-              'BlockingQueue 四象限：抛异常 / 返回特殊值 / 阻塞 / 带超时；生产优先用带超时的 offer',
-            ],
-            pitfalls: [
-              '把 CountDownLatch 与 CyclicBarrier 的等待对象说反：前者等别人做完，后者等彼此到齐',
-              '用并发容器做「先检查再写入」：并发容器只保证单操作原子，组合操作仍要 putIfAbsent',
-              '在线程池里用无界 LinkedBlockingQueue：掩盖任务堆积，最终 OOM',
             ],
           },
         },
         {
           id: 'concurrency-design',
           title: '死锁、手写题与并发设计',
-          kind: 'concept',
+          minutes: 55,
           sources: [{ topic: 'java-03', chapters: ['并发设计问题'] }],
           content: {
             intro:
-              '这一节是并发部分的手写与场景区：死锁的四个必要条件与排查手段、线程安全的手段全景、单例的五种写法、生产者消费者、两个线程交替打印。手写题的关键不是背代码，而是**先说清用什么原语、为什么不用另一种**——比如交替打印用 `wait/notify` 还是 `Lock` + `Condition`，取舍点在于「是否需要超时」与「是否只有一个条件队列」；生产者消费者用 `wait/notify` 还是 `BlockingQueue`，取舍点在于「要不要自己处理虚假唤醒和队列边界」。本节按题型逐一拆解，每题都给可复述的思路骨架和可直接默写的代码。',
+              '这一课管两件事:出事了怎么定位僵死,面试让你现场写的时候怎么写对。两件事其实是一件事——死锁的四个必要条件描述的不是「锁」,而是任何需要排队才能拿到的资源;把「线程」代进去,线程池为什么会被自己饿死就自己浮出来了。手写题考的是同一种能力:能不能把「谁等谁、等到什么时候、等不到怎么办」讲清楚。读完这一课,你应该能在没有任何报错日志的情况下,判断出「系统为什么不动了」。',
+            outline: [
+              '四个死锁条件是「合取」,破坏任意一个就足以让死锁不可能发生',
+              '资源换成「线程」,四条件一字不改地成立,这就是线程池饥饿死锁',
+              '`jstack` 能自动认出锁的等待环,但认不出饥饿——它找的是 monitor 的持有关系',
+              '保证线程安全的手段按「是否产生竞争」分四层:消除、压制、绕过、封装',
+              '手写题的得分线:原语选得对、条件用 `while` 重检、边界补齐、生产环境用现成的',
+            ],
+            pitfalls: [
+              '把「没有 BLOCKED 线程」当成没有死锁:等 Future、等连接池、等池线程都是 WAITING,不是 BLOCKED',
+              '在同一个线程池里提交任务再 `get()` 结果:池被打满时父任务占着线程等子任务,死锁且检测器看不见',
+              '手写等待时用 `if` 判条件、用 `notify` 而不是 `notifyAll`:虚假唤醒与信号丢失都会让实现悄悄卡死',
+            ],
             sections: [
               {
-                kind: 'concept',
-                title: '手写题的三步答题法',
+                kind: 'why',
+                title: '三次线程 dump 里一个 BLOCKED 都没有,服务却彻底卡死了',
                 body: [
-                  '面试手写并发题，**先讲思路再写代码**比直接写更得分。三步：**① 选原语**（说清为什么用它）、**② 画数据流**（谁写谁读、临界区在哪）、**③ 补边界**（中断、超时、异常、虚假唤醒）。',
-                  '**选原语的判断顺序**：需要「互斥 + 条件等待」→ `synchronized` + `wait/notify`（或 `ReentrantLock` + `Condition`）；只需要「原子增减」→ `Atomic*`；需要「限流」→ `Semaphore`；需要「等 N 个任务」→ `CountDownLatch`；需要「传递任务」→ `BlockingQueue`。**能用现成容器就别自己写锁**——`BlockingQueue` 就是生产者消费者的标准答案，自己用 `wait/notify` 写只是为了证明你懂原理。',
-                  '**边界三问**：等待能不能被中断？能不能超时？条件唤醒后需不需要重新检查？前两个决定你用哪个 API（`await` vs `awaitUninterruptibly`、`wait` vs `wait(t)`），第三个决定你是不是写了 `while` 而不是 `if`——**用 `if` 判条件是并发手写题最常见的失分点**。',
-                  '最后一个容易被忽略的点：**临界区里不要做慢操作**。手写题里如果临界区包含 sleep、IO、日志打印，面试官会立刻追问「这样会不会拖住其他线程」。正确做法是把慢操作移到锁外，只在锁内做状态判断与修改。',
+                  '订单导出功能上线当天,整台机器上的接口陆续超时。运维按惯例抓了三次线程 dump,结果很反常:没有任何一个线程处于 BLOCKED 状态,`jstack` 也没有打印那句熟悉的 `Found one Java-level deadlock`。CPU 8%,数据库连接池活跃 3/50,GC 日志里 Full GC 零次。所有线程都在安静地 park 或者 wait,像一群人在排队——但队列永远不动。',
                 ],
-                term: {
-                  name: '条件等待的规范写法',
-                  def: '用 while 而不是 if 包裹 wait/await：`while (!condition) lock.wait();`。因为被唤醒不代表条件成立（可能有虚假唤醒，也可能条件被别人又改回去），必须重新检查。这是并发手写题的第一条铁律。',
+                code: {
+                  language: 'java',
+                  code:
+                    '// 导出:一个大任务拆成 40 个子任务,再汇总写 Excel\nExecutorService pool = Executors.newFixedThreadPool(8);\n\npool.submit(() -> {                       // 父任务本身也是池里的一员\n    List<Future<Row>> futures = new ArrayList<>();\n    for (int i = 0; i < 40; i++) {\n        futures.add(pool.submit(() -> queryPage(i)));   // 子任务进同一个池\n    }\n    List<Row> rows = new ArrayList<>();\n    for (Future<Row> f : futures) {\n        rows.addAll(f.get());             // ← 父任务在这里阻塞等子任务\n    }\n    writeExcel(rows);\n});\n\n// 现场\n// 池大小 8、队列无界:父任务占 1 个线程,剩下 7 个线程跑完 7 个子任务就空了\n// 之后:父任务 get() 等第 8 个子任务,第 8 个子任务在队列里等空闲线程\n// thread dump:8 个 pool-1-thread-* 全是 WAITING (parking),一个 BLOCKED 都没有',
+                  caption:
+                    '注意最后一行:线程状态全是「正常等待」。这就是这类故障最难查的地方——从线程状态上看,系统没有任何异常,只是所有人都在等一个永远不会发生的事。',
                 },
-                points: [
-                  '先讲原语选择与理由，再写代码；说清为什么不用另一种',
-                  '边界三问：能否中断、能否超时、唤醒后要不要重新检查条件',
-                  '`while` 判条件，绝不用 `if`；`wait/await` 必须成对出现在锁内',
-                  '临界区内不做慢操作（sleep / IO / RPC），只做状态判断与修改',
+                wrong: [
+                  '猜法一:数据库连接池被打满了。但监控显示活跃连接只有 3,而上限是 50——数据库这边根本没有排队。',
+                  '猜法二:某个线程死循环把 CPU 吃满了。但 CPU 使用率只有 8%,所有线程都在等待态,没有一个在 RUNNABLE 上烧 CPU。',
+                  '猜法三:GC 停顿导致服务假死。但 Full GC 一次都没发生,年轻代停顿累计 11ms,这个量级不可能让接口卡死几分钟。',
                 ],
+                real:
+                  '真因是执行器饥饿:父任务自己就是池里的一个线程,它提交 40 个子任务之后调用 `get()` 阻塞等结果;而子任务排在同一个池的队列里,必须先拿到一个空闲线程才能开跑。池只有 8 个线程,父任务占掉 1 个,剩下 7 个跑完就空了。[[此刻父任务在等子任务、子任务在等线程、而线程被父任务占着——等待环闭合了]]。这类死锁占用的资源不是锁而是线程,所以 JVM 的死锁检测看不见它:检测器找的是 monitor 与 AQS 的持有关系,而这里没有任何 monitor 被互斥持有,8 个线程都只是普通地等待。',
+                reveal:
+                  '所以这一课真正要讲的不是「两个线程反序加锁」这个例子,而是那四个必要条件——它们描述的是[[任何一种需要排队获取的资源]],换成线程、换成连接、换成内存配额都成立。理解了这一层,才会在 thread dump 里认出「没有 BLOCKED 的死锁」,也才知道后面的手写题为什么要反复交代「等待的边界」。',
               },
               {
-                kind: 'question',
-                title: '死锁产生的四个必要条件？如何破坏？',
-                questionId: 'java-03-Q65',
-                intent:
-                  '必背题。四个条件要能按「互斥 / 持有并等待 / 不可剥夺 / 循环等待」顺序说出，并对应给出破坏手段。',
-                points: [
-                  '**互斥**：资源同一时刻只能被一个线程占用。破坏：把资源改成可共享（如用 `ReadWriteLock`、`CopyOnWrite`、无锁结构）——**通常最难破坏**',
-                  '**持有并等待**：持有至少一个资源，同时在等另一个。破坏：**一次性申请全部资源**（要么全拿到，要么一个都不拿）',
-                  '**不可剥夺**：资源只能由持有者主动释放。破坏：**允许抢占**（申请不到时释放已持有的，稍后重试）——`tryLock(timeout)` 就是这个思路',
-                  '**循环等待**：存在一个「A 等 B、B 等 A」的环。破坏：**给资源定全序，所有线程按同一顺序申请**（最实用）',
-                  '工程上最常用的两条：**统一加锁顺序**（破坏循环等待）+ **`tryLock` 带超时**（破坏不可剥夺）',
-                  '补充：死锁不只发生在「锁」上——线程池「任务 A 等任务 B 的结果，而 B 在队列里排队等不到线程」也是死锁（资源是「线程」），这是**线程池饥饿死锁**',
+                kind: 'concept',
+                title: '四个条件是一条合取式,破坏一个就够',
+                body: [
+                  '四个必要条件要按固定顺序记,因为顺序本身就是成因链:互斥(资源同一时刻只能被一方占用)→ 持有并等待(手里占着一个,同时在等另一个)→ 不可剥夺(占着的不能被强行拿走)→ 循环等待(等成了一个环)。四者同时成立,才可能出现死锁。',
+                  '关键在「同时成立」这三个字。这是一个合取式,所以[[破坏其中任何一个条件,死锁就不可能发生]]。这也是回答追问的抓手:面试官问「怎么预防」,你不需要四招全上,只要挑一招能落地、代价又能接受的。',
+                  '还有一个必须说清的区分:四个条件满足只代表「可能死锁」,不代表「一定死锁」。真的发生还需要特定的时序,所以「压测跑一万次没死」不能当作安全的证据。线上的死锁几乎都是 QPS 上来之后才出现的——代码没变,变的是交错概率。',
                 ],
-                depth:
-                  '「为什么破坏任一条件就够了」——因为四个条件是「必要条件」的合取：`互斥 ∧ 持有并等待 ∧ 不可剥夺 ∧ 循环等待` 同时成立才可能死锁。破坏任何一个，合取式为假。但要注意「可能死锁」与「一定死锁」的区别：四个条件满足只是**可能**，实际发生还需要特定的时序。所以「测试跑一万次没死锁」不代表安全。',
-                followup: '「数据库的死锁怎么处理」——数据库通常**不预防**，而是「检测 + 回滚」：用等待图（wait-for graph）检测环，发现环就选一个「代价最小」的事务回滚。因为数据库层面统一加锁顺序不现实（SQL 由应用决定），回滚重试反而是成本最低的方案。**这是一个「预防 vs 检测」的重要对比**。',
+                term: {
+                  name: '死锁 / 活锁 / 饥饿',
+                  def: '死锁:互相等待、谁都不推进,资源被永久占住。活锁:大家都在动,但互相谦让或反复重试,谁也完不成。饥饿:系统整体在推进,只是某个线程长期抢不到资源(比如非公平锁下的某些线程)。三者体验都是「慢或卡」,区分点是「到底有没有人在真正推进」。',
+                },
+                points: [
+                  '互斥通常最难破坏:要把资源改成可共享,往往意味着换数据结构,而不是调个参数',
+                  '破坏循环等待最便宜:只需要一条关于加锁顺序的团队约定,不用改任何并发原语',
+                  '破坏不可剥夺必须配套重试:抢不到就释放已持有的锁并回退重来,否则等于没破坏',
+                  '四条件只是必要条件,「没复现」不等于「没问题」',
+                ],
               },
               {
                 kind: 'diagram',
-                title: '四个条件，四种破坏手段',
+                title: '四个条件,四种破坏手段',
                 diagram: {
                   type: 'matrix',
                   cols: ['怎么破坏', '代价 / 限制', '实用度'],
                   rows: [
-                    ['**互斥**', '改共享（读写锁、COW、无锁结构、不可变）', '很多资源本质上无法共享', '★★（最难）'],
-                    ['**持有并等待**', '一次性申请全部资源 / 全局锁', '降低并发度，可能浪费资源', '★★'],
-                    ['**不可剥夺**', '`tryLock(timeout)` 失败就释放重试', '需要支持回滚与重试，逻辑变复杂', '★★★★'],
-                    ['**循环等待**', '给锁定全序，所有线程按同一顺序申请', '需要全局约定，跨模块时难保证', '★★★★★（最实用）'],
+                    ['互斥', '改成共享:读写锁、写时复制、无锁结构、不可变对象', '很多资源本质上无法共享', '★★（最难）'],
+                    ['持有并等待', '一次性申请全部资源,或者用一把全局锁', '降低并发度,还可能白白占着资源', '★★'],
+                    ['不可剥夺', '`tryLock` 带超时,拿不到就释放已持有的锁重试', '需要业务能回滚重试,逻辑变复杂', '★★★★'],
+                    ['循环等待', '给资源定一个全序,所有线程按同一顺序申请', '需要全局约定,跨模块时难保证', '★★★★★（最实用）'],
                   ],
                   caption:
-                    '实际项目中「统一加锁顺序」是性价比最高的手段——它只需要一条团队约定（比如「先锁账户表再锁订单表」），不需要改任何并发原语。其次是 `tryLock` 超时，它把「永久死锁」变成了「偶发失败可重试」。',
-                  note: '注意：破坏「互斥」往往意味着换数据结构（用 `ConcurrentHashMap` 代替 `synchronized (map)`），这其实是「从根上消除锁」，效果最好但适用范围最窄。',
+                    '实际项目里「统一加锁顺序」是性价比最高的手段:它只需要一条团队约定(先锁账户表再锁订单表),不需要改任何并发原语。其次是 `tryLock` 超时,它把「永久死锁」降级成「偶发失败可重试」。',
+                  note: '破坏互斥往往意味着换数据结构(用并发容器代替给整个 map 加锁),效果最彻底,但适用范围也最窄——只有真正能共享的资源才谈得上。',
                 },
               },
               {
-                kind: 'question',
-                title: '如何排查死锁？手写一个死锁示例。',
-                questionId: 'java-03-Q66',
-                intent:
-                  '两问：排查手段要能说出 `jstack` 的关键输出；手写要能写出「两个线程、两把锁、相反顺序」这个最小复现。',
-                points: [
-                  '**排查工具**：`jstack <pid>`（或 `jcmd <pid> Thread.print`）→ 输出里会直接给出 `Found one Java-level deadlock` 与等待环',
-                  '关键输出：`"Thread-1" ... BLOCKED (on object monitor)` + `waiting to lock <0x000000076ab...>` + `locked <0x000000076ac...>`',
-                  '`jstack` 会推断出环路：`Thread-1 等待 0xac（被 Thread-2 持有）` / `Thread-2 等待 0xab（被 Thread-1 持有）`',
-                  '其他手段：`jconsole` / `jvisualvm` 的「检测死锁」按钮；`ThreadMXBean.findDeadlockedThreads()`（可编程检测）；`arthas` 的 `thread -b`（直接找阻塞其他线程的线程）',
-                  '**最小复现**：两把锁 `A`、`B`，线程 1 先锁 A 再锁 B，线程 2 先锁 B 再锁 A，各自中间 `sleep` 一下让交错必然发生',
-                  '`thread -b` 是最快的线上手段：它直接告诉你「哪个线程阻塞了 N 个其他线程」，不需要自己看等待图',
-                  '预防优于排查：加锁顺序约定 + `tryLock` 超时 + 代码评审时重点看「嵌套锁」',
+                kind: 'concept',
+                title: '把「线程」代进四个条件,就是线程池饥饿',
+                body: [
+                  '把四个条件里的资源从「锁」换成「线程」,可以逐条对上,而且一条都不用改。互斥:一个线程同一时刻只能跑一个任务。持有并等待:父任务自己占着一个线程,同时等子任务的结果。不可剥夺:没有现成机制能把父任务暂时从线程上摘下来,让线程先去跑子任务。循环等待:子任务等空闲线程,空闲线程被父任务占着。',
+                  '破坏方式也就跟着出来了。要么让子任务不受同一个池的约束——给子任务单独一个池,或者用 `ForkJoinPool` 的托管阻塞让池在等待时临时补偿线程;要么干脆不让父任务阻塞——用回调组合代替「提交完再 `get()`」。[[同一个线程池里「提交任务并等结果」是所有饥饿死锁的共同形状]],`parallelStream` 里做阻塞 RPC、`CompletableFuture` 默认池里再提交并 join、线程池任务里再调本服务的另一个接口,都是这个形状。',
+                  '这类问题比锁死锁更难查,原因有两条。一是低负载时同一份代码完全正常:池里线程够用,子任务提交完立刻就跑了,只有当并发上来、池被打满时才发作。二是它不产生 BLOCKED,线程状态看起来全是「正常等待」,监控上一个红点都没有,只有吞吐悄悄掉到零。',
                 ],
-                depth:
-                  '为什么死锁示例里要加 `sleep`：不加的话，两个线程可能「一个跑完另一个才开始」，永远复现不出来。`sleep` 的作用是把「持有一把锁」的时间窗口拉长，让另一个线程有机会拿到另一把锁。**这也说明死锁的偶发性**——线上死锁往往在 QPS 上来之后才出现，因为只有高并发才有足够的交错概率。',
-                followup: '「`jstack` 抓不到死锁怎么办」——可能不是 `synchronized` 死锁，而是：① `ReentrantLock` 死锁（`jstack` 也能看到 `parking to wait for`，但不一定推断出环）；② 线程池饥饿（线程都在等队列里的任务，没有环但确实僵死）；③ 数据库/连接池耗尽（JVM 层看不到）。所以「没抓到死锁」不等于「没有僵死」。',
+                points: [
+                  '判断口诀:同一个池里,线程等的东西是不是也需要这个池的线程?是,就有饥饿风险',
+                  '隔离池是最简单的修法:慢任务、可阻塞任务、会递归提交的任务,都应该和主链路分开',
+                  '`ForkJoinPool` 的托管阻塞能自动补偿线程,但只对 ForkJoin 体系有效,别指望给普通线程池也补',
+                ],
               },
               {
                 kind: 'code',
                 title: '最小死锁复现 + jstack 的关键输出',
                 lang: 'java',
+                version: 'JDK 8+',
                 code:
-                  'public class DeadlockDemo {\n    private static final Object LOCK_A = new Object();\n    private static final Object LOCK_B = new Object();\n\n    public static void main(String[] args) {\n        Thread t1 = new Thread(() -> {\n            synchronized (LOCK_A) {\n                System.out.println("T1 got A");\n                sleep(100);                       // ① 拉长持有窗口\n                synchronized (LOCK_B) {\n                    System.out.println("T1 got B");\n                }\n            }\n        }, "T1");\n\n        Thread t2 = new Thread(() -> {\n            synchronized (LOCK_B) {               // ② 顺序相反\n                System.out.println("T2 got B");\n                sleep(100);\n                synchronized (LOCK_A) {\n                    System.out.println("T2 got A");\n                }\n            }\n        }, "T2");\n\n        t1.start();\n        t2.start();\n    }\n\n    static void sleep(long ms) {\n        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }\n    }\n}\n\n/*  jstack 输出（关键部分）：\n\nFound one Java-level deadlock:\n=============================\n"T2":\n  waiting to lock monitor 0x00007f8b4c006e00 (object 0x000000076ab6a8f8, a java.lang.Object),\n  which is held by "T1"\n"T1":\n  waiting to lock monitor 0x00007f8b4c005f00 (object 0x000000076ab6a8e8, a java.lang.Object),\n  which is held by "T2"\n\nJava stack information for the threads listed above:\n===================================================\n"T2":\n        at DeadlockDemo.lambda$main$1(DeadlockDemo.java:24)\n        - waiting to lock <0x000000076ab6a8f8> (a java.lang.Object)\n        - locked <0x000000076ab6a8e8> (a java.lang.Object)\n"T1":\n        at DeadlockDemo.lambda$main$0(DeadlockDemo.java:14)\n        - waiting to lock <0x000000076ab6a8f8> (a java.lang.Object)   ← 注意两者的地址正好互换\n        - locked <0x000000076ab6a8e8> (a java.lang.Object)\n*/\n\n// ✓ 修法一：统一加锁顺序（最简单）\n// 两个线程都先锁 A 再锁 B —— 循环等待被破坏\n\n// ✓ 修法二：tryLock 带超时（需要回滚逻辑）\n// boolean gotA = lockA.tryLock(1, TimeUnit.SECONDS);\n// boolean gotB = lockB.tryLock(1, TimeUnit.SECONDS);\n// if (!(gotA && gotB)) { if (gotA) lockA.unlock(); if (gotB) lockB.unlock(); retry(); }\n\n// ✓ 修法三：合并成一把锁（破坏「持有并等待」）\n// 用同一个 lock 保护 A 和 B，虽然降低并发度但彻底消除死锁',
+                  'public class DeadlockDemo {\n    private static final Object LOCK_A = new Object();\n    private static final Object LOCK_B = new Object();\n\n    public static void main(String[] args) {\n        Thread t1 = new Thread(() -> {\n            synchronized (LOCK_A) {\n                System.out.println("T1 got A");\n                sleep(100);                       // ① 拉长持有窗口\n                synchronized (LOCK_B) {\n                    System.out.println("T1 got B");\n                }\n            }\n        }, "T1");\n\n        Thread t2 = new Thread(() -> {\n            synchronized (LOCK_B) {               // ② 顺序相反\n                System.out.println("T2 got B");\n                sleep(100);\n                synchronized (LOCK_A) {\n                    System.out.println("T2 got A");\n                }\n            }\n        }, "T2");\n\n        t1.start();\n        t2.start();\n    }\n\n    static void sleep(long ms) {\n        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }\n    }\n}\n\n/*  jstack 输出（关键部分）：\n\nFound one Java-level deadlock:\n=============================\n"T2":\n  waiting to lock monitor 0x00007f8b4c006e00 (object 0x000000076ab6a8f8, a java.lang.Object),\n  which is held by "T1"\n"T1":\n  waiting to lock monitor 0x00007f8b4c005f00 (object 0x000000076ab6a8e8, a java.lang.Object),\n  which is held by "T2"\n\nJava stack information for the threads listed above:\n===================================================\n"T2":\n        at DeadlockDemo.lambda$main$1(DeadlockDemo.java:24)\n        - waiting to lock <0x000000076ab6a8f8> (a java.lang.Object)\n        - locked <0x000000076ab6a8e8> (a java.lang.Object)\n"T1":\n        at DeadlockDemo.lambda$main$0(DeadlockDemo.java:14)\n        - waiting to lock <0x000000076ab6a8f8> (a java.lang.Object)   ← 注意两者的地址正好互换\n        - locked <0x000000076ab6a8e8> (a java.lang.Object)\n*/\n\n// ✓ 修法一：统一加锁顺序（最简单）\n// 两个线程都先锁 A 再锁 B —— 循环等待被破坏\n\n// ✓ 修法二：带超时的 tryLock（可用 ReentrantLock 实现）\n// if (lockB.tryLock(1, TimeUnit.SECONDS)) { ... } else { 释放已持有的 A，重试 }\n',
                 caption:
-                  '`jstack` 的两段信息是关键：**第一段直接告诉你「谁等谁、被谁持有」**（不用自己分析），**第二段给出代码行号**。注意 `waiting to lock` 与 `locked` 的地址在 T1/T2 里正好互换——这就是「环」的证据。',
+                  '`jstack` 的两段信息各有用途:第一段直接告诉你「谁在等谁、被谁持有」,不用自己分析;第二段给出代码行号。注意 `waiting to lock` 与 `locked` 的地址在两个线程里正好互换——这就是「环」的证据。',
                 notes: [
-                  { line: 'sleep(100);', text: '拉长「持有一把锁等另一把」的窗口，让死锁必然发生。去掉它可能一万次都不复现。' },
-                  { line: 'synchronized (LOCK_B) {  // 顺序相反', text: '这就是「循环等待」的成因：两个线程以相反顺序申请资源。统一顺序即可消除。' },
-                  { line: 'Found one Java-level deadlock:', text: 'JVM 的 `ThreadMXBean` 会自动检测 `synchronized` 与 `ReentrantLock` 的等待环并打印这段。但**线程池饥饿不会有这个段**。' },
+                  { line: 'sleep(100);', text: '拉长「持有一把锁、去等另一把」的窗口,让死锁必然发生。去掉它可能一万次都不复现。' },
+                  { line: 'synchronized (LOCK_B) {  // 顺序相反', text: '这就是循环等待的成因:两个线程以相反顺序申请资源。统一顺序即可消除。' },
+                  { line: 'Found one Java-level deadlock:', text: '这是 `ThreadMXBean` 自动检测出来的,只覆盖 `synchronized` 与 `ReentrantLock` 的等待环。线程池饥饿不会打印这一段。' },
                 ],
               },
               {
-                kind: 'question',
-                title: '保证线程安全的手段有哪些？',
-                questionId: 'java-03-Q67',
-                intent:
-                  '框架题。要能按「从最彻底到最轻量」的顺序组织，而不是罗列名词。',
-                points: [
-                  '**① 不可变**：`final` 字段 + 不提供 setter + 防御性拷贝。最彻底，连同步都不需要（天然线程安全）',
-                  '**② 无共享**：把状态限制在单线程内（局部变量、`ThreadLocal`、栈封闭）。不共享就没有竞争',
-                  '**③ 互斥同步**：`synchronized`、`ReentrantLock`、`StampedLock`。最通用，代价是串行与阻塞',
-                  '**④ 非阻塞同步**：`Atomic*`、`LongAdder`、CAS 自旋。低竞争更优，但只适合单变量',
-                  '**⑤ 并发容器**：`ConcurrentHashMap`、`CopyOnWriteArrayList`、`BlockingQueue`。把「同步」封装在容器里',
-                  '**⑥ 消息传递**：用 `BlockingQueue` / `Actor` 模型让线程只通过消息通信，不共享可变状态',
-                  '**⑦ 同步工具**：`CountDownLatch` / `Semaphore` / `CyclicBarrier` 协调而非互斥',
+                kind: 'concept',
+                title: '排查:三个工具各能看到什么,看不到什么',
+                body: [
+                  '`jstack <pid>`(或 `jcmd <pid> Thread.print`)是第一步。它会把 monitor 与 AQS 的等待关系算成一张等待图,一旦发现环就直接打印 `Found one Java-level deadlock`,并把两个线程互相等待的地址抄给你。看到 `waiting to lock` 与 `locked` 的地址在两个线程里正好互换,就是环的铁证。',
+                  '`ThreadMXBean.findDeadlockedThreads()` 是同一套检测的可编程版本,适合做成健康检查接口,返回的是死锁线程 id 数组。`arthas` 的 `thread -b` 更直接:它不找环,只找「当前阻塞其他线程最多的那个线程」,一眼就能看到元凶,而且不要求环完整。三者的关系是:前者给证据,中者给自动化,后者给速度。',
+                  '但这三个工具的共同前提是:[[死锁的形态是「锁被互斥持有」]]。执行器饥饿、连接池耗尽、以及自己用标志位加自旋实现的等待,统统不在检测范围内。这时只能人工看数字:有多少线程停在 `Future.get`、停在哪个池、池的活跃数是否正好等于上限、队列长度是不是一直在涨。',
                 ],
-                depth:
-                  '「优先级为什么是这个顺序」——因为它对应「消除竞争的成本从高到低」：不可变与无共享是**从设计上消除**竞争（没有竞态就没有同步），互斥是**用串行压制**竞争，CAS 是**用重试绕过**竞争。工程上应该**先想能不能不共享或不可变**，实在不行才加锁。绝大多数「并发 bug」的根因是「本来可以不共享却共享了」。',
-                followup: '「不可变对象真的完全安全吗」——不完全。① 对象内部的**可变引用**（如 `final List` 但 list 内容可变）仍不安全，需要 `Collections.unmodifiableList` + 防御性拷贝；② 若引用在构造过程中**逃逸**（`this` 泄漏到其他线程），仍可能发布半初始化对象（需要 `final` 字段 + 不逃逸，或 `volatile`）。所以「不可变」要求的是**深不可变 + 正确发布**。',
+                points: [
+                  'BLOCKED 只表示「等 monitor」;等锁、等 Future、等 IO 都是 WAITING 或 TIMED_WAITING,所以「没有 BLOCKED」根本不能排除死锁',
+                  '僵死时先看池的活跃数是否顶到上限——这一步能在一分钟内排除或确认饥饿类问题',
+                  '`thread -b` 是线上最快的定位手段,因为它不需要环,只需要「谁挡了最多人」',
+                  '能被自动检测的只有 `synchronized` 与 AQS;自己写的等待逻辑永远不会被自动发现',
+                ],
+              },
+              {
+                kind: 'analogy',
+                title: '两辆车在窄路相遇',
+                text:
+                  '一条只能过一辆车的窄路,这是互斥;A 车从东头开进来、B 车从西头开进来,各自占住一段路又要往前走,这是持有并等待;路中间相遇之后谁都不能把车倒出去,这是不可剥夺;于是 A 等 B 退、B 等 A 退,这就是循环等待。要解开只有四种办法:把路拓宽(破坏互斥)、规定必须一次占完整条路才准进(破坏持有并等待)、允许叫拖车强行挪走一辆(破坏不可剥夺)、规定所有车只能从东往西走(破坏循环等待,等价于统一加锁顺序)。',
+                mapping: [
+                  { real: '只能过一辆车的窄路', tech: '互斥资源（锁）' },
+                  { real: '各占一段又都要往前', tech: '持有并等待' },
+                  { real: '谁都不能倒车', tech: '不可剥夺（锁只能由持有者释放）' },
+                  { real: 'A 等 B 退、B 等 A 退', tech: '循环等待' },
+                  { real: '规定所有车头朝同一方向', tech: '统一加锁顺序（最实用）' },
+                  { real: '叫拖车强行挪走一辆', tech: '`tryLock` 超时后放弃重试' },
+                ],
+                limit:
+                  '类比到「什么时候会死」就失效了:窄路上两车一定会相遇,死锁是必然的;而代码里的死锁需要特定时序才会触发,同一份代码可能跑一年都不出问题。这个差别很要紧——它解释了为什么死锁几乎总是在流量上涨后才爆发,也解释了为什么「测试通过」不能当结论。类比也解释不了饥饿:窄路上不存在「车太多导致某辆车永远排不上」的情形,而线程池饥饿恰恰只跟「池的大小与任务数的比例」有关。',
+              },
+              {
+                kind: 'concept',
+                title: '保证线程安全的四层手段:先消除,再压制,最后封装',
+                body: [
+                  '「怎么保证线程安全」这题如果只答「加锁」,会被认为视野太窄。正确的组织方式是按「有没有产生竞争」分四层,从上往下退化:能不共享就不共享,必须共享就让它不可变,实在不行才压制竞争,最后才是把同步交给现成的容器和工具。',
+                  '第一层是消除竞争:不可变对象(所有字段 `final`、不提供 setter、构造时深拷贝)、栈封闭(状态只活在方法局部变量里)、`ThreadLocal`(每个线程一份)。这一层最彻底,因为根本没有竞态,连内存屏障都不需要。第二层是压制竞争:用 `synchronized` 或 `ReentrantLock` 把临界区串起来,通用但代价是阻塞。第三层是绕过竞争:用原子类做无锁重试,低竞争时更快,但只能保护单个变量。第四层是封装与协调:把同步交给并发容器和同步工具,业务代码只调 API。',
+                  '[[绝大多数并发 bug 的根因是「本来可以不共享却共享了」]],而不是「锁没加对」。所以答题顺序本身就是得分点:先问能不能不共享,再问能不能不可变,最后才谈加锁和换容器。',
+                ],
+                points: [
+                  '不可变要求「深不可变 + 正确发布」:内部若持有可变引用,要防御性拷贝;构造中泄漏 `this` 仍可能发布半初始化对象',
+                  '原子类只保护「单个变量的一次操作」,两个变量要一起变就必须用锁或把它们合成一个不可变对象',
+                  '同步工具(Latch、Semaphore)不保护任何数据,它们只协调时序——拿它当锁用是最常见的误用',
+                ],
               },
               {
                 kind: 'diagram',
-                title: '线程安全的七种手段：从「消除竞争」到「协调竞争」',
+                title: '四层手段:越靠上,后面的麻烦越少',
                 diagram: {
                   type: 'tree',
                   root: {
                     label: '线程安全手段',
-                    note: '按「是否产生竞争」分层',
+                    note: '按「是否产生竞争」分层,从上往下退化',
                     children: [
                       {
-                        label: '不产生竞争',
-                        note: '最彻底，无需同步',
+                        label: '消除竞争',
+                        note: '最彻底,无需同步',
                         tone: 'primary',
                         children: [
                           { label: '不可变对象', note: '`final` + 无 setter + 深拷贝' },
-                          { label: '栈封闭 / 局部变量', note: '不逃逸就天然安全' },
-                          { label: 'ThreadLocal', note: '每线程一份，零竞争' },
+                          { label: '栈封闭', note: '状态只活在局部变量里,不逃逸' },
+                          { label: '`ThreadLocal`', note: '每线程一份,零竞争' },
                         ],
                       },
                       {
@@ -3333,253 +3101,202 @@ export default {
                         note: '串行化临界区',
                         tone: 'warn',
                         children: [
-                          { label: 'synchronized', note: 'JVM 内建，有锁升级' },
-                          { label: 'ReentrantLock / StampedLock', note: '可中断、超时、公平、读写分离' },
+                          { label: '`synchronized`', note: 'JVM 内建,有锁升级' },
+                          { label: '`ReentrantLock` / `StampedLock`', note: '可中断、可超时、可读写分离' },
                         ],
                       },
                       {
                         label: '绕过竞争',
-                        note: '无锁重试',
+                        note: '无锁重试,只适合单变量',
                         tone: 'warn',
                         children: [
-                          { label: 'Atomic* / CAS', note: '单变量原子操作' },
-                          { label: 'LongAdder', note: '高并发累加' },
+                          { label: '`Atomic*` / CAS', note: '单变量原子更新' },
+                          { label: '`LongAdder`', note: '高并发累加,分散热点' },
                         ],
                       },
                       {
                         label: '封装与协调',
-                        note: '把同步交给容器/工具',
+                        note: '把同步交给现成的',
                         tone: 'primary',
                         children: [
-                          { label: '并发容器', note: 'CHM / COW / BlockingQueue' },
-                          { label: '同步工具', note: 'Latch / Semaphore / Barrier' },
-                          { label: '消息传递', note: '队列通信，不共享状态' },
+                          { label: '并发容器', note: 'CHM / COW / 阻塞队列' },
+                          { label: '同步工具', note: 'Latch / Barrier / Semaphore' },
+                          { label: '消息传递', note: '只通过队列通信,不共享状态' },
                         ],
                       },
                     ],
                   },
                   caption:
-                    '这张树的读法是**从上往下退化**：最上面是「不需要同步」，最下面是「用容器替你同步」。面试回答「如何保证线程安全」时按这个顺序说，会显得有层次——**先问能不能不共享，再问能不能不可变，最后才谈加锁**。只说「加 synchronized」会被认为视野窄。',
+                    '这张树的读法是从上往下:最上面是「不需要同步」,最下面是「用别人的同步」。面试回答这题时按这个顺序说,层次立刻就出来了。',
                 },
               },
               {
-                kind: 'question',
-                title: '写出线程安全的单例（至少两种写法）。',
-                questionId: 'java-03-Q68',
-                intent:
-                  '基础手写题。要能写出至少四种，并说清各自的取舍。**枚举是标准答案**。',
-                points: [
-                  '**① 饿汉式**：`private static final INSTANCE = new X()`。靠类初始化保证线程安全（JVM 保证 `<clinit>` 只执行一次），简单但会提前初始化',
-                  '**② 静态内部类**：`Holder` 类里放 `INSTANCE`。**既延迟加载又线程安全**，且无锁——最推荐的「非枚举」写法',
-                  '**③ 双重检查锁（DCL）**：`volatile` 修饰实例 + 两次判空 + `synchronized`。复杂且容易写错，**不推荐**',
-                  '**④ 枚举**：`enum Singleton { INSTANCE; }`。**《Effective Java》推荐**：天然线程安全、防反射攻击、防反序列化生成新实例',
-                  '⑤ 懒汉式（方法加 `synchronized`）：线程安全但**每次调用都抢锁**，性能差，只作为反面教材',
-                  '取舍：饿汉/内部类简单但「不能传参初始化」；DCL 能传参但易错；枚举最安全但不能继承、不能延迟加载',
+                kind: 'concept',
+                title: '单例的五种写法,其实只回答两个问题',
+                body: [
+                  '五种写法看着多,把问题拆开就只剩两个:什么时候创建(类加载时就建,还是第一次用到才建),以及谁来保证只创建一次(JVM 的类初始化,还是自己加锁 / CAS)。所有的写法都是这两个问题的不同组合。',
+                  '饿汉式最简单:静态字段直接 new,靠 JVM 的类初始化保证只跑一次,天然线程安全,代价是不管用不用都会创建。静态内部类在此基础上补了延迟加载:外层类加载时不会初始化内部类,直到第一次访问才触发,同样不需要加锁。这两个是「非枚举」写法里最推荐的两个。',
+                  '双重检查锁是唯一需要手写同步的:必须给实例字段加 `volatile`,否则可能出现「引用已经赋值、对象还没构造完」的重排,别的线程就会拿到一个半成品。它只有在「必须延迟加载 + 必须传参 + 不能用枚举」时才值得写。枚举最省事:JVM 保证实例唯一,反序列化返回同一对象,反射创建会被直接拒绝。',
+                  '[[判断用哪种,先问「能不能不延迟」和「能不能传参」]]。能接受提前创建就用饿汉式,要延迟又不能传参就用静态内部类,必须传参就用静态初始化块加一次性开关,其余情况一律用枚举。',
                 ],
-                depth:
-                  '「为什么枚举能防反射」——`Constructor.newInstance` 里有硬编码检查：若 `clazz.isEnum()` 且不是「正在被 JVM 反序列化」，直接抛 `IllegalArgumentException: Cannot reflectively create enum objects`。这是 JDK 层的保护，无法通过 `setAccessible(true)` 绕过。而普通类（包括 DCL）都能被 `setAccessible(true)` 破坏。',
-                followup: '「单例怎么传参数」——静态内部类和饿汉式都做不到（`INSTANCE` 是静态 final，构造时无参）。需要传参时只能用 DCL 或在 `Holder` 里做静态初始化块（从配置文件读）。这时可以退化为「单例 + 初始化方法」：`Singleton.init(config)` 只在第一次调用时生效（用 `AtomicBoolean` 保证只执行一次）。',
+                points: [
+                  '`volatile` 在双重检查锁里不是可选项,它禁止「初始化」与「赋值」重排,少了它就是真 bug',
+                  '枚举防反射是 JDK 层的硬检查,`setAccessible(true)` 也绕不过去;普通类(包括双重检查锁)都能被绕',
+                  '双重检查锁再怎么优化也逃不过「先判空再抢锁」的结构,初始化之后的每次访问仍然要读一次 volatile',
+                ],
               },
               {
                 kind: 'code',
-                title: '单例的五种写法：从「能用」到「该用」',
+                title: '四种常用写法,按「该用」排序',
                 lang: 'java',
+                version: 'JDK 8+',
                 code:
-                  '// ① 饿汉式：靠类初始化保证线程安全（JVM 保证 clinit 只跑一次）\nclass Eager {\n    private static final Eager INSTANCE = new Eager();\n    private Eager() {}\n    static Eager get() { return INSTANCE; }\n}\n\n// ② 静态内部类：延迟加载 + 线程安全 + 无锁（推荐）\nclass Holder {\n    private Holder() {}\n    private static class H { static final Holder INSTANCE = new Holder(); }\n    static Holder get() { return H.INSTANCE; }\n}\n\n// ③ 双重检查锁：必须 volatile，否则可能发布半初始化对象\nclass Dcl {\n    private static volatile Dcl instance;      // volatile 不能省\n    private Dcl() {}\n    static Dcl get() {\n        Dcl local = instance;\n        if (local == null) {\n            synchronized (Dcl.class) {\n                local = instance;\n                if (local == null) instance = local = new Dcl();\n            }\n        }\n        return local;\n    }\n}\n\n// ④ 枚举：《Effective Java》推荐，防反射、防反序列化破坏\nenum EnumSingleton {\n    INSTANCE;\n    void doWork() { }\n}\n\n// ⑤ 反面教材：每个调用都抢锁\nclass BadLazy {\n    private static BadLazy instance;\n    private BadLazy() {}\n    static synchronized BadLazy get() { return instance == null ? (instance = new BadLazy()) : instance; }\n}\n\n// 补充：需要传参时——静态初始化块 + 一次性开关\nclass ConfigSingleton {\n    private static final AtomicBoolean INITED = new AtomicBoolean();\n    private static volatile ConfigSingleton instance;\n    private ConfigSingleton(Config c) { /* ... */ }\n    static void init(Config c) {\n        if (!INITED.compareAndSet(false, true)) throw new IllegalStateException("already inited");\n        instance = new ConfigSingleton(c);\n    }\n    static ConfigSingleton get() {\n        if (instance == null) throw new IllegalStateException("not inited");\n        return instance;\n    }\n}',
+                  '// ① 饿汉式：靠类初始化保证线程安全（JVM 保证 clinit 只跑一次）\nclass Eager {\n    private static final Eager INSTANCE = new Eager();\n    private Eager() {}\n    static Eager get() { return INSTANCE; }\n}\n\n// ② 静态内部类：延迟加载 + 线程安全 + 无锁（非枚举里推荐这个）\nclass Holder {\n    private Holder() {}\n    private static class H { static final Holder INSTANCE = new Holder(); }\n    static Holder get() { return H.INSTANCE; }\n}\n\n// ③ 枚举：《Effective Java》推荐，防反射、防反序列化破坏\nenum EnumSingleton {\n    INSTANCE;\n    void doWork() { }\n}\n\n// ④ 双重检查锁：只在「必须延迟加载 + 必须传参 + 不能用枚举」时才写\nclass Dcl {\n    private static volatile Dcl instance;      // volatile 不能省\n    private Dcl() {}\n    static Dcl get() {\n        Dcl local = instance;                  // 局部变量少读一次 volatile\n        if (local == null) {\n            synchronized (Dcl.class) {\n                local = instance;\n                if (local == null) instance = local = new Dcl();\n            }\n        }\n        return local;\n    }\n}\n\n// ⑤ 需要传参：静态初始化块 + 一次性开关\nclass ConfigSingleton {\n    private static final AtomicBoolean INITED = new AtomicBoolean();\n    private static volatile ConfigSingleton instance;\n    private ConfigSingleton(Config c) { /* ... */ }\n    static void init(Config c) {\n        if (!INITED.compareAndSet(false, true)) throw new IllegalStateException("already inited");\n        instance = new ConfigSingleton(c);\n    }\n    static ConfigSingleton get() {\n        if (instance == null) throw new IllegalStateException("not inited");\n        return instance;\n    }\n}',
                 caption:
-                  '选型建议：**能用枚举就用枚举**（`EnumSingleton.INSTANCE`）；需要延迟加载又不能改类型 → 静态内部类；需要传参 → 静态初始化块 + `AtomicBoolean`。**DCL 只在「必须延迟加载 + 必须传参 + 不能用枚举」时才值得写**，而且一定要记得 `volatile`。',
+                  '选型顺序:能改类型就用枚举;必须延迟加载又不用传参就用静态内部类;必须传参就用静态初始化块加 `AtomicBoolean`。第四个双重检查锁留着是为了能讲清 `volatile` 为什么不能省,不是为了让你在项目里用它。',
                 notes: [
-                  { line: 'private static final Eager INSTANCE = new Eager();', text: '「饿汉」不是缺点——如果单例一定会被用到，提前初始化反而避免了首次访问的延迟抖动。' },
-                  { line: 'private static volatile Dcl instance;', text: '`volatile` 禁止「初始化」与「引用赋值」重排，防止其他线程看到半初始化对象。少了它是真 bug。' },
+                  { line: 'private static final Eager INSTANCE = new Eager();', text: '「饿汉」不是缺点:如果单例一定会被用到,提前初始化反而避免了首次访问的延迟抖动。' },
+                  { line: 'private static volatile Dcl instance;', text: '`volatile` 禁止「构造对象」与「把引用指过去」这两步重排,防止别的线程看到半初始化对象。' },
                   { line: 'enum EnumSingleton { INSTANCE; }', text: '枚举的构造器天然私有、实例由 JVM 保证唯一、反序列化返回同一实例、反射创建被禁止——四个问题一次解决。' },
                 ],
               },
               {
-                kind: 'question',
-                title: '手写生产者消费者模型（多种实现）。',
-                questionId: 'java-03-Q69',
-                intent:
-                  '最经典的手写题。要说清至少三种实现，并强调「`while` 而不是 `if`」与「`notifyAll` 而不是 `notify`」两个要点。',
-                points: [
-                  '**实现一：`BlockingQueue`（生产首选）** —— 一行 `queue.put(x)` / `queue.take()` 就够，虚假唤醒、边界、阻塞全由容器处理',
-                  '**实现二：`synchronized` + `wait/notifyAll`** —— 自定义有界缓冲，`while (count == capacity) wait();`，入队后 `notifyAll()`',
-                  '**实现三：`ReentrantLock` + 两个 `Condition`** —— `notFull` / `notEmpty` 精确唤醒，避免无效唤醒（`ArrayBlockingQueue` 就是这么做的）',
-                  '**实现四：`Semaphore` 双信号量** —— `empty = new Semaphore(capacity)`、`full = new Semaphore(0)`，天然表达「空位数」与「产品数」',
-                  '**关键点一**：判断条件用 `while` 而不是 `if`（防虚假唤醒 + 防条件被改回去）',
-                  '**关键点二**：`wait/notify` 版本必须用 `notifyAll`（用 `notify` 可能叫醒同类线程造成「信号丢失」，最终全部僵死）',
-                  '**关键点三**：`wait` 必须在 `synchronized` 块内，且 `try/finally` 里保证 `unlock`',
+                kind: 'concept',
+                title: '生产者消费者的四种实现,差在「谁记住队列状态」',
+                body: [
+                  '这道题的四种实现不是四个并列的答案,而是一条演进线,主线是「队列空了、满了这件事,由谁记住」。第一种用现成的阻塞队列,状态由容器记住,业务代码只管 `put` 和 `take`。第二种用 `synchronized` 加 `wait`/`notifyAll`,状态由你自己在循环里判断,而且只有一个等待队列,所以只能广播。第三种换成锁加两个条件变量,状态还是自己判断,但可以精确唤醒对端——`ArrayBlockingQueue` 就是这么实现的。第四种用双信号量,状态直接编码进「许可的数量」里,连条件判断都省了。',
+                  '无论哪种实现,有两条纪律不能破。一是判断条件必须用 `while` 而不是 `if`:被唤醒不代表条件成立,可能是虚假唤醒,也可能是条件被别人又改了。二是单条件队列的版本必须 `notifyAll` 而不是 `notify`:只叫醒一个,却不保证叫醒的是对的那一类线程,被叫醒的消费者发现队列还是空的、又回去等,而真正该被叫醒的生产者永远收不到通知,整个系统静默卡死。',
+                  '[[生产环境直接用 `BlockingQueue`]]。自己写只是向面试官证明你知道里面发生了什么;真写进业务,虚假唤醒、中断、超时、关闭时的收尾,每一条都能出事故。',
                 ],
-                depth:
-                  '「为什么 `notify` 会导致僵死」——假设队列空，两个消费者 C1、C2 都在 `wait`。生产者放入一个元素并 `notify()`，随机叫醒 C1。C1 消费后队列又空。此时生产者再放入一个元素并 `notify()`，这次**可能叫醒的还是 C1**（也可能叫醒 C2）——如果叫醒的是 C1 而 C1 恰好又先抢到锁，C2 就永远等不到通知。**`notify` 只保证「叫醒一个」，不保证「叫醒对的那个」。** 这就是为什么单条件队列时只能用 `notifyAll`。',
-                followup: '「`Condition` 版本好在哪」——两个条件队列让「生产者只唤醒消费者、消费者只唤醒生产者」，既没有无效唤醒（不用 `notifyAll` 惊群），也不会僵死。这是「精确唤醒」的价值，也是 `ArrayBlockingQueue` 的选择。',
+                points: [
+                  '双条件版本的价值是「精确唤醒」:生产者只唤醒消费者,消费者只唤醒生产者,没有惊群',
+                  '`signal()` 之后对方不会立刻执行:它只是从条件队列搬到同步队列,还要抢锁',
+                  '阻塞队列不允许存 `null`,因为 `poll()` 已经用 `null` 表示「队列空」,这个歧义无法消除',
+                ],
               },
               {
                 kind: 'handwrite',
-                title: '手写有界阻塞队列：ReentrantLock + 双 Condition',
+                title: '手写有界阻塞队列:ReentrantLock + 双 Condition',
                 lang: 'java',
                 prompt:
-                  '面试官：「不用 `BlockingQueue`，手写一个有界阻塞队列，`put` 满了要等、`take` 空了要等，要求线程安全，且不能出现信号丢失。」这题是生产者消费者的核心版本，评分点在「两个 Condition」「while 判条件」「finally 解锁」三处。',
+                  '面试官:「不用现成的阻塞队列,手写一个有界阻塞队列,`put` 满了要等、`take` 空了要等,要求线程安全,且不能出现信号丢失。」这道题的核心评分点只有三处:两个条件变量、用 `while` 判条件、在 `finally` 里解锁。',
                 signature:
                   'class BoundedQueue<T> {\n    BoundedQueue(int capacity);\n    void put(T item) throws InterruptedException;   // 满则阻塞\n    T take() throws InterruptedException;           // 空则阻塞\n    int size();\n}',
                 plan: [
                   {
-                    title: '先定数据结构与两把「条件」',
+                    title: '① 先定数据结构与两把「条件」',
                     detail:
-                      '用数组存环形缓冲（`head`/`tail`/`count`）。`ReentrantLock` 一把锁 + 两个 `Condition`：`notFull`（生产者等它）、`notEmpty`（消费者等它）。两个条件分开，才能「精确唤醒对端」。',
+                      '用数组做环形缓冲,维护 `head`、`tail`、`count` 三个字段。一把锁配两个条件变量:`notFull` 给生产者等,`notEmpty` 给消费者等。两个分开才能精确唤醒对端,这也是它比 `wait`/`notifyAll` 版本高级的地方。',
                   },
                   {
-                    title: '`put`：满了就 await notFull',
+                    title: '② `put`:满了就等 notFull',
                     detail:
-                      '`while (count == capacity) notFull.await();` → 放入 → `count++` → `notEmpty.signal()`。注意三件事：用 `while` 不用 `if`；`signal` 只叫醒一个消费者（因为只放入一个）；解锁必须在 `finally`。',
+                      '循环检查队列是否已满,满了就 `notFull.await()`,不满才写入并让 `tail` 环形前进、`count` 自增,最后 `notEmpty.signal()` 叫醒一个消费者。注意只叫一个——你只放入了一个元素,叫醒多个没有意义。',
                   },
                   {
-                    title: '`take`：空了就 await notEmpty',
+                    title: '③ `take`:空了就等 notEmpty',
                     detail:
-                      '`while (count == 0) notEmpty.await();` → 取出 → `count--` → `notFull.signal()`。两个方法结构完全对称，是这道题「好背」的原因。',
+                      '结构与 `put` 完全对称:空了就 `notEmpty.await()`,取出后把该位置置 null 帮 GC、`head` 前进、`count` 自减,最后 `notFull.signal()`。两个方法对称是这道题好背的原因,也是对称性检查的好机会。',
                   },
                   {
-                    title: '补边界：`put(null)` 该不该允许',
+                    title: '④ 补边界:`null`、中断、容量非法',
                     detail:
-                      '`BlockingQueue` 不允许 null（`null` 被用作 `poll` 的空返回值）。手写时也应 `Objects.requireNonNull(item)`，与 JDK 语义一致——这是「细节加分项」。',
+                      '构造时校验容量大于 0;`put(null)` 直接抛空指针,与 JDK 语义一致;用 `lockInterruptibly()` 而不是 `lock()`,让等待可被中断;解锁放 `finally`。这四件事都不难,但面试官会逐条看。',
                   },
                 ],
                 skeleton:
-                  'class BoundedQueue<T> {\n    private final Object[] items;\n    private int head, tail, count;\n    private final ReentrantLock lock = new ReentrantLock();\n    private final Condition notFull = lock.newCondition();\n    private final Condition notEmpty = lock.newCondition();\n\n    BoundedQueue(int capacity) {\n        items = new Object[capacity];\n    }\n\n    void put(T item) throws InterruptedException {\n        Objects.requireNonNull(item);\n        lock.lock();\n        try {\n            // TODO: 1) while 满 → notFull.await()\n            //       2) 放入 tail，tail 环形前进，count++\n            //       3) notEmpty.signal()\n        } finally {\n            lock.unlock();\n        }\n    }\n\n    T take() throws InterruptedException {\n        lock.lock();\n        try {\n            // TODO: 1) while 空 → notEmpty.await()\n            //       2) 取出 head，head 环形前进，count--\n            //       3) notFull.signal()\n            return null;\n        } finally {\n            lock.unlock();\n        }\n    }\n\n    int size() {\n        lock.lock();\n        try { return count; } finally { lock.unlock(); }\n    }\n}',
+                  'class BoundedQueue<T> {\n    private final Object[] items;\n    private int head, tail, count;\n    private final ReentrantLock lock = new ReentrantLock();\n    private final Condition notFull = lock.newCondition();\n    private final Condition notEmpty = lock.newCondition();\n\n    BoundedQueue(int capacity) {\n        items = new Object[capacity];\n    }\n\n    void put(T item) throws InterruptedException {\n        Objects.requireNonNull(item);\n        lock.lock();\n        try {\n            // TODO: 1) while 满 → notFull.await()\n            //       2) 写入 tail，环形前进，count++\n            //       3) notEmpty.signal()\n        } finally {\n            lock.unlock();\n        }\n    }\n\n    T take() throws InterruptedException {\n        lock.lock();\n        try {\n            // TODO: 1) while 空 → notEmpty.await()\n            //       2) 取出 head，环形前进，count--\n            //       3) notFull.signal()\n            return null;\n        } finally {\n            lock.unlock();\n        }\n    }\n\n    int size() {\n        lock.lock();\n        try { return count; } finally { lock.unlock(); }\n    }\n}',
                 solution:
                   'class BoundedQueue<T> {\n    private final Object[] items;\n    private int head, tail, count;\n    private final ReentrantLock lock = new ReentrantLock();\n    private final Condition notFull = lock.newCondition();\n    private final Condition notEmpty = lock.newCondition();\n\n    BoundedQueue(int capacity) {\n        if (capacity <= 0) throw new IllegalArgumentException();\n        items = new Object[capacity];\n    }\n\n    void put(T item) throws InterruptedException {\n        Objects.requireNonNull(item);\n        lock.lockInterruptibly();              // 可中断，避免永久阻塞\n        try {\n            while (count == items.length) {    // while 而非 if\n                notFull.await();               // 满：等「不满」这个条件\n            }\n            items[tail] = item;\n            tail = (tail + 1) % items.length;  // 环形前进\n            count++;\n            notEmpty.signal();                 // 精确唤醒一个消费者\n        } finally {\n            lock.unlock();\n        }\n    }\n\n    @SuppressWarnings("unchecked")\n    T take() throws InterruptedException {\n        lock.lockInterruptibly();\n        try {\n            while (count == 0) {\n                notEmpty.await();              // 空：等「不空」这个条件\n            }\n            T item = (T) items[head];\n            items[head] = null;                // 帮助 GC\n            head = (head + 1) % items.length;\n            count--;\n            notFull.signal();                  // 精确唤醒一个生产者\n            return item;\n        } finally {\n            lock.unlock();\n        }\n    }\n\n    int size() {\n        lock.lock();\n        try { return count; } finally { lock.unlock(); }\n    }\n}',
                 complexity:
-                  '`put` / `take` 均为 O(1)（只有数组读写与取模）· 空间 O(capacity) · 锁竞争程度取决于容量与快慢速匹配度。',
+                  '`put` 与 `take` 都是 O(1)(只有数组读写与取模)· 空间 O(容量) · 阻塞时长取决于快慢两端的匹配度,而不是数据量。',
                 traps: [
-                  '用 `if` 判断条件：被唤醒后条件可能已不成立（虚假唤醒或别人先抢走），必须 `while` 重新检查',
-                  '只用一个 `Condition`：那就只能 `signalAll()`，否则会叫醒同类线程造成信号丢失、最终僵死',
-                  '`unlock()` 不写 `finally`：`await()` 抛 `InterruptedException` 时锁不会释放，直接死锁',
-                  '`signal()` 之后误以为对方立刻执行：它只是把对方从条件队列搬到同步队列，仍要竞争锁',
-                  '遗忘 `tail`/`head` 的取模：数组越界或元素覆盖',
+                  '用 `if` 判条件:被唤醒后条件可能已不成立(虚假唤醒,或别人先抢走了),必须 `while` 重新检查',
+                  '只用一个条件变量:那就只能 `signalAll`,否则会叫醒同类线程造成信号丢失,最终全部僵死',
+                  '`unlock()` 没写在 `finally`:`await()` 抛中断异常时锁不会释放,直接变成死锁',
+                  '以为 `signal()` 之后对方立刻执行:它只是把对方从条件队列挪到同步队列,还要抢锁',
+                  '忘了 `tail` / `head` 取模:数组越界,或者元素被悄悄覆盖',
+                ],
+              },
+              {
+                kind: 'code',
+                title: '交替打印:两把信号量串成一条链',
+                lang: 'java',
+                version: 'JDK 8+',
+                code:
+                  '// 两个线程交替打印 1..100：A 打奇数、B 打偶数\nclass AlternatingPrinter {\n    private final Semaphore odd = new Semaphore(1);    // A 先跑\n    private final Semaphore even = new Semaphore(0);   // B 等 A 交棒\n    private int count = 1;                             // 只在持许可时读写\n\n    void print() {\n        new Thread(() -> run(odd, even), "A-odd").start();\n        new Thread(() -> run(even, odd), "B-even").start();\n    }\n\n    private void run(Semaphore mine, Semaphore next) {\n        try {\n            while (true) {\n                mine.acquire();                            // 等到轮到我\n                if (count > 100) { next.release(); return; }  // ← 交棒后退出\n                System.out.println(Thread.currentThread().getName() + ": " + count);\n                count++;\n                next.release();                            // 把机会交给对方\n            }\n        } catch (InterruptedException e) {\n            Thread.currentThread().interrupt();\n        }\n    }\n}',
+                caption:
+                  '这个版本的妙处在于「谁该跑」不需要变量:它被编码进了「谁能拿到许可」。所以没有 `turn` 变量、没有轮次判断、也没有广播唤醒。换成三个线程交替,只需把三个信号量串成一个环——这就是用同步工具表达约束比用锁加条件变量更声明式的地方。',
+                notes: [
+                  { line: 'mine.acquire();', text: '等待由 `acquire` 表达,省掉了「while (turn != me) wait()」这类样板代码。' },
+                  { line: 'if (count > 100) { next.release(); return; }', text: '本题最容易漏的边界:发现结束时必须把许可交出去,否则对方永远阻塞在 `acquire` 上。' },
+                  { line: 'next.release();', text: '把「下一个是谁」交给信号量,而不是靠 if 判断线程名或计数奇偶。' },
                 ],
               },
               {
                 kind: 'question',
-                title: '手写：两个线程交替打印 1~100。',
+                title: '两个线程交替打印 1~100,你能写几种?',
                 questionId: 'java-03-Q70',
                 intent:
-                  '高频手写题。要能给出三种以上写法，并说清各自的取舍（`wait/notify` / `Condition` / `Semaphore` / CAS）。',
+                  '高频手写题。写出一种只是及格,能说清四种写法的取舍、并指出哪一种「看起来对其实不保证交替」,才拉开分档。',
                 points: [
-                  '**写法一：`synchronized` + `wait/notifyAll`** —— 共享一个 `count` 与 `turn` 标志，各自 `while (turn != me) wait();`，打印后改 `turn` 并 `notifyAll()`',
-                  '**写法二：`ReentrantLock` + 两个 `Condition`** —— `condA` / `condB` 互相 `signal`，无需 `notifyAll`，无惊群',
-                  '**写法三：`Semaphore` 双许可** —— `s1 = new Semaphore(1)`、`s2 = new Semaphore(0)`，A 先 `acquire(s1)` 打印后 `release(s2)`，B 反之',
-                  '**写法四：`AtomicInteger` + CAS** —— 每个线程 `do { cur = get(); } while (!cas(cur, cur+1))`，谁 CAS 成功谁打印（但**无法保证「交替」**，只保证不重复）',
-                  '**关键点一**：`while` 判自己的轮次，不用 `if`',
-                  '**关键点二**：`wait` 版本必须 `notifyAll`（只有一个条件变量时，`notify` 可能叫醒同类）',
-                  '**关键点三**：循环终止条件要放在锁内判断，否则可能多打一个数',
+                  '锁加 `wait`/`notifyAll`:共享一个计数和一个轮次标志,各自循环判断「是不是轮到我」,打印后改标志并广播',
+                  '锁加两个条件变量:奇数、偶数各一个条件,互相 `signal`,不需要广播,也没有惊群',
+                  '双信号量:把「该谁跑」编码成「谁能拿到许可」,不需要轮次变量,线程数变多时只需把信号量串成环',
+                  '原子类加自旋:谁 CAS 成功谁打印,但只保证不重复打印,不保证交替顺序——这是最容易说错的答案',
+                  '必答的边界:发现打完最后一个数时,必须把许可或通知交给对方再退出,否则对方永久阻塞',
                 ],
                 depth:
-                  '「`Semaphore` 版本为什么最简洁」——因为它把「谁该跑」编码进了「谁能拿到许可」：A 持 `s1`，打印完把 `s2` 的许可给出；B 拿到 `s2` 才能跑，跑完把 `s1` 还回去。**不需要 `turn` 变量、不需要 `notifyAll`、不需要 `while` 轮次判断**（`acquire` 本身就是等待）。这是「用同步工具表达约束」的典型例子——比用锁 + 条件变量更声明式。',
-                followup: '「如果要求交替打印 A、B、C 三个线程呢」——`Semaphore` 版本只需三个信号量串成一个环（`s1→s2→s3→s1`）；`wait/notify` 版本要维护 `turn ∈ {0,1,2}` 并在 `while` 里比较。**线程数增加时，`Semaphore` 方案的可扩展性明显更好。**',
-              },
-              {
-                kind: 'handwrite',
-                title: '手写交替打印：Semaphore 版与 Condition 版',
-                lang: 'java',
-                prompt:
-                  '面试官：「两个线程交替打印 1~100，A 打奇数、B 打偶数，要求严格交替且不丢不重。」说完思路后现场写一种即可，但要能答出「还有哪几种写法、区别在哪」。',
-                signature:
-                  'class AlternatingPrinter {\n    void print();   // 启动两个线程，交替打印 1..100\n}',
-                plan: [
-                  {
-                    title: '方案选择：优先 `Semaphore`',
-                    detail:
-                      '两个信号量 `odd = new Semaphore(1)`、`even = new Semaphore(0)`。A 先拿 `odd`，打完释放 `even`；B 拿 `even`，打完释放 `odd`。**等待由 `acquire` 表达，不需要 `turn` 变量与 `while` 轮次判断**。',
-                  },
-                  {
-                    title: '共享计数器要安全',
-                    detail:
-                      '`count` 只在一个线程持许可时被读写，所以理论上用普通 `int` 就够（靠信号量的内存屏障保证可见性）。但为了「即使写错也不出错」，可以用 `AtomicInteger` 更稳。',
-                  },
-                  {
-                    title: '终止条件放在打印后判断',
-                    detail:
-                      '打印完发现已到 100 就 `return`，此时**必须把自己手上的许可也释放**（或让对端感知结束），否则另一个线程会永久 `acquire` 阻塞。这是本题最容易漏的边界。',
-                  },
-                  {
-                    title: '备选：`Condition` 版',
-                    detail:
-                      '一把 `ReentrantLock` + 两个 `Condition`（`oddCond`/`evenCond`），用 `turn` 变量表示轮到谁。`while (turn != 0) oddCond.await();` 打印后改 `turn` 并 `signal` 对方。比 `synchronized` 版少了 `notifyAll` 的惊群。',
-                  },
-                ],
-                skeleton:
-                  'class AlternatingPrinter {\n    private final Semaphore odd = new Semaphore(1);    // A 先跑\n    private final Semaphore even = new Semaphore(0);   // B 等 A\n    private int count = 1;\n\n    void print() {\n        Thread a = new Thread(() -> {\n            while (true) {\n                // TODO: acquire(odd) → 若 count > 100 则释放并 return\n                //       打印 count，count++\n                //       释放 even\n            }\n        }, "A-odd");\n\n        Thread b = new Thread(() -> {\n            while (true) {\n                // TODO: acquire(even) → 若 count > 100 则释放并 return\n                //       打印 count，count++\n                //       释放 odd\n            }\n        }, "B-even");\n\n        a.start();\n        b.start();\n    }\n}',
-                solution:
-                  'class AlternatingPrinter {\n    private final Semaphore odd = new Semaphore(1);\n    private final Semaphore even = new Semaphore(0);\n    private int count = 1;                 // 只在持许可时被访问，故无需原子类\n\n    void print() {\n        Thread a = new Thread(() -> {\n            try {\n                while (true) {\n                    odd.acquire();\n                    if (count > 100) { even.release(); return; }  // 交棒后退出\n                    System.out.println(Thread.currentThread().getName() + ": " + count);\n                    count++;\n                    even.release();\n                }\n            } catch (InterruptedException e) {\n                Thread.currentThread().interrupt();\n            }\n        }, "A-odd");\n\n        Thread b = new Thread(() -> {\n            try {\n                while (true) {\n                    even.acquire();\n                    if (count > 100) { odd.release(); return; }\n                    System.out.println(Thread.currentThread().getName() + ": " + count);\n                    count++;\n                    odd.release();\n                }\n            } catch (InterruptedException e) {\n                Thread.currentThread().interrupt();\n            }\n        }, "B-even");\n\n        a.start();\n        b.start();\n    }\n}\n\n// ◆ 备选实现：ReentrantLock + 双 Condition\nclass ConditionPrinter {\n    private final ReentrantLock lock = new ReentrantLock();\n    private final Condition oddCond = lock.newCondition();\n    private final Condition evenCond = lock.newCondition();\n    private int count = 1;\n    private int turn;                       // 0 = A, 1 = B\n\n    void print() {\n        new Thread(() -> run(0, oddCond, evenCond), "A-odd").start();\n        new Thread(() -> run(1, evenCond, oddCond), "B-even").start();\n    }\n\n    private void run(int me, Condition mine, Condition other) {\n        lock.lock();\n        try {\n            while (count <= 100) {\n                while (turn != me && count <= 100) mine.await();   // while 判轮次\n                if (count > 100) break;\n                System.out.println(Thread.currentThread().getName() + ": " + count);\n                count++;\n                turn = 1 - me;\n                other.signal();                                    // 精确唤醒对方\n            }\n            other.signal();                                        // 收尾唤醒，避免对方永久等待\n        } catch (InterruptedException e) {\n            Thread.currentThread().interrupt();\n        } finally {\n            lock.unlock();\n        }\n    }\n}',
-                complexity:
-                  'O(n) 次打印，每次只有一次信号量获取/释放（或一次锁进出）· 无额外空间 · 严格交替（无忙等、无惊群）。',
-                traps: [
-                  '打印完发现到 100 就直接 `return`，忘了释放对端的许可/信号 → 另一个线程永久阻塞',
-                  '`synchronized` 版本用 `notify()` 而不是 `notifyAll()` → 可能叫醒同类线程，导致互相等待僵死',
-                  '`while` 写成 `if` 判轮次 → 虚假唤醒后会打乱顺序或重复打印',
-                  '把 `count++` 放在锁外（`synchronized` 版本）→ 两个线程可能读到同一个值',
-                  '用 `AtomicInteger` + CAS 声称「交替打印」：CAS 只保证不重复，**不保证交替顺序**（同一线程可能连续拿两次）',
-                ],
-              },
-              {
-                kind: 'analogy',
-                title: '死锁像两辆车在窄路相遇',
-                text:
-                  '一条**只能过一辆车**的窄路（互斥），A 车从东头开进来、B 车从西头开进来（各自占住一段 = 持有并等待），路中间相遇后谁都**不能把车倒出去**（不可剥夺），于是 **A 等 B 退、B 等 A 退**（循环等待），两车永远僵住。要解开只有四种办法：**把路拓宽**（破坏互斥）、**规定必须一次占完整条路才准进**（破坏持有并等待）、**允许叫拖车强行挪走一辆**（破坏不可剥夺）、**规定车头一律朝东，只能从东往西走**（破坏循环等待，等价于「统一加锁顺序」）。',
-                mapping: [
-                  { real: '只能过一辆车的窄路', tech: '互斥资源（锁）' },
-                  { real: 'A 车占住东段，等西段空出来', tech: '持有一把锁，等另一把' },
-                  { real: '谁也不肯/不能倒车', tech: '不可剥夺：只能持有者主动释放' },
-                  { real: 'A 等 B、B 等 A', tech: '循环等待' },
-                  { real: '叫拖车强行挪走一辆', tech: '`tryLock(timeout)` 失败就释放重试' },
-                  { real: '规定所有车只能从东往西走', tech: '统一加锁顺序（最实用）' },
-                  { real: '两车僵在路口，后面的车全堵住', tech: '死锁的「雪崩」效应：占满线程池' },
-                ],
-                limit:
-                  '类比到「线程池饥饿」就不成立了：窄路相撞的双方**互相**等着对方，是一个明确的环；而「任务 A 在线程池里等任务 B 的结果，B 还在队列里排队」**没有环**——A 等的是「一个还没开始的任务」，B 等的是「一个空闲线程」。这类僵死在 `jstack` 里**不会**被识别为 deadlock（没有等待环），只能靠「线程数打满 + 队列堆积」的现象判断。**这是死锁排查里最容易被漏掉的一类。**',
+                  '追问通常落在「为什么信号量版本最短」:因为它把状态换成了资源。轮次变量是「共享数据 + 判断」,需要锁保护、需要用 `while` 重检;许可数量本身就是「谁可以动」,`acquire` 天然既判断又等待。[[用资源表达约束,比用变量表达约束少一半代码]]——这也是并发设计里一条通用的思路:能靠队列、许可、屏障表达的,就不要自己维护标志位。',
+                followup:
+                  '再追「三个线程交替打印 A、B、C 呢」:信号量版本只需三个信号量首尾相接,把 `release` 的目标换成下一个;锁加轮次的版本要把标志扩成三种取值,并保证每个线程只叫醒它后面那个。线程数一多,两边的复杂度差距会迅速拉开——这就是「选型要看可扩展性」的具体样子。',
               },
               {
                 kind: 'principle',
-                title: '并发题的四条得分线',
+                title: '手写并发题的四条得分线',
                 body: [
-                  '这一节把并发部分的手写与场景题收尾。回顾所有题目，得分点其实高度重复——面试官看的是这四条。',
+                  '同一道手写题,有人写完只能拿及格分,有人能拿到高分,差别通常不在代码能不能跑,而在这四条线上。',
                 ],
                 steps: [
                   {
-                    title: '第一线：原语选得对，且说得清为什么',
+                    title: '第一线:原语选得对,而且说得清为什么',
                     detail:
-                      '需要「互斥 + 条件等待」→ 锁 + 条件变量；只需原子计数 → `Atomic*`；只需限流 → `Semaphore`；只需传递任务 → `BlockingQueue`。**能说出「为什么不用另一种」，比写对代码更值钱。**',
+                      '开口先说选什么、为什么不用另一种。同样是交替打印,选信号量是因为「等待可以被编码成许可」,选锁加条件变量是因为「需要超时和可中断」。[[能说出取舍,比写出代码更能证明你懂]]。',
                   },
                   {
-                    title: '第二线：`while` 判条件，绝不用 `if`',
+                    title: '第二线:条件必须用 `while` 重新检查',
                     detail:
-                      '虚假唤醒、条件被改回去、同类线程抢走——三种情况都要求「醒来后重新检查」。这是并发手写题的第一条铁律，也是最常见的失分点。',
+                      '被唤醒不等于条件成立。虚假唤醒、别人先抢走、条件被改回去,三种情况都要求重新判。这一条是面试官最先扫的地方,用 `if` 基本等于自曝。',
                   },
                   {
-                    title: '第三线：边界齐全（中断 / 超时 / 异常 / 终止）',
+                    title: '第三线:边界补齐(中断、超时、异常、终止)',
                     detail:
-                      '所有等待都要能被中断（`lockInterruptibly` / `await`），所有阻塞都该有超时版本，`unlock` 必须在 `finally`，循环终止后要「交棒」防止对端永久等待。**手写题的难度几乎全在边界上。**',
+                      '能不能被中断?能不能超时?抛异常时锁放没放?结束条件在哪判断、判完要不要通知对方?这四个问题一个个过,基本不会漏。反例就是交替打印里两个线程只有一方退出,另一方永久阻塞。',
                   },
                   {
-                    title: '第四线：知道这是「玩具」，生产要用现成的',
+                    title: '第四线:知道这是「玩具」,生产要用现成的',
                     detail:
-                      '手写生产者消费者是为了证明你懂原理，但生产环境应该用 `BlockingQueue`；手写单例是为了证明你懂 JMM，但生产环境该用枚举或框架的 DI 容器。**能说出「生产里我会怎么做」，是区分「背过题」和「上过线」的关键一句。**',
+                      '写完主动补一句:生产上我会直接用 `BlockingQueue` / `CompletableFuture`,因为现成实现处理了虚假唤醒、超时、关闭、监控。[[把「手写是为了讲原理」说出口,是成熟度的信号]]。',
                   },
                 ],
                 takeaway:
-                  '一句话收口：**并发手写题考的不是「能不能写出来」，而是「知不知道哪里会错、生产上该怎么避免」。** 原语选对 + `while` 判条件 + 边界齐全 + 承认「生产用现成的」，四条都做到，这一节就没有失分点。',
+                  '一句话收口:**先选原语并说清理由,再用 `while` 重检条件,再补四个边界,最后声明生产用现成的。** 这四步走完,代码哪怕有小瑕疵,评价也已经是「懂并发」而不是「背过题」。',
               },
-            ],
-            outline: [
-              '死锁四条件：互斥、持有并等待、不可剥夺、循环等待；最实用的是统一加锁顺序与 tryLock 超时',
-              '排查：jstack 会直接给出 deadlock 环；arthas 的 thread -b 最快；线程池饥饿没有环，需看线程数',
-              '线程安全七手段：不可变 / 无共享 → 互斥 → CAS → 并发容器；优先「消除竞争」而非「压制竞争」',
-              '单例首选枚举（防反射防序列化），次选静态内部类；DCL 必须 volatile，且只在必须传参时用',
-              '生产者消费者与交替打印：while 判条件、Condition 精确唤醒、交棒后别忘了叫醒对端',
-            ],
-            pitfalls: [
-              'DCL 单例忘写 volatile：可能发布半初始化对象，这是真实存在过的 bug',
-              '条件等待用 if：虚假唤醒或条件被改回去后会打出错误结果',
-              '手写交替打印收尾时直接 return 不交棒：另一个线程永久阻塞，程序挂死',
+              {
+                kind: 'concept',
+                title: '回头看:这一课的四个判断',
+                body: [
+                  '第一,死锁的四个条件是合取,破坏任一即可;能不能想到「统一加锁顺序」和「`tryLock` 超时」这两条,决定了你的答案是不是可落地的。',
+                  '第二,这四个条件描述的是任何需要排队的资源。把「线程」代进去就得到执行器饥饿,它比锁死锁更难查——因为线程状态全是正常等待,`jstack` 也认不出来。[[判断口诀是:同一个池里,线程等的东西是不是也需要这个池的线程]]。',
+                  '第三,保证线程安全的手段要按「消除 → 压制 → 绕过 → 封装」四层来讲,而不是罗列名词。绝大多数并发问题的根因是「本来可以不共享却共享了」。',
+                  '第四,手写题考的是把「谁等谁、等到什么时候、等不到怎么办」讲清楚。三句话能自述这一课:死锁是四个条件同时成立,破坏一个就够;排查要靠「谁占着资源、谁在等它」而不是只看线程状态;手写题的得分点在条件重检与边界,不在代码量。自测:如果让你在同一个池里提交任务并等结果,你会怎么改?把你的改法对照题库里「死锁的四个必要条件」「如何排查死锁」「保证线程安全的手段」「手写生产者消费者」「交替打印」这几道题的要点,看是否还漏了边界。',
+                ],
+                points: [
+                  '能复述:四条件 + 两种最实用的破坏手段 + 为什么只有必要条件',
+                  '能识别:线程池饥饿、连接池耗尽、自旋等待都不在 JVM 死锁检测范围内',
+                  '能落地:统一加锁顺序、`tryLock` 超时、任务隔离池、等待必带超时',
+                ],
+              },
             ],
           },
         },
@@ -3599,324 +3316,320 @@ export default {
           sources: [{ topic: 'java-03', chapters: ['CompletableFuture'] }],
           content: {
             intro:
-              '`CompletableFuture` 的价值在于把多个异步调用**编排成有依赖关系的流水线**，而不是「一个 Future 配一个 get」。要掌握的是三组方法的区别：`thenApply` 与 `thenCompose` 一个是「转换」一个是「扁平化」，`thenCombine` 做并行聚合，`exceptionally` 与 `handle` 决定异常如何被消费。还有一个线上很容易踩的坑：**默认线程池是 `ForkJoinPool.commonPool()`**，把阻塞的 IO 任务丢进去会拖垮整个 JVM 共享的那几个线程——这一节会把「为什么必须自定义线程池」讲清。',
+              '`CompletableFuture` 解决的不是「异步执行」,而是「把多个异步调用编排成有依赖关系的流水线」。真正的难点只有两个:第一,那一堆 `then*` 方法其实是三个维度的组合,认清维度就不用背 40 个方法;第二,它默认在一个全 JVM 共享的池里跑,而这个池只适合短小的计算任务——把它当通用线程池用,会以最难查的方式拖垮整台机器。',
+            outline: [
+              '老 `Future` 三缺(不能组合、只能阻塞取、没有异常出口),`CompletableFuture` 三补',
+              '`then*` 方法只有三个维度:要不要上游的值、有没有返回值、换不换线程',
+              '上游返回的是另一个异步计算时用 `thenCompose` 拍平,否则会变成两层嵌套',
+              '异常有三条出口:`exceptionally` 给兜底、`handle` 统一出口、`whenComplete` 只观察',
+              '默认线程池并行度是核数减一且全 JVM 共享,阻塞任务必须显式传自己的池',
+            ],
+            pitfalls: [
+              '用 `thenApply` 包一个返回 `CompletableFuture` 的方法,得到两层嵌套,`join()` 拿到的还是 future',
+              '`allOf` 之后忘了再取结果:它返回的是 `Void`,每个子任务的结果得自己 `join` 回来',
+              '在默认池里跑阻塞调用:占满那仅有的几个共享线程,连带第三方库的异步任务一起排队',
+            ],
             sections: [
               {
-                kind: 'concept',
-                title: 'Future 差在哪：为什么需要 CompletableFuture',
+                kind: 'why',
+                title: '压测时 CPU 只有 20%,吞吐却掉到十分之一',
                 body: [
-                  '`Future` 只有五个方法：`get()`、`get(timeout)`、`cancel()`、`isDone()`、`isCancelled()`。它表达的是「**一个还没算完的结果**」，但缺三样东西：**① 无法组合**——两个 Future 没法「都完成后一起处理」；**② 只能阻塞取结果**——`get()` 是阻塞的，`isDone()` 轮询又浪费 CPU；**③ 没有异常处理**——异常被包进 `ExecutionException`，只能 `get` 时才知道。',
-                  '`CompletableFuture` 补齐了这三样：**组合**（`thenApply` / `thenCombine` / `allOf`）、**回调**（完成时自动触发后续动作，不用阻塞等）、**异常处理**（`exceptionally` / `handle` / `whenComplete`）。它的本质是「**一个可以被手动完成、且支持链式注册回调的 Future**」。',
-                  '一个关键的设计细节：`CompletableFuture` 实现了 `Future` 与 `CompletionStage` 两个接口。`Future` 提供「取结果」的老语义，`CompletionStage` 提供「链式编排」的新语义。所以它向下兼容，可以在任何要 `Future` 的地方直接用。',
-                  '还有一个容易被忽略的事实：**`CompletableFuture` 的链式调用默认不是「新起线程」**。`thenApply` 里的函数会在「**完成上一个阶段的那个线程**」上执行（除非加 `Async` 后缀）。这一点决定了它的线程模型，也是很多「为什么我的回调阻塞了别的任务」问题的根源。',
+                  '一个新接口上线前压测,单机 QPS 从预估的 3000 掉到 300,而 CPU 使用率只有 20%,内存正常,GC 也正常。抓 thread dump 看,工作线程大多在等 socket 读,而池里排队任务数一直在涨。最反常的是:业务自己的线程池明明有 64 个线程、几乎全空闲,任务却排不进去——因为它们排的是另一个池。',
                 ],
-                term: {
-                  name: 'CompletionStage',
-                  def: 'JDK 8 引入的接口，描述「异步计算的一个阶段」以及「这个阶段完成后可以触发什么」。CompletableFuture 是它最重要的实现。链式方法（thenApply 等）都定义在这个接口上。',
+                code: {
+                  language: 'java',
+                  code:
+                    '// 三段下游调用,作者以为「用了异步就快了」\nCompletableFuture<Detail> f = CompletableFuture\n        .supplyAsync(() -> queryOrder(id))              // ← 没传池\n        .thenCompose(o -> CompletableFuture.supplyAsync(() -> queryStock(o)))   // ← 没传池\n        .thenCombine(\n            CompletableFuture.supplyAsync(() -> queryPrice(id)),                // ← 没传池\n            Detail::new);\n\nreturn f.join();\n\n// 现场\n// 机器 4 核 → ForkJoinPool.commonPool 并行度 = 3\n// 每个请求的 3 个下游调用都是阻塞 HTTP，平均 80ms\n// 60 个并发请求 → 180 个阻塞任务抢 3 个线程\n// dump：commonPool-worker-1..3 全部停在 SocketInputStream.read，队列里 170+ 任务\n// 业务线程池 biz-pool 的 64 个线程：0 个在用',
+                  caption:
+                    '注意最后两行:业务池空着,任务却排在 `ForkJoinPool.commonPool` 里。作者以为自己「用了异步」,实际上是换了一个更小、而且全 JVM 共用的池在排队。',
                 },
-                points: [
-                  '`Future` 三缺：不能组合、只能阻塞取、无异常处理',
-                  '`CompletableFuture` 三补：链式组合、完成回调、异常分支',
-                  '实现了 `Future` + `CompletionStage`，向下兼容',
-                  '链式默认**不新起线程**：在「完成上一阶段的线程」上执行（除非加 `Async`）',
+                wrong: [
+                  '猜法一:下游接口慢。但下游的 P99 一直是 85ms,和自己压测前的基线完全一致——慢的是排队,不是调用。',
+                  '猜法二:数据库或连接池打满。连接池活跃数只有 2,数据库侧没有任何压力。',
+                  '猜法三:业务线程池太小。业务池配了 64 个线程,压测期间它一个线程都没用上,瓶颈根本不在那里。',
                 ],
+                real:
+                  '真因是这些任务全部落进了默认池。`supplyAsync` 不传执行器时用的是 `ForkJoinPool.commonPool()`,它的并行度是[[核数减一]]——4 核机器上只有 3 个线程,而且这个池是整个 JVM 共享的。三个 80ms 的阻塞调用把 3 个线程占满之后,后面所有任务只能排队,不管业务侧开了多少线程都没用。',
+                reveal:
+                  '所以 `CompletableFuture` 的第一个知识点不是「怎么串联」,而是「任务在哪个池里跑」。串联只决定依赖关系与耗时,线程池才决定吞吐。剩下的问题是:那一堆 `then*` 方法到底怎么选,以及失败了从哪儿知道——这两件事构成了这一课的另外两条线。',
               },
               {
-                kind: 'question',
-                title: 'CompletableFuture 和 Future 的区别？',
-                questionId: 'java-03-Q71',
-                intent:
-                  '对比题。要按「能否组合 / 是否阻塞 / 异常处理」三条说，并点出「回调在哪个线程执行」这个进阶认知。',
-                points: [
-                  '**组合能力**：`Future` 不能组合两个结果；`CF` 有 `thenApply` / `thenCompose` / `thenCombine` / `allOf` / `anyOf`',
-                  '**取值方式**：`Future.get()` 只能阻塞（或轮询 `isDone`）；`CF` 可以注册回调（`thenAccept` 等），完成时自动触发',
-                  '**异常处理**：`Future` 的异常只能通过 `ExecutionException` 感知；`CF` 有 `exceptionally` / `handle` / `whenComplete` 三个明确入口',
-                  '**手动完成**：`CF` 有 `complete(v)` / `completeExceptionally(e)`，可以自己控制何时完成（`Future` 不行）',
-                  '**线程模型**：`CF` 的链式方法默认在「完成上一阶段的线程」上执行；加 `Async` 后缀才提交到线程池',
-                  '**可选的执行器**：`*Async(..., executor)` 可以指定线程池，`Future` 只能靠创建它的那个池',
+                kind: 'concept',
+                title: '老 Future 缺的三样,正好是新 API 的三条主线',
+                body: [
+                  '老的 `Future` 只有五个方法:取结果、带超时取结果、取消、是否完成、是否已取消。它能表达「一个还没算完的结果」,但缺三样东西。第一,不能组合:两个 `Future` 没法写成「都完成后一起处理」,只能自己阻塞两次。第二,只能阻塞取:要么 `get()` 卡住线程,要么轮询 `isDone()` 空转烧 CPU。第三,没有异常出口:异常被包进 `ExecutionException`,只有 `get()` 时才知道,而一旦你忘了 `get()`,异常就永远静默。',
+                  '`CompletableFuture` 正好补这三样:组合(`thenCompose`、`thenCombine`、`allOf`)、完成回调(完成时自动触发下一段,不用阻塞等)、异常分支(`exceptionally`、`handle`、`whenComplete`)。用一句话概括它的本质:一个可以被手动完成、并且支持链式注册回调的 `Future`。',
+                  '还有一个容易被忽略的设计细节:它同时实现了 `Future` 与 `CompletionStage` 两个接口。前者保留「取结果」的老语义,后者提供「链式编排」的新语义,所以它向下兼容——任何要 `Future` 的地方都能直接传进去。',
+                  '最后一个必须先建立的直觉:[[链式调用默认不新起线程]]。不带 `Async` 后缀的方法,会在「完成上一阶段的那个线程」上执行;上游如果早就完成了,就在调用方线程上直接跑。这条规则解释了后面所有「为什么我的回调阻塞了业务线程」的问题。',
                 ],
-                depth:
-                  '最容易被追问的一点：「`thenApply` 到底在哪个线程跑？」——如果上游 `CF` 已经被完成（`completedFuture`），它就在**调用 `thenApply` 的线程**上跑；如果上游是在线程池里异步完成的，它就在**那个池的线程**上跑；只有 `thenApplyAsync` 才会提交到线程池。**这个差别决定了「你的回调会不会阻塞业务线程」。**',
-                followup: '「`CF` 能替代 `Future` 吗」——功能上是超集，但要注意：① `CF` 的回调链会持有对象引用，长链可能内存占用更高；② `CF` 的异常处理更复杂（容易「静默吞掉」）；③ 老代码里 `Future` 的语义更简单明确。所以「新代码用 `CF`」是合理的，但不必为了用而用。',
+                points: [
+                  '老 `Future` 三缺:不能组合、只能阻塞取、没有异常出口',
+                  '`CompletableFuture` 三补:链式组合、完成回调、异常分支',
+                  '同时实现 `Future` 与 `CompletionStage`,老代码可直接替换',
+                  '不带 `Async` 就不换线程,在完成上一阶段的线程上执行',
+                ],
               },
               {
                 kind: 'diagram',
-                title: 'Future 与 CompletableFuture：能力对照',
+                title: '两代 API 的能力对照',
                 diagram: {
                   type: 'split',
                   left: {
                     title: 'Future（JDK 5）',
                     tone: 'warn',
                     items: [
-                      '只能 get() / get(timeout) 阻塞取',
-                      '无法组合两个结果',
-                      '异常包在 ExecutionException 里',
-                      '只能靠轮询 isDone() 判断',
+                      '取结果只有 get() / get(timeout)，都会阻塞',
+                      '两个结果无法组合，只能先后 get',
+                      '异常包在 ExecutionException 里，取时才暴露',
+                      '判断完成只能轮询 isDone()',
                       '不能手动完成',
-                      '没有回调机制',
+                      '没有任何回调机制',
                     ],
                   },
                   right: {
                     title: 'CompletableFuture（JDK 8）',
                     tone: 'good',
                     items: [
-                      'thenApply / thenAccept / thenRun 链式接续',
+                      'thenApply / thenAccept / thenRun 接续',
                       'thenCombine / allOf / anyOf 组合',
                       'exceptionally / handle / whenComplete',
-                      '完成时自动触发回调（无需轮询）',
+                      '完成时自动触发回调，无需轮询',
                       'complete() / completeExceptionally() 手动完成',
-                      'join() 不抛受检异常（get 抛）',
+                      'join() 不抛受检异常，适合 lambda 里用',
                     ],
                   },
                   caption:
-                    '一句话概括右边：**`CF` 把「等结果」变成了「登记回调」**。左边是「命令式 + 阻塞」，右边是「声明式 + 事件驱动」。这也是为什么 `CF` 的代码看起来像「流水线定义」，而不是「调用顺序」。',
+                    '一句话概括右边:它把「等结果」变成了「登记回调」。左边是命令式加阻塞,右边是声明式加事件驱动。这也是为什么用了它之后,代码看起来像在描述流水线,而不是在描述调用顺序。',
                 },
               },
               {
                 kind: 'concept',
-                title: '接续方法的分类：三个维度定清 20 多个方法',
+                title: '三个维度,把二十多个方法压缩成六个',
                 body: [
-                  '`CompletionStage` 有 40 多个方法，看着吓人，其实是三个维度的笛卡尔积：**「接什么」（有参/无参）、「返回什么」（有值/无值）、「在哪个线程」（同步/Async）**。理清这三个维度，就只需要记 6 个核心方法。',
-                  '**按「对结果做什么」分三类**：`thenApply`（`Function`，转换值）、`thenAccept`（`Consumer`，消费值但无返回）、`thenRun`（`Runnable`，不关心值只做动作）。这三者是「同一件事的三种返回形态」。',
-                  '**按「上游返回什么」分两类**：上游返回普通值时用 `thenApply`；上游返回 `CompletionStage` 时用 `thenCompose`（否则会得到嵌套的 `CF<CF<T>>`）。这就是「map vs flatMap」的区别，和 `Optional`、`Stream` 完全一致。',
-                  '**按「是否换线程」分两种**：不带 `Async` 的在「完成上一阶段的线程」上跑；带 `Async` 的提交到线程池（无参版本用 `commonPool`，带 `executor` 参数的用指定池）。**这个选择直接影响「会不会阻塞关键线程」，必须显式决定而不是默认。**',
+                  '`CompletionStage` 有四十多个方法,吓人,但它们是三个维度的组合,认清维度就只剩六个要记。维度一:要不要上游的值。要值就用 `thenApply`(函数式转换)或 `thenAccept`(消费掉、不返回),不要值就用 `thenRun`(只做个动作)。维度二:有没有返回值。这三者正好覆盖「有值进有值出」「有值进无值出」「无值进无值出」。',
+                  '维度二是「上游返回什么」。如果上游返回普通值,用前三个;如果上游返回的本身就是另一个异步计算,必须用 `thenCompose`,否则你会得到一个套了两层的 future。[[这和 `Stream` 里 map 与 flatMap 的区别是同一个问题]],只是包的类型不同。',
+                  '维度三是「换不换线程」。不带 `Async` 的方法在完成上一阶段的线程上跑,带 `Async` 的提交到线程池——无参版本用的是那个共享的默认池,带执行器参数的才用你指定的池。这个选择直接决定「会不会占满共享线程」,必须显式做,不能靠默认。',
+                  '还有一个单独记的:`thenCombine` 不是上面三类中的任何一类,它是「两个独立 future 的合流」。它要求两个 future 都已经发起,然后等两者都完成时把结果合成一个。[[串行依赖用 `thenCompose`,并行聚合用 `thenCombine`]]——选错这一处,耗时就会从「取最大」变成「相加」。',
                 ],
                 term: {
-                  name: 'thenApply vs thenCompose',
-                  def: 'thenApply 接收 Function<T,R>，把 T 变成 R；若你的映射函数本身返回 CompletionStage<R>，用 thenApply 会得到 CompletableFuture<CompletableFuture<R>>。thenCompose 接收 Function<T, CompletionStage<R>>，会把结果拍平，等价于 Stream 的 flatMap。',
+                  name: 'CompletionStage（阶段）',
+                  def: '描述「异步计算的一个阶段」以及「这个阶段完成后可以触发什么」的接口。所有 then* 方法都定义在它上面,CompletableFuture 是最常用的实现。理解成「流水线的一段」比理解成「一个类」更有用。',
                 },
                 points: [
-                  '`thenApply`（有返回值）/ `thenAccept`（无返回值）/ `thenRun`（不接收值）',
-                  '上游返回 `CF` 时用 `thenCompose` 拍平，否则会嵌套两层',
-                  '`thenCombine` 合并两个**独立** `CF` 的结果；`allOf` 等全部；`anyOf` 取第一个',
-                  '`Async` 后缀决定是否换线程；不加以「完成上一阶段的线程」为准',
+                  '要值用 `thenApply` / `thenAccept`,不要值用 `thenRun` —— 很多人误以为 `thenRun` 能拿到上游结果',
+                  '上游返回 future 时必须 `thenCompose` 拍平,否则是两层嵌套',
+                  '`Async` 后缀只管「换不换线程」,和「拍不拍平」是两个正交的维度',
+                  '`thenCombine` 要求两个 future 都已发起,顺序写反就退化成串行',
                 ],
               },
               {
                 kind: 'diagram',
-                title: 'then* 方法全景：只要记六个',
+                title: '六个核心方法:一张表定清',
                 diagram: {
                   type: 'matrix',
                   cols: ['需要上游的值吗', '有返回值吗', '典型用途'],
                   rows: [
-                    ['`thenApply(fn)`', '**要**（`Function`）', '**有**（`R`）', '转换：`User -> UserDTO`'],
-                    ['`thenAccept(consumer)`', '**要**（`Consumer`）', '无（`Void`）', '消费：写库、打日志'],
+                    ['`thenApply(fn)`', '要（`Function`）', '有（`R`）', '转换：`User` 转 `UserDTO`'],
+                    ['`thenAccept(consumer)`', '要（`Consumer`）', '无（`Void`）', '消费：写库、打日志'],
                     ['`thenRun(action)`', '不要（`Runnable`）', '无（`Void`）', '收尾：通知、计数'],
-                    ['`thenCompose(fn)`', '**要**（`Function<T, CompletionStage<R>>`）', '**有**（`R`，已拍平）', '串行依赖：拿 A 的 id 再查 B'],
-                    ['`thenCombine(other, fn)`', '要两个 `CF`', '**有**', '并行聚合：两个独立接口的结果合并'],
+                    ['`thenCompose(fn)`', '要，且返回值是 future', '有（`R`，已拍平）', '串行依赖：拿 A 的 id 再查 B'],
+                    ['`thenCombine(other, fn)`', '要两个 future', '有', '并行聚合：两个独立接口合并'],
                     ['`allOf` / `anyOf`', '要（多个）', '`Void` / 第一个完成者', '批量等待 / 竞速'],
                   ],
                   caption:
-                    '这张表最该记的是第三行与第四行：**`thenRun` 拿不到上游结果**（很多人误以为能拿到），**`thenCompose` 是为了拍平嵌套**（不是「异步版的 thenApply」）。加上 `Async` 后缀就是「换线程」版本，方法名与参数完全一样。',
-                  note: '助记：`Apply` = 返回值；`Accept` = 消费值无返回；`Run` = 既不给值也不返回；`Compose` = 拍平；`Combine` = 合并。',
+                    '这张表最该记的是第三行与第四行:`thenRun` 拿不到上游结果,`thenCompose` 是为了拍平而不是「异步版的 `thenApply`」。所有方法加 `Async` 后缀就是换线程版本,名字与参数完全不变。',
+                  note: '助记:Apply 有返回、Accept 消费无返回、Run 既不给值也不返回、Compose 拍平、Combine 合并。',
                 },
               },
               {
+                kind: 'code',
+                title: '一个例子看清嵌套、拍平与串并行的耗时差',
+                lang: 'java',
+                version: 'JDK 8+',
+                code:
+                  '// 场景：先查订单，再用订单号查物流\nCompletableFuture<Order> orderF = CompletableFuture.supplyAsync(() -> queryOrder(1L), pool);\n\n// ✗ 错：thenApply 的函数返回 future → 得到 CF<CF<Logistics>>\nCompletableFuture<CompletableFuture<Logistics>> nested =\n        orderF.thenApply(order -> queryLogisticsAsync(order.getNo()));\n// 嵌套的后果：要 join 两次，而且内层可能还没开始\n\n// ✓ 对：thenCompose 拍平 → CF<Logistics>\nCompletableFuture<Logistics> flat =\n        orderF.thenCompose(order -> queryLogisticsAsync(order.getNo()));\n\n// ✓ 并行聚合：两个互不依赖的调用，都先发起再合并\nCompletableFuture<Price> priceF = CompletableFuture.supplyAsync(() -> queryPrice(1L), pool);\nCompletableFuture<Stock> stockF = CompletableFuture.supplyAsync(() -> queryStock(1L), pool);\nCompletableFuture<Detail> detailF = priceF.thenCombine(stockF, Detail::new);\n\n// 耗时对照（每个下游 40ms）\n// 串行：orderF.thenCompose(...).thenCompose(...)    → 120ms\n// 并行：allOf(orderF, priceF, stockF)               → 40ms 左右\n\n// ◆ 最有用的形态：外层串行、内层并行\nCompletableFuture<Detail> chain = orderF.thenCompose(order -> {\n    CompletableFuture<Price> p = CompletableFuture.supplyAsync(() -> queryPrice(order), pool);\n    CompletableFuture<Stock> s = CompletableFuture.supplyAsync(() -> queryStock(order), pool);\n    return p.thenCombine(s, (price, stock) -> new Detail(order, price, stock));\n});\n// 总耗时 ≈ 查订单 + max(查价格, 查库存)',
+                caption:
+                  '最后那段「串行里嵌并行」是这套 API 最有价值的形态:外层有依赖用 `thenCompose`,内层无依赖用 `thenCombine`。这样总耗时是「加法里嵌一个取最大」,而不是三层回调,也不是全串行。',
+                notes: [
+                  { line: 'orderF.thenApply(order -> queryLogisticsAsync(...))', text: '`queryLogisticsAsync` 返回 future,但 `thenApply` 把它当普通值,结果就是两层嵌套。' },
+                  { line: 'orderF.thenCompose(order -> queryLogisticsAsync(...))', text: '`thenCompose` 认得「返回的是另一个异步计算」,自动拍平。语义等同于 flatMap。' },
+                  { line: 'p.thenCombine(s, Detail::new)', text: '前提是两个 future 都已经发起。先起两个再合并才是并行,写成链式就先串行了。' },
+                ],
+              },
+              {
                 kind: 'question',
-                title: 'thenApply 和 thenCompose 的区别？',
+                title: 'thenApply 和 thenCompose 的区别?',
                 questionId: 'java-03-Q72',
                 intent:
-                  '必须说清「嵌套」这个后果。最佳回答方式是举一个「查订单 → 用订单号查物流」的例子，对比两种写法的返回类型。',
+                  '必须把「嵌套」这个后果说清,而不是只背一句「一个是 map 一个是 flatMap」。最好的答法是拿一个真实依赖举例,并对比返回类型。',
                 points: [
-                  '`thenApply(Function<T, R>)`：把结果 `T` 映射成 `R`；若 `fn` 返回 `CF<R>`，你得到的是 **`CF<CF<R>>`**（双层嵌套）',
-                  '`thenCompose(Function<T, CompletionStage<R>>)`：把结果 `T` 映射成 `CF<R>` 并**拍平**，得到 `CF<R>`',
-                  '类比：`thenApply` = `Stream.map`，`thenCompose` = `Stream.flatMap`；也等价于 `Optional.map` vs `flatMap`',
-                  '判据：**你的函数返回「普通值」还是「另一个异步计算」**——前者用 `Apply`，后者用 `Compose`',
-                  '`thenCompose` 是**串行依赖**：第二个调用需要第一个的结果（查订单 → 拿订单号查物流）',
-                  '`thenCombine` 是**并行聚合**：两个调用互不依赖，各自发起后合并结果',
+                  '`thenApply` 接收一个普通转换函数,把值变成另一个值;函数返回 future 时,它照样当普通值处理,于是得到两层嵌套',
+                  '`thenCompose` 接收的函数本身返回 future,它负责拍平,结果仍然是单层',
+                  '类比:`thenApply` 对应 `Stream.map`,`thenCompose` 对应 `Stream.flatMap`;和 `Optional` 里的同名方法也是同一回事',
+                  '判据只有一条:你的函数返回的是「普通值」还是「另一个异步计算」',
+                  '嵌套的危害不只是多写一次 `join`,而是破坏了「一次 `join` 就能等到最终结果」的语义',
                 ],
                 depth:
-                  '「嵌套了会怎样」——`CF<CF<R>>` 的 `join()` 返回的是内层 `CF`，你还得再 `join()` 一次，而且**内层的异步计算在外层 `join` 时可能还没开始**（如果它是 `supplyAsync`）。也就是说嵌套不只是「多写一次 `join`」，而是**破坏了「join 能等到最终结果」的语义**。这是必须用 `thenCompose` 的根本原因。',
-                followup: '「`thenApplyAsync` 和 `thenCompose` 哪个是异步的」——两者都可能是异步的，取决于你是否加 `Async` 后缀。`Async` 管的是「在哪个线程执行」，`Compose` 管的是「返回类型是否拍平」，**两个维度正交**，不要混。',
+                  '为什么嵌套会「破坏语义」:外层 future 完成时,只是「内层 future 被创建出来了」,内层真正开始跑、什么时候结束,外层一点都不关心。所以 `nested.join()` 拿到的还是一个 future,而且这个内层任务可能根本还没被调度。[[把 join 当成「等最终结果」的人,在嵌套这一处会静默地拿到错误结论]]——这也是为什么 `thenCompose` 不是风格问题而是正确性问题。',
+                followup:
+                  '常见追问:「那 `thenApplyAsync` 和 `thenCompose` 是不是都是异步的?」两者都可能异步,取决于有没有加 `Async` 后缀。`Async` 管的是在哪个线程执行,`Compose` 管的是返回类型要不要拍平,两个维度完全正交。把它们混在一起记,是这一题最常见的失分点。',
               },
               {
-                kind: 'code',
-                title: '一个例子看清嵌套与拍平',
-                lang: 'java',
-                code:
-                  '// 场景：先查订单，再用订单号查物流\nCompletableFuture<Order> orderF = CompletableFuture.supplyAsync(() -> queryOrder(1L), pool);\n\n// ✗ 错：thenApply 返回 CF → 得到 CF<CF<Logistics>>\nCompletableFuture<CompletableFuture<Logistics>> nested =\n        orderF.thenApply(order -> queryLogisticsAsync(order.getNo()));\n\n// 嵌套的后果：要 join 两次，且内层可能还没开始\n// Logistics l = nested.join().join();\n\n// ✓ 对：thenCompose 拍平 → CF<Logistics>\nCompletableFuture<Logistics> flat =\n        orderF.thenCompose(order -> queryLogisticsAsync(order.getNo()));\n// Logistics l = flat.join();\n\n// ✓ 并行聚合：两个互不依赖的调用\nCompletableFuture<Price> priceF = CompletableFuture.supplyAsync(() -> queryPrice(1L), pool);\nCompletableFuture<Stock> stockF = CompletableFuture.supplyAsync(() -> queryStock(1L), pool);\n\nCompletableFuture<Detail> detailF =\n        priceF.thenCombine(stockF, (price, stock) -> new Detail(price, stock));\n// 注意：这里两个查询是「同时发起」的，总耗时 ≈ max(两者)，而不是相加\n\n// ✓ 串行 vs 并行的耗时差异\n// 串行：orderF.thenCompose(o -> logisticsF(o)).thenCompose(l -> priceF(l))\n//       总耗时 = 三者之和\n// 并行：allOf(orderF, priceF, stockF) 后再合并\n//       总耗时 = 三者最大值\n\n// ◆ 完整链条：查订单 → 并行查价格与库存 → 组装\nCompletableFuture<Detail> chain =\n        CompletableFuture.supplyAsync(() -> queryOrder(1L), pool)\n            .thenCompose(order -> {\n                CompletableFuture<Price> p = CompletableFuture.supplyAsync(() -> queryPrice(order), pool);\n                CompletableFuture<Stock> s = CompletableFuture.supplyAsync(() -> queryStock(order), pool);\n                return p.thenCombine(s, (price, stock) -> new Detail(order, price, stock));\n            });',
-                caption:
-                  '最后那段「串行里嵌套并行」的写法是 `CF` 最有价值的地方：**外层串行依赖用 `thenCompose`，内层并行用 `thenCombine`**。这样总耗时 ≈ `查订单 + max(查价格, 查库存)`，而不用写成三层回调。',
-                notes: [
-                  { line: 'orderF.thenApply(order -> queryLogisticsAsync(...))', text: '`queryLogisticsAsync` 返回 `CF<Logistics>`，所以 `thenApply` 把它当普通值，结果就是嵌套的 `CF<CF<...>>`。' },
-                  { line: 'orderF.thenCompose(order -> queryLogisticsAsync(...))', text: '`thenCompose` 认得「返回的是 `CompletionStage`」，自动拍平。这就是 `flatMap` 的语义。' },
-                  { line: 'p.thenCombine(s, (price, stock) -> ...)', text: '`thenCombine` 要求两个 `CF` 都已发起。**顺序很重要**：先 `supplyAsync` 起两个，再 `thenCombine`，才是并行。' },
+                kind: 'concept',
+                title: '异常的三条出口:能改结果的、能吞异常的、只能看的',
+                body: [
+                  '三条出口的差别可以精确到两列:什么时机会执行、能不能改变最终结果。`exceptionally` 只在异常时执行,返回一个兜底值,异常就被替换成了正常结果。`handle` 无论成功失败都执行,既能拿到正常值也能拿到异常,返回什么就是最终结果。`whenComplete` 也是无论成败都执行,但它返回的是原结果,既改不了值也吞不掉异常——它只是个观察者。',
+                  '最容易记错的恰恰是 `whenComplete`:很多人以为在里面处理了异常就没事了,结果异常照样从 `join` 抛出来。[[它只能打日志、埋点,不能做兜底]]。反过来,`exceptionally` 在成功时根本不执行,所以也不能拿它来埋点。',
+                  '取值的两个方法也有差别:`join` 抛的是非受检的 `CompletionException`,`get` 抛的是受检的 `ExecutionException`,原始异常都挂在 `getCause()` 上。这个差别在 lambda 里很实际——`get` 声明了受检异常,写进函数式接口就得额外包一层。',
+                  '真正危险的不是这三个方法怎么选,而是「根本不选」:如果一个 future 从来不被 `join`,也从来没挂过兜底,那么它失败的时候[[不会有任何日志]],线程池安静地把异常丢掉。这是线上「任务明明失败了,监控上却一片正常」的典型来源。',
                 ],
-              },
-              {
-                kind: 'question',
-                title: 'CompletableFuture 的异常处理：exceptionally、handle、whenComplete 有什么区别？',
-                questionId: 'java-03-Q73',
-                intent:
-                  '三个方法的差异要精确：能改结果吗？能改异常吗？什么情况下执行？这一题答模糊就等于没答。',
                 points: [
-                  '`exceptionally(Function<Throwable, T>)`：**只在异常时执行**，返回一个兜底值 `T`，异常被「吞掉」；正常时直接透传结果',
-                  '`handle(BiFunction<T, Throwable, R>)`：**无论成功失败都执行**，可以同时看到结果和异常，返回新值 `R`（可改结果，也可吞异常）',
-                  '`whenComplete(BiConsumer<T, Throwable>)`：**无论成败都执行**，但**不能改结果也不能吞异常**，只能观察（打日志、埋点）',
-                  '`whenComplete` 想让异常继续传播就什么都不做；想吞掉需在 `handle` / `exceptionally` 里处理',
-                  '`join()` 抛 `CompletionException`（非受检），`get()` 抛 `ExecutionException`（受检）；原始异常都在 `getCause()`',
-                  '如果异常一直没被处理，最终会在 `join`/`get` 时暴露——但**如果你从不 `join`，它就永远静默**（线上事故常见来源）',
+                  '只要兜底值就用 `exceptionally`;要成功失败统一出口就用 `handle`;只想打日志就用 `whenComplete`',
+                  '`handle` 里别忘了判异常是否为空,这是它最容易写错的地方',
+                  '`whenComplete` 里抛出的异常会替换掉原始异常,所以里面要自己包 try/catch',
+                  '每个链尾要么 `join`,要么挂兜底;两者都没有,失败就是静默的',
                 ],
-                depth:
-                  '「三个方法的选择口诀」——**只想记日志 → `whenComplete`**（不改语义）；**要降级返回兜底值 → `exceptionally`**（最常用）；**要「成功失败统一出口」→ `handle`**（比如统一包装成 `Result<T>`）。`handle` 是唯一能「既处理异常又拿到正常值」的，也正因如此它最容易写错（忘了 `t != null` 判断）。',
-                followup: '「`whenComplete` 里抛异常会怎样」——它会**替换**原来的异常（如果原来没异常，则是新异常）。这是很隐蔽的坑：日志代码里如果 `e.getMessage()` 触发 NPE，会把原始异常吞掉换成 NPE。所以 `whenComplete` 里要 `try/catch` 包住。',
               },
               {
                 kind: 'diagram',
-                title: '三个异常方法：谁能改结果、谁能吞异常',
+                title: '三条出口:谁在什么时候执行,谁能改结局',
                 diagram: {
                   type: 'matrix',
                   cols: ['何时执行', '能改结果吗', '能吞异常吗'],
                   rows: [
-                    ['`exceptionally`', '**仅异常时**', '能（返回兜底值 `T`）', '**能**（异常被替换成正常结果）'],
-                    ['`handle`', '**总是**（成功也执行）', '**能**（返回 `R`）', '**能**（返回正常值即吞掉）'],
-                    ['`whenComplete`', '**总是**', '**不能**（返回原结果）', '**不能**（原异常继续传播）'],
-                    ['`join` / `get`', '取值时', '不能', '不能（此处才暴露异常）'],
+                    ['`exceptionally`', '仅异常时', '能（返回兜底值）', '能（异常被替换成正常结果）'],
+                    ['`handle`', '总是（成功也执行）', '能（返回新值）', '能（返回正常值即吞掉）'],
+                    ['`whenComplete`', '总是', '不能（返回原结果）', '不能（原异常继续传播）'],
+                    ['`join` / `get`', '取值那一刻', '不能', '不能（异常在此处才暴露）'],
                   ],
                   caption:
-                    '记住 `whenComplete` 那一行两个「不能」——**它是纯观察者**。很多人以为 `whenComplete` 能处理异常，结果异常照样从 `join` 抛出来。另外注意 `exceptionally` 在成功时**完全不执行**，所以它不能用于埋点。',
-                  note: '补充：`exceptionally` 只接收 `Throwable`，看不到正常结果；`handle` 两个都接收。若你的逻辑需要「成功和失败都走同一段代码」，只有 `handle` 能做到。',
+                    '盯着第三行那两列「不能」看:`whenComplete` 是纯观察者。再对照第一行的「仅异常时」:`exceptionally` 不能用来埋点,因为它成功时不执行。两条限制记住,这三个方法就不会用混。',
+                  note: '补充:`exceptionally` 只接收异常,看不到正常结果;`handle` 两个都接收。所以只有它能写「成功和失败走同一段代码」的逻辑,比如统一包装成 Result。',
                 },
               },
               {
-                kind: 'question',
-                title: '为什么 CompletableFuture 要自定义线程池？allOf 怎么用？',
-                questionId: 'java-03-Q74',
-                intent:
-                  '两个重点：`commonPool` 的坑（阻塞任务拖垮全 JVM），以及 `allOf` 的「结果收集」与「异常只抛一个」两个陷阱。',
-                points: [
-                  '默认 `supplyAsync` / `thenApplyAsync` 用 `ForkJoinPool.commonPool()`，**并行度 = CPU 核数 - 1**，且**全 JVM 共享**',
-                  '`commonPool` 的线程是**非守护**的、为「短小 CPU 密集任务」设计；塞进阻塞 IO 会占满所有线程 → 影响**所有**未指定池的 `CF`（包括第三方库）',
-                  '所以：**IO 密集或阻塞任务必须传自定义线程池**（`supplyAsync(supplier, myPool)`）',
-                  '`allOf(cfs...)` 返回 `CF<Void>`，**拿不到各个结果**——必须自己从原 `cf` 里 `join()` 收集',
-                  '`allOf` 的异常：任一失败则整体失败，但 `join` 时**只抛出其中一个**异常；要看全部需逐个 `handle` 收集',
-                  '`allOf` 是「全部完成」，`anyOf` 是「任一完成」（返回第一个完成的结果，其余仍在跑）',
-                  '`allOf` 不负责超时，要超时得在整体上加 `orTimeout`（JDK 9+）或自己用 `ScheduledExecutorService`',
+                kind: 'concept',
+                title: '批量等待:allOf 的两个坑与一个标准套路',
+                body: [
+                  '`allOf` 用起来简单,但它有两个坑,而且坑都在返回值上。第一个坑:它返回的是「无值」的 future,所有子任务的结果拿不到,必须自己在回调里逐个取一遍。正确写法是先 `allOf` 等全部完成,再在它的回调里遍历原集合逐个 `join`——此时全部已完成,`join` 不会阻塞。',
+                  '第二个坑:任一子任务失败,整体就失败,而 `join` 只会抛出其中一个异常,其余失败你看不到。更麻烦的是「一部分成功、一部分失败」这种真实场景,`allOf` 的处理方式是整体失败,直接把你已经拿到的部分结果也扔掉了。',
+                  '标准套路是提前把「可能失败」变成「一定成功」:每个子任务后面挂一个 `handle`,把异常转成一个表示失败的结果对象,再交给 `allOf`。这样 `allOf` 看到的是全部成功,你拿到的是一个「成功和失败混在一起的列表」,谁失败了一目了然。[[这一步的本质是把「异常」降格成「数据」]]——只要失败变成了一个普通返回值,后面的编排就再也不会被它打断。这是批量查详情、个别失败不该让整页报错时的标准做法。',
+                  '还有两件必须知道的事。一是 `allOf` 不管超时,要超时得在整体上加 `orTimeout`(JDK 9 起),或者自己起一个定时任务去取消;二是 `orTimeout` 只是让整体快速失败,[[并不会中断还在跑的子任务]]——那些任务继续占着线程直到自己结束,这才是「超时了但资源还在漏」的真正原因。',
                 ],
-                depth:
-                  '`commonPool` 到底有多危险：它的并行度只有 `核数 - 1`（4 核机器就是 3）。如果某个框架用 `commonPool` 跑了 3 个阻塞 10 秒的任务，**这 10 秒内全 JVM 所有用 `commonPool` 的 `CF` 全部排队**。而且它无法通过 JVM 参数有效隔离（`-Djava.util.concurrent.ForkJoinPool.common.parallelism` 只是调大小，仍是共享的）。**结论：任何可能阻塞的异步任务，都必须显式传池。**',
-                followup: '「`allOf` 里某个任务超时了怎么办」——`allOf` 本身没有超时机制，所以常见的做法是：① 每个子任务自己加 `.orTimeout(t, unit)`；② 整体加 `.orTimeout`（但它只是让**整体**失败，子任务仍在跑，可能泄漏）；③ 用 `ScheduledExecutorService` 在超时后 `cancel` 各个 `CF`（注意 `CF.cancel` 不一定能中断底层任务）。**这一点要能说清，因为它涉及「超时了但任务还在跑」的资源泄漏。**',
-              },
-              {
-                kind: 'code',
-                title: 'allOf 的两个坑：结果要自己收，异常只抛一个',
-                lang: 'java',
-                code:
-                  '// ✗ 坑一：allOf 返回 CF<Void>，拿不到结果\nCompletableFuture<Void> all = CompletableFuture.allOf(f1, f2, f3);\nall.join();\n// f1.join(); f2.join(); f3.join();   ← 必须自己再取一次\n\n// ✓ 正确写法：先 allOf 等全部，再逐个 join（此时 join 不会阻塞）\nList<CompletableFuture<User>> futures = ids.stream()\n        .map(id -> CompletableFuture.supplyAsync(() -> load(id), bizPool))\n        .toList();\n\nCompletableFuture<Void> all = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));\nList<User> users = all.thenApply(v ->\n        futures.stream().map(CompletableFuture::join).toList())   // 已完成，join 不阻塞\n    .join();\n\n// ✗ 坑二：一个失败只抛一个异常，其他失败看不到\n// 若 f1 抛 A、f2 抛 B，all.join() 只会抛其中一个\n\n// ✓ 收集全部异常与结果（不因单个失败中断）\nList<CompletableFuture<Result<User>>> wrapped = ids.stream()\n        .map(id -> CompletableFuture.supplyAsync(() -> load(id), bizPool)\n                .handle((u, e) -> e == null ? Result.ok(u) : Result.fail(id, e)))\n        .toList();\n\nList<Result<User>> results = CompletableFuture\n        .allOf(wrapped.toArray(new CompletableFuture[0]))\n        .thenApply(v -> wrapped.stream().map(CompletableFuture::join).toList())\n        .orTimeout(3, TimeUnit.SECONDS)      // 整体超时（JDK 9+）\n        .exceptionally(e -> List.of(Result.fail(-1L, e)))\n        .join();\n\n// 结果：每个 id 都有 ok 或 fail，一个失败不影响其他的\nlong okCount = results.stream().filter(Result::isOk).count();\n\n// ◆ 关键：自定义线程池（绝不能用 commonPool 跑 IO）\nExecutorService bizPool = new ThreadPoolExecutor(\n        8, 32, 60L, TimeUnit.SECONDS,\n        new ArrayBlockingQueue<>(500),\n        r -> { Thread t = new Thread(r, "cf-" + N.incrementAndGet()); return t; },\n        new ThreadPoolExecutor.CallerRunsPolicy());',
-                caption:
-                  '第二段的 `handle` 包装是关键技巧：**把「可能失败的任务」变成「一定成功的 Result」**，这样 `allOf` 就永远不会因单个失败而整体失败，你能拿到「成功的部分结果」。这在「批量查详情，个别失败不该让整页报错」的场景里是标准做法。',
-                notes: [
-                  { line: 'all.thenApply(v -> futures.stream().map(CompletableFuture::join).toList())', text: '在 `allOf` 的回调里 `join` 不会阻塞（全部已完成）。这是「收集结果」的标准写法。' },
-                  { line: '.handle((u, e) -> e == null ? Result.ok(u) : Result.fail(id, e))', text: '把异常转成数据。这样后面的 `allOf` 看到的是「全部成功」，你需要自己检查 `Result` 的成败。' },
-                  { line: '.orTimeout(3, TimeUnit.SECONDS)', text: 'JDK 9+ 才有。注意它只让整体以 `TimeoutException` 完成，**不会中断**子任务——子任务仍在池里跑，可能造成资源浪费。' },
+                points: [
+                  '`allOf` 拿不到结果:必须自己遍历原集合 `join`,再放进容器',
+                  '`allOf` 的异常只暴露一个:要拿到全部失败,就得自己用 `handle` 收集',
+                  '整体超时用 `orTimeout`,但它不中断子任务,子任务自己的超时必须另外配',
+                  '批量场景的降级套路:每个子任务先 `handle` 成结果对象,再 `allOf`',
                 ],
               },
               {
                 kind: 'analogy',
-                title: 'CompletableFuture 像流水线，thenApply 是工位、thenCompose 是换线',
+                title: '像一条装配流水线,工位、换线与合装',
                 text:
-                  '把一条**装配流水线**想成 `CF` 链：每个工位（`thenApply`）接收上游来的零件，加工一下再传给下一个工位。但有些零件需要**送去另一条专门的产线**（另一个异步调用），加工完再送回来——如果你把它直接塞给当前工位，你会得到一个「贴着别的产线标签的箱子」（`CF<CF<T>>`），得再拆一层（`thenCompose` 就是「送去并等它回来」的规范动作）。**`thenCombine` 则是「两条产线并行跑，最后在同一个工位合装」。**',
+                  '把一条装配流水线想成 future 链:每个工位接收上游送来的零件,加工一下再传给下一个,这就是 `thenApply`。有的工位只做质检盖章、不产出新零件,这是 `thenAccept`;有的工位连零件都不碰、只负责清场关灯,这是 `thenRun`。有些零件必须送去另一条专门产线加工再送回来——如果直接把它塞给当前工位,你得到的是「贴着别的产线标签的箱子」,还得多拆一层;把「送去并等它回来」做规范,就是 `thenCompose`。至于两条产线同时开跑、最后在同一个工位合装,那是 `thenCombine`。',
                 mapping: [
-                  { real: '整条流水线', tech: '`CompletableFuture` 链' },
+                  { real: '整条流水线', tech: 'future 链' },
                   { real: '一个加工工位', tech: '`thenApply`（转换值）' },
-                  { real: '只贴标签不出货的工位', tech: '`thenAccept`（消费无返回）' },
+                  { real: '只盖章不出货的工位', tech: '`thenAccept`（消费、不返回）' },
                   { real: '不碰零件只做清场的动作', tech: '`thenRun`（不接收值）' },
                   { real: '送去另一条产线加工再送回来', tech: '`thenCompose`（拍平嵌套）' },
                   { real: '两条产线并行，最后合装', tech: '`thenCombine`（并行聚合）' },
                   { real: '所有产线都停工才下班', tech: '`allOf`' },
                   { real: '哪条先出货就先发哪条', tech: '`anyOf`' },
-                  { real: '质检不合格就贴「返工」标签', tech: '`exceptionally` / `handle`' },
+                  { real: '质检不合格就贴返工标签', tech: '`exceptionally` / `handle`' },
                 ],
                 limit:
-                  '类比到「线程」就不成立了：现实中的工位是**固定的人**在干活，而 `CF` 的接续方法默认**不指定谁干**——它在「完成上一阶段的那个线程」上执行。这意味着「同一个流水线」的不同工位可能由不同线程执行，甚至可能是「提交任务的那个业务线程」。要指定工位（线程池），必须显式用 `thenApplyAsync(..., pool)`。**这个差别正是线上「回调阻塞了业务线程」问题的根源。**',
+                  '类比到「谁在干活」就不成立了:现实里的工位是固定的人在操作,而这里的方法默认不指定人——它在「完成上一阶段的那个线程」上执行。也就是说同一条流水线的不同工位可能由不同线程来做,甚至可能是提交任务的那个业务线程顺手做掉。要指定工位,必须显式用带执行器的 `Async` 版本。这个差别正是「回调阻塞了业务线程」这类事故的根源。',
               },
               {
                 kind: 'handwrite',
-                title: '手写：三个接口并行 + 汇总 + 超时降级',
+                title: '手写:三个接口并行 + 汇总 + 超时降级',
                 lang: 'java',
                 prompt:
-                  '面试官：「有三个互不依赖的下游接口，要求并行调用、总耗时不超过 3 秒、任何一个失败都不能让整页报错（用兜底值），最后汇总返回。用 `CompletableFuture` 写。」这题考的是「`allOf` + `handle` + `orTimeout` + 自定义线程池」四件套的实战组合。',
+                  '面试官:「有三个互不依赖的下游接口,要求并行调用、总耗时不超过 3 秒、任何一个失败都不能让整页报错,失败的就用兜底值,最后汇总返回。」这道题考的是四件套的组合:并行发起、各自兜底、统一等齐、整体超时。',
                 signature:
                   'class Aggregator {\n    Aggregator(ExecutorService bizPool);\n    PageData aggregate(long userId);\n}',
                 plan: [
                   {
-                    title: '第一步：三个任务各自「包装成一定成功」',
+                    title: '① 三个任务并行发起,并且都传自己的池',
                     detail:
-                      '每个下游调用都用 `.handle((v, e) -> e == null ? v : fallback())` 包一层。这样单个失败会被转成兜底值，`allOf` 永远不会因一个失败而整体失败——这是「部分成功也要返回」的关键。',
+                      '三个 `supplyAsync` 一起写,每个都传 `bizPool`。这一步决定「并行」与「能不能撑住吞吐」——不传池就落到共享池,阻塞调用会占满那几个线程,后面所有异步任务一起排队。',
                   },
                   {
-                    title: '第二步：`allOf` 等全部，再逐个 `join` 收集',
+                    title: '② 每个任务各自包一层 `handle`,把失败转成兜底值',
                     detail:
-                      '`allOf` 返回 `CF<Void>` 拿不到结果，必须在它的回调里 `futures.stream().map(CF::join)` 收集。此时全部已完成，`join` 不会阻塞。',
+                      '这样单个下游失败只会得到一个空对象,不会让整体失败。这是「部分可用也要返回」的关键,也是 `allOf` 唯一好用的用法:让 `allOf` 永远看到全部成功。',
                   },
                   {
-                    title: '第三步：整体超时 + 最终兜底',
+                    title: '③ `allOf` 等齐,再在回调里逐个 `join` 收集',
                     detail:
-                      '整体加 `.orTimeout(3, SECONDS).exceptionally(e -> 全兜底 PageData)`。注意 `orTimeout` 只让整体快速失败，**不会中断**还在跑的子任务——所以子任务本身也要有超时（或依赖下游客户端的超时配置）。',
+                      '`allOf` 本身拿不到结果,必须在它的 `thenApply` 里按原顺序 `join` 回来——此时全部已完成,`join` 不会阻塞。三段拼成一个 `PageData`。',
                   },
                   {
-                    title: '第四步：显式指定线程池',
+                    title: '④ 整体超时 + 最终降级',
                     detail:
-                      '所有 `supplyAsync` 都必须传 `bizPool`，绝不能用默认 `commonPool`——否则三个阻塞调用会占满全 JVM 共享的少数几个线程，把别的业务一起拖死。',
+                      '整体挂 `orTimeout(3, SECONDS)`,再挂 `exceptionally` 返回整页兜底。要主动说明:`orTimeout` 不会中断子任务,所以下游客户端自己的读超时必须小于 3 秒,否则超时之后线程还在被占着。',
                   },
                 ],
                 skeleton:
-                  'class Aggregator {\n    private final ExecutorService pool;\n\n    Aggregator(ExecutorService bizPool) { this.pool = bizPool; }\n\n    PageData aggregate(long userId) {\n        // TODO: 1) 三个 supplyAsync 并发发起（都传 pool）\n        //       2) 每个都 .handle 包成「不失败」\n        //       3) allOf 等全部，再逐个 join 收集\n        //       4) .orTimeout(3s).exceptionally(整体兜底)\n        return null;\n    }\n\n    private Profile loadProfile(long uid) { /* 下游调用 */ return null; }\n    private List<Order> loadOrders(long uid) { return List.of(); }\n    private List<Coupon> loadCoupons(long uid) { return List.of(); }\n}',
+                  'class Aggregator {\n    private final ExecutorService pool;\n\n    Aggregator(ExecutorService bizPool) { this.pool = bizPool; }\n\n    PageData aggregate(long userId) {\n        // TODO: 1) 三个 supplyAsync 并发发起（都传 pool）\n        //       2) 每个都 .handle 包成「不失败」\n        //       3) allOf 等全部，再逐个 join 收集\n        //       4) .orTimeout(3s).exceptionally(整体兜底)\n        return null;\n    }\n\n    private Profile loadProfile(long uid) { return null; }\n    private List<Order> loadOrders(long uid) { return List.of(); }\n    private List<Coupon> loadCoupons(long uid) { return List.of(); }\n}',
                 solution:
-                  'class Aggregator {\n    private final ExecutorService pool;\n\n    Aggregator(ExecutorService bizPool) { this.pool = bizPool; }\n\n    PageData aggregate(long userId) {\n        // ① 三个任务并行发起，各自「包装成一定成功」\n        CompletableFuture<Profile> profileF =\n                CompletableFuture.supplyAsync(() -> loadProfile(userId), pool)\n                        .handle((v, e) -> {\n                            if (e != null) log.warn("profile failed", e);\n                            return e == null ? v : Profile.empty();     // 兜底\n                        });\n\n        CompletableFuture<List<Order>> ordersF =\n                CompletableFuture.supplyAsync(() -> loadOrders(userId), pool)\n                        .handle((v, e) -> e == null ? v : List.<Order>of());\n\n        CompletableFuture<List<Coupon>> couponsF =\n                CompletableFuture.supplyAsync(() -> loadCoupons(userId), pool)\n                        .handle((v, e) -> e == null ? v : List.<Coupon>of());\n\n        // ② allOf 等全部，再逐个 join 收集\n        CompletableFuture<PageData> all = CompletableFuture\n                .allOf(profileF, ordersF, couponsF)\n                .thenApply(v -> new PageData(\n                        profileF.join(),      // 已完成，不会阻塞\n                        ordersF.join(),\n                        couponsF.join()));\n\n        // ③ 整体超时 + 最终兜底\n        return all.orTimeout(3, TimeUnit.SECONDS)               // JDK 9+\n                  .exceptionally(e -> {\n                      log.error("aggregate timeout/failed, uid={}", userId, e);\n                      return PageData.empty();                   // 整页降级\n                  })\n                  .join();\n    }\n\n    private Profile loadProfile(long uid) { return null; }\n    private List<Order> loadOrders(long uid) { return List.of(); }\n    private List<Coupon> loadCoupons(long uid) { return List.of(); }\n}',
+                  'class Aggregator {\n    private final ExecutorService pool;\n\n    Aggregator(ExecutorService bizPool) { this.pool = bizPool; }\n\n    PageData aggregate(long userId) {\n        // ① 三个任务并行发起，各自「包装成一定成功」\n        CompletableFuture<Profile> profileF =\n                CompletableFuture.supplyAsync(() -> loadProfile(userId), pool)\n                        .handle((v, e) -> {\n                            if (e != null) log.warn("profile failed, uid={}", userId, e);\n                            return e == null ? v : Profile.empty();     // 兜底\n                        });\n\n        CompletableFuture<List<Order>> ordersF =\n                CompletableFuture.supplyAsync(() -> loadOrders(userId), pool)\n                        .handle((v, e) -> e == null ? v : List.<Order>of());\n\n        CompletableFuture<List<Coupon>> couponsF =\n                CompletableFuture.supplyAsync(() -> loadCoupons(userId), pool)\n                        .handle((v, e) -> e == null ? v : List.<Coupon>of());\n\n        // ② allOf 等全部，再逐个 join 收集\n        CompletableFuture<PageData> all = CompletableFuture\n                .allOf(profileF, ordersF, couponsF)\n                .thenApply(v -> new PageData(\n                        profileF.join(),      // 已完成，不会阻塞\n                        ordersF.join(),\n                        couponsF.join()));\n\n        // ③ 整体超时 + 最终兜底\n        return all.orTimeout(3, TimeUnit.SECONDS)               // JDK 9+\n                  .exceptionally(e -> {\n                      log.error("aggregate timeout/failed, uid={}", userId, e);\n                      return PageData.empty();                   // 整页降级\n                  })\n                  .join();\n    }\n}',
                 complexity:
-                  '总耗时 ≈ `max(三个下游的 RT)`（并行）+ 少量编排开销，而不是三者之和 · 最坏情况被 `orTimeout` 限制在 3 秒 · 线程占用：3 个池线程（峰值），比「串行 3 次」的 1 个线程占用高，但总体 RT 低得多。',
+                  '总耗时约等于「三个下游里最慢的那个」加少量编排开销,而不是三者之和 · 最坏情况被整体超时压在 3 秒 · 线程占用峰值 3 个池线程,比串行更吃线程,但等待时间短得多。',
                 traps: [
-                  '不传 `pool`，用默认 `commonPool`：阻塞任务占满全 JVM 共享线程，影响所有其他异步任务',
-                  '`allOf` 后忘记再 `join` 收集：拿到的是 `Void`，没有结果',
-                  '只加整体 `orTimeout` 而不配下游超时：整体快速失败了，但子任务还在跑，线程被长时间占用',
-                  '在 `handle` 里重新抛出异常：等于没兜底，`allOf` 仍然整体失败',
-                  '`thenApply` 里返回 `CF` 而不用 `thenCompose`：得到嵌套 `CF`，`join` 拿不到最终值',
+                  '不传池,用默认的共享池:阻塞任务占满那几个线程,连带第三方库的异步任务一起排队',
+                  '`allOf` 之后忘记再取结果:拿到的是 `Void`,一个值都没有',
+                  '只加整体超时而不配下游读超时:整体快速失败了,子任务还在跑,线程被长时间占着',
+                  '在 `handle` 里把异常重新抛出去:等于没兜底,整体还是失败',
+                  '`thenApply` 里返回 future 而不用 `thenCompose`:得到嵌套,`join` 拿不到最终值',
                 ],
               },
               {
                 kind: 'principle',
-                title: 'CompletableFuture 的四条实践规则',
+                title: '四条实践规则,比背四十个方法有用',
                 body: [
-                  '`CF` 的 API 面很大，但线上真正会出问题的只有四个点。记住这四条，比背 40 个方法有用。',
+                  '这套 API 的失败模式很集中:线程池选错、异常静默、串并行搞反。下面四条正好各对应一类。',
                 ],
                 steps: [
                   {
-                    title: '① 所有可能阻塞的任务，必须传自定义线程池',
+                    title: '① 任何可能阻塞的任务,必须显式传自己的池',
                     detail:
-                      '`commonPool` 的并行度是 `核数 - 1` 且全 JVM 共享，专为「短小 CPU 密集」设计。IO 密集或阻塞任务塞进去会占满它，影响包括第三方库在内的所有 `CF`。这一条是「必须」而不是「建议」。',
+                      '默认池的并行度是核数减一,且全 JVM 共享,它是为短小的计算任务设计的。往里塞 IO 或任何阻塞调用,会占满它并影响所有没指定池的异步任务,包括第三方库。这一条不是建议,是必须。',
                   },
                   {
-                    title: '② 每个 `CF` 都要有「出口」：`join` 或 `exceptionally`',
+                    title: '② 每个链尾都要有出口:要么 `join`,要么挂兜底',
                     detail:
-                      '`CF` 的异常是**静默的**——如果你从不 `join`，也从不 `handle`，任务失败了不会有任何日志。所以要么在链尾 `join` 取值，要么每个链尾都挂 `exceptionally` 兜底 + 打日志。',
+                      '异常在这套 API 里是静默的。不 `join`、也不挂兜底,失败就等于没发生——没有日志,没有告警,只有业务数据莫名其妙地少了一块。',
                   },
                   {
-                    title: '③ 用 `handle` 把「可能失败」转成「一定成功」',
+                    title: '③ 批量的降级套路:先 `handle` 成结果对象,再 `allOf`',
                     detail:
-                      '批量调用时，如果希望「部分成功也返回」，就在每个子任务上 `.handle(...)` 包装成 `Result<T>`。这样 `allOf` 不会整体失败，你能拿到成功的部分——这是「降级」的标准实现方式。',
+                      '「个别失败不该影响整体」只能这么做。不要指望 `allOf` 帮你区分成功失败,它只会整体失败。',
                   },
                   {
                     title: '④ 串行用 `thenCompose`、并行用 `thenCombine`、批量用 `allOf`',
                     detail:
-                      '三个方法对应三种依赖关系，选错了会写成「串行执行」导致 RT 相加。判据：**后者依赖前者的结果 → 串行（`thenCompose`）；两者互不依赖 → 并行（`thenCombine` / `allOf`）**。',
+                      '判据是依赖关系:后者要前者的结果就是串行,两者互不依赖就是并行。写反了不会报错,只会让耗时从「取最大」变成「相加」——这是最难被发现的一类性能问题。',
                   },
                 ],
                 takeaway:
-                  '一句话收口：**`CF` 把「阻塞取值」变成「声明式编排」，代价是「线程模型变隐式」与「异常变静默」。** 所以用它的关键不是记 API，而是盯住两件事：**任务在哪个池跑**、**失败有没有出口**。这两件事管住了，`CF` 就只是一个表达力更强的工具。',
+                  '一句话收口:**它把「阻塞取值」换成了「声明式编排」,代价是线程模型变隐式、异常变静默。** 所以用它的关键不是记 API,而是盯住两件事:任务在哪个池里跑,失败有没有出口。这两件事管住了,剩下的都是表达方式问题。',
               },
-            ],
-            outline: [
-              'Future 三缺（不能组合 / 只能阻塞取 / 无异常处理），CF 三补（组合 / 回调 / 异常分支）',
-              'thenApply 转换值、thenAccept 消费无返回、thenRun 不接收值；带 Async 才换线程',
-              'thenCompose 拍平嵌套（等价 flatMap），thenCombine 并行聚合，allOf 批量等待',
-              'exceptionally 仅异常时执行且吞异常；handle 总是执行且可改结果；whenComplete 只观察',
-              '默认 commonPool 并行度仅核数-1 且全 JVM 共享；allOf 返回 Void 要自己 join 收集',
-            ],
-            pitfalls: [
-              '把阻塞 IO 丢进 commonPool：拖垮全 JVM 共享的并行度，连带影响第三方库',
-              '用 thenApply 接一个返回 CF 的函数：得到嵌套 CF，join 拿不到最终值',
-              'allOf 后直接 join 就以为拿到结果：它返回 CF<Void>，必须自己逐项 join 收集',
+              {
+                kind: 'concept',
+                title: '回头看一眼:三句话记住这一课',
+                body: [
+                  '第一,老 `Future` 缺组合、缺点回调、缺异常出口,新 API 正好补这三样——所以方法的分类也是按这三样展开的。第二,`then*` 只是三个维度的组合:要不要上游的值、有没有返回值、换不换线程;再加一个 `thenCombine` 处理并行合流。第三,拍平与串并行是正确性问题不是风格问题:`thenApply` 里返回 future 会得到嵌套,`thenCompose` 写成链式会让耗时相加。',
+                  '自测三问:你的异步任务在哪个池里跑?它的并行度是多少?如果这个 future 失败了,谁会知道?三个问题都能立刻答出来,这一课就算过了。答不出来,回到开头的压测现场再看一遍——那三个问题的答案,就是那次事故的全部成因。',
+                ],
+                points: [
+                  '能复述:三缺三补、三个维度、三个异常出口',
+                  '能判断:一段编排里哪些调用是并行的、总耗时是相加还是取最大',
+                  '能兜底:批量场景下让个别失败不拖垮整体的标准写法',
+                ],
+              },
             ],
           },
         },
@@ -4259,70 +3972,73 @@ export default {
       lessons: [
         {
           id: 'jvm-memory',
-          title: '运行时数据区',
-          kind: 'concept',
+          title: '运行时数据区:五块内存与三块编外',
+          minutes: 55,
           sources: [
             { topic: 'java-04', chapters: ['JVM 概览'] },
             { topic: 'java-04', chapters: ['运行时内存区域'] },
           ],
           content: {
             intro:
-              '这一节要能**徒手画出运行时数据区**，并标注三件事：哪些线程私有、哪些共享、各自会抛什么错。规范里的五大区加上规范外却真实存在的直接内存与 Code Cache，构成一张「从 new 到 OOM」的完整地图。面试官常从这里切入，一路问到「堆没满为什么进程占 4G」。本节按「看全景 → 拆栈帧 → 追常量池 → 对错误码」四步推进，最后把所有 OOM 收敛成一张归因表。',
+              '运行时数据区这组题,本质上都在回答同一个三元组:**这块内存在哪 → 谁能控制它 → 它崩了报什么**。把这三列对齐,就不需要死记结论。而所有「内存溢出」的困惑,都源于一个前提没分清:`-Xmx` 只管堆,而进程占的内存远不止堆——元空间、直接内存、线程栈、Code Cache 都在本地内存里,容器却按总 RSS 判死。这就是「堆没满却被 OOMKilled」的全部原因,也是本课要从头拆开的那件事。',
             outline: [
-              '线程私有三块：PC、虚拟机栈、本地方法栈；共享两块：堆、方法区',
-              '栈帧五件套：局部变量表、操作数栈、动态链接、返回地址、附加信息',
-              'JDK 7 字符串常量池移入堆；JDK 8 永久代被元空间取代，改用本地内存',
-              '直接内存与 Code Cache 不在规范内，不受 -Xmx 管，却计入进程 RSS',
-              '七种 OOM 加 StackOverflowError 一一对应到区域，是排查的索引表',
+              '五块运行时数据区 + 三块规范外的真实内存,划分依据是「生命周期归谁」',
+              '`-Xss` 管栈、`-Xmx` 管堆、`MaxMetaspaceSize` 管元空间、`MaxDirectMemorySize` 管堆外,互不影响',
+              '方法区是规范概念,永久代（JDK 7）与元空间（JDK 8）是两种实现;字符串常量池早在 JDK 7 就搬进了堆',
+              '直接内存不受 `-Xmx` 管,回收依赖 GC 触发——所以「堆很空但堆外 OOM」是正常现象',
+              '八种 OOM 各有各的修法,只有「堆溢出」能靠调大 `-Xmx` 缓解',
             ],
             pitfalls: [
-              '把方法区说成永久代：方法区是规范里的抽象概念，永久代只是 JDK 7 的实现',
-              '认为字符串常量池在方法区：JDK 7 起它已在堆里，与元空间无关',
-              '把 StackOverflowError 归为 OOM：它是 Error 但不是 OutOfMemoryError，成因是栈深度',
+              '把方法区说成永久代:方法区是规范里的抽象概念,永久代只是 JDK 7 的 HotSpot 实现',
+              '认为字符串常量池在方法区:JDK 7 起它已经在堆里,与元空间无关',
+              '把 `StackOverflowError` 归为 OOM:它是 `Error` 但不是 `OutOfMemoryError`,成因是栈深度而非内存不足',
             ],
             sections: [
               {
-                kind: 'question',
-                title: 'JVM、JRE、JDK：三层嵌套，各管一段',
-                questionId: 'java-04-Q1',
-                intent:
-                  '送分题，但三层关系要说准。最常见的错是「JRE 不包含 JVM」和「JDK 就是编译器」——这两句一出，后面的深度题就没人愿意听了。',
-                points: [
-                  '**JVM 是一份规范**，不是一个程序。《Java 虚拟机规范》定义了 class 文件格式、指令集、运行时数据区和错误类型；任何能读 class 文件并按规范执行的实现，都算 JVM',
-                  '**JRE** = JVM + 核心类库（`java.*` / `javax.*`）+ 支撑文件。它是「**跑**一个 Java 程序的最小集合」',
-                  '**JDK** = JRE + 开发工具（`javac`、`jar`、`javadoc`、`jdb`、`jmap`、`jstack`）。它是「**写**一个 Java 程序的最小集合」',
-                  '嵌套关系：**JDK ⊃ JRE ⊃ JVM**。JDK 9 模块化后取消了独立的 `jre/` 目录，逻辑三层仍成立，可用 `jlink` 自己裁一个只含所需模块的运行时镜像',
-                  '**JVM 存在的第一价值**：`javac` 把源码编成**平台无关的字节码**，平台差异被关进 JVM 内部——这才是「一次编写到处运行」的真实机制',
-                  '**另外两层价值**：内存与 GC 托管（无需手动 free）、运行时安全（字节码校验、数组越界检查、类访问控制）',
+                kind: 'why',
+                title: '堆只给了 4G,进程却被杀了 6.8G',
+                body: [
+                  '一个容器化的服务,`-Xmx4g`,容器内存 limit 8Gi。跑了两天开始周期性重启,`kubectl describe` 里的原因是 `OOMKilled`,退出码 137。可翻遍 Java 日志,**没有一条 `OutOfMemoryError`**。',
                 ],
-                depth:
-                  '「一次编译到处运行」今天要打个补丁：**字节码平台无关，但 JVM 平台相关**——准确说法是「一次编译，到处有对应 JVM 就能跑」。更常被追问的是：既然 JIT 最终也要生成机器码，为什么不直接静态编译？答案是**延迟决策**：只有运行时才知道真实 CPU 型号、真实分支走向、真实类型分布。`if (obj instanceof HashMap)` 这样的判断，静态编译期只能保守处理，JIT 却能观测到「99% 都是这一个类」而直接内联——这是 Java 长期性能逼近 C 的关键。',
-                followup:
-                  '「常见的 JVM 实现有哪些」——**HotSpot**（OpenJDK / Oracle JDK 默认，C1+C2 分层编译）、**GraalVM**（可 AOT 编成原生镜像，启动毫秒级但峰值优化弱于 C2）、**OpenJ9**（IBM 系，内存占用低，适合容器）、**ART**（Android，寄存器架构）。注意 **Oracle JDK 与 OpenJDK 的差别在许可证与少量商业特性，不在 VM 本体**。',
+                code: {
+                  language: 'bash',
+                  code:
+                    '# 启动参数\njava -Xmx4g -Xms4g -jar app.jar\n\n# 容器死亡时的现场(kubectl top / 监控快照)\n# 容器 RSS        : 6.8 Gi   ← limit 8Gi,但已被判死\n# 堆 used(Full GC 后): 1.1 Gi\n# Metaspace       : 380 Mi\n# Direct buffers  : 1.2 Gi\n# 线程数          : 600      ← 600 × 1MB 栈 = 600Mi\n# Code Cache      : 240 Mi\n# → 4G(堆上限) + 0.38 + 1.2 + 0.6 + 0.24 ≈ 6.4G,再加 JVM 自身与 GC 结构 ≈ 6.8G',
+                  caption: '注意第二条:**堆在 Full GC 之后只剩 1.1G**。它压根没满,所以永远不会抛 `OutOfMemoryError`。',
+                },
+                wrong: [
+                  '**猜法一:堆内存泄漏。** 但 `jmap -histo` 里没有异常增长的类,Full GC 后堆从 3.9G 降到 1.1G,回收得很干净——泄漏的对象是回收不掉的,这个特征对不上。',
+                  '**猜法二:`-Xmx4g` 没生效。** `jinfo -flag MaxHeapSize` 打印 `4294967296`,生效了。而且堆确实被限制在 4G 以内。',
+                  '**猜法三:GC 没跑,所以堆外的对象没人清。** Full GC 后堆确实降了,说明 GC 正常。但 RSS 只降了两百兆——因此涨的那部分**不在堆里**。',
+                ],
+                real:
+                  '真因是**「进程内存」不等于「堆内存」**。`-Xmx` 只约束堆;而元空间(380M)、直接内存(1.2G)、600 个线程的栈(约 600M)、JIT 的 Code Cache(240M)全都申请在**本地内存**里,[[-Xmx 管不到它们,但它们一样计入 RSS]]。容器是照 RSS 判死刑的,所以堆还空着,进程已经被杀——而且**这种死法不会留下任何 Java 异常**,只有 `OOMKilled` 和退出码 137。',
+                reveal:
+                  '所以「JVM 内存」从来不是一个东西,而是**五块受不同参数管的内存,加三块规范外的编外内存**。下面先按「生命周期归谁」把区域分清,再逐块配上「谁管它、崩了报什么」——这样任何内存题都能顺着推。',
               },
               {
                 kind: 'concept',
-                title: '五大区与两种所有权：谁私有、谁共享',
+                title: '五大区与两种所有权:谁私有、谁共享',
                 body: [
-                  '《JVM 规范》把运行时数据区分成五块，划分依据只有一条：**生命周期归谁**。线程私有的区域随线程生、随线程死；线程共享的区域随 JVM 启动而生、随 JVM 退出而亡。',
-                  '**线程私有**三块：程序计数器（PC）、虚拟机栈、本地方法栈。它们必须私有，因为它们记录的都是「**这个线程执行到哪了**」——PC 存当前字节码行号，栈存当前调用链。若共享，两个线程的调用链会互相覆盖，程序立刻崩溃。',
-                  '**线程共享**两块：堆与方法区。堆存对象实例，方法区存类元信息、运行时常量池、静态变量。共享才合理——一个类的元信息全进程只需要一份，一万个实例共用。',
-                  '规范之外还有几块真实内存：**直接内存**（`ByteBuffer.allocateDirect` 向 OS 申请的）、**Code Cache**（JIT 编出的机器码）、**GC 辅助结构**（卡表、记忆集、标记位图）、**线程栈总量**（线程数 × `-Xss`）。它们不在规范里，却全部计入进程 RSS——这正是「堆没满但进程占 4G」的答案所在。',
+                  '《JVM 规范》把运行时数据区分成五块,划分依据只有一条:**生命周期归谁**。线程私有的区域随线程生、随线程死;线程共享的区域随 JVM 启动而生、随 JVM 退出而亡。',
+                  '**线程私有**三块:程序计数器(PC)、虚拟机栈、本地方法栈。它们必须私有,因为它们记录的都是「**这个线程执行到哪了**」——PC 存当前字节码行号,栈存当前调用链。若共享,两个线程的调用链会互相覆盖,程序立刻崩溃。',
+                  '**线程共享**两块:堆与方法区。堆存对象实例,方法区存类元信息、运行时常量池、静态变量。共享才合理——一个类的元信息全进程只需要一份,一万个实例共用。',
+                  '规范之外还有几块真实内存:**直接内存**(`ByteBuffer.allocateDirect` 向 OS 申请的)、**Code Cache**(JIT 编出的机器码)、**GC 辅助结构**(卡表、记忆集、标记位图)、**线程栈总量**(线程数 × `-Xss`)。它们不在规范里,却全部计入进程 RSS——这正是开头那个「堆没满却被杀」的答案所在。',
                 ],
                 term: {
                   name: '运行时数据区（Runtime Data Area）',
-                  def: 'JVM 在执行 Java 程序过程中把它所管理的内存划分为若干区域。规范只规定**行为**（什么时候创建、什么时候销毁、会抛什么错误），不规定**实现**——比如「方法区」在 HotSpot 7 是永久代、在 HotSpot 8+ 是元空间、在 OpenJ9 又是另一套。面试里问「方法区在哪个区域」时，先分清问的是规范概念还是 HotSpot 实现。',
+                  def: 'JVM 在执行 Java 程序过程中把它所管理的内存划分为若干区域。规范只规定**行为**(什么时候创建、什么时候销毁、会抛什么错误),不规定**实现**——「方法区」在 HotSpot 7 是永久代、在 HotSpot 8+ 是元空间、在 OpenJ9 又是另一套。',
                 },
                 points: [
-                  '私有：PC、虚拟机栈、本地方法栈——记录「本线程执行到哪」',
-                  '共享：堆（对象实例）、方法区（类元信息 / 常量 / 静态变量）',
-                  '规范外：直接内存、Code Cache、GC 辅助结构、线程栈总量——都进 RSS，都不受 `-Xmx` 管',
-                  '判断口诀：**每个线程都得有一份自己的 → 私有；一个类 / 一个对象只有一份 → 共享**',
+                  '私有:PC、虚拟机栈、本地方法栈——记录「本线程执行到哪」',
+                  '共享:堆(对象实例)、方法区(类元信息 / 常量 / 静态变量)',
+                  '编外:直接内存、Code Cache、GC 辅助结构、线程栈总量——都进 RSS,都不受 `-Xmx` 管',
+                  'PC 是唯一不会抛任何 OOM 的区域;虚拟机栈抛的是 `StackOverflowError` 与 OOM 两种',
                 ],
               },
               {
                 kind: 'diagram',
-                title: '运行时数据区全景：三块私有、两块共享、三块编外',
+                title: '运行时数据区全景:三块私有、两块共享、三块编外',
                 diagram: {
                   type: 'memory',
                   regions: [
@@ -4356,50 +4072,27 @@ export default {
                     },
                   ],
                   caption:
-                    '特别注意第二区域里的「字符串常量池」：它的**逻辑归属**是方法区的运行时常量池，但**物理位置**从 JDK 7 起就在堆中。这是本课最高频的错答点。图上还给每块区域标了对应的启动参数——「参数管哪块区域」比背参数名有用得多：`-Xss` 管栈、`-Xmx` 管堆、`MaxDirectMemorySize` 管堆外，三者互不影响。',
+                    '特别注意第二区域里的「字符串常量池」:它的**逻辑归属**是方法区的运行时常量池,但**物理位置**从 JDK 7 起就在堆中——这是本课最高频的错答点。图上还给每块区域标了对应的启动参数:「参数管哪块区域」比背参数名有用得多:`-Xss` 管栈、`-Xmx` 管堆、`MaxDirectMemorySize` 管堆外,三者互不影响。',
                 },
               },
               {
-                kind: 'question',
-                title: 'JVM 运行时数据区包括哪些部分？哪些是线程私有的？',
-                questionId: 'java-04-Q5',
-                intent:
-                  '本课的主干题。答的时候按「私有 / 共享」两组报菜名，再补一句「规范外还有直接内存」，立刻比只背五块的候选人多一层。',
-                points: [
-                  '**线程私有①程序计数器**：当前线程执行的字节码行号指示器。分支、循环、跳转、异常处理、线程恢复都靠它',
-                  '**线程私有②虚拟机栈**：每个方法调用创建一个栈帧（局部变量表 + 操作数栈 + 动态链接 + 返回地址）。方法调用即入栈，返回即出栈',
-                  '**线程私有③本地方法栈**：为 native 方法服务。HotSpot 直接把它和虚拟机栈合并实现，所以 `-Xss` 同时管两者',
-                  '**线程共享④堆**：几乎所有对象实例和数组都在这里分配，是 GC 主战场。分新生代（Eden + 2×Survivor）与老年代',
-                  '**线程共享⑤方法区**：类元信息、运行时常量池、字段与方法描述、静态变量、JIT 编译后的代码（部分实现放 Code Cache）。JDK 8 起由**元空间**实现，位于本地内存',
-                  '**规范外⑥直接内存**：`NIO` 的 `DirectByteBuffer` 从这里分配，不属于运行时数据区，但会被频繁问到',
+                kind: 'concept',
+                title: '栈:PC 为什么必须私有,栈帧里到底装了什么',
+                body: [
+                  '**PC 为什么必须私有**,是这组题里最容易被问倒的一个。它存的是「当前线程正在执行的字节码行号」,而多线程是**轮流**使用 CPU 的:线程 A 执行到第 12 行被切走,线程 B 从第 3 行开始跑,切回来时 A 必须能从 12 行继续。若 PC 共享,这个「接着跑」就不可能实现。[[PC 私有不是设计选择,是并发执行的前提]]。',
+                  '顺带一个常被考的点:PC 是唯一**不会**抛 OOM 的区域——它存的只是一个地址,大小在编译期就定了。而虚拟机栈会抛两种:栈太深(`StackOverflowError`)和栈申请不到内存(OOM)。',
+                  '**栈帧**是方法调用的载体:每调用一个方法压入一个栈帧,返回时弹出。它由五部分组成:局部变量表(放 `this`、参数、局部变量)、操作数栈(计算的临时工作区)、动态链接(指向常量池里本方法的符号引用)、方法返回地址(恢复上层的 PC)、以及附加的调试信息。',
+                  '两个结论值得记住:[[栈帧大小在编译期就确定]],因为局部变量表容量与操作数栈最大深度都写在 class 文件的 `Code` 属性里——所以栈深度是可预测的,`-Xss` 越小越容易 `StackOverflowError`;另一个是 **Slot 会复用**,离开作用域的局部变量的槽会被后面的变量占用——这既解释了「断点看不到已出作用域的变量」,也解释了为什么「把大对象声明在循环外」有时反而不利于 GC。',
                 ],
-                depth:
-                  '「为什么 PC 是唯一不会 OOM 的区域」——因为它存的是一个**行号**（int 宽度），大小在编译期就固定了，不需要动态扩展。这也是一个漂亮的推理链：**能否 OOM 取决于「这块区域会不会按需增长」**。堆和栈会（栈是深度增长、堆是对象增长），PC 不会，所以规范明确写出「此区域不会抛 OutOfMemoryError」。答出这个因果，比背结论强得多。',
-                followup:
-                  '「JVM 内存结构和 JMM 有什么区别」——这题几乎必跟在后面。一句话分清：**JVM 内存结构是「东西放在哪」（物理划分：堆、栈、方法区）；JMM 是「多线程读写共享变量时的规则」（抽象模型：主内存 + 每个线程的工作内存，配 happens-before 与 8 种原子操作）**。JMM 里的「主内存」并不等于堆、「工作内存」也不等于栈——它是逻辑概念，落到硬件上对应 CPU 缓存与寄存器。',
-              },
-              {
-                kind: 'question',
-                title: '程序计数器：为什么它必须是线程私有的？',
-                questionId: 'java-04-Q6',
-                intent:
-                  '小题，但答得准能加分。核心就一句：它是「断点续跑」的凭证。',
                 points: [
-                  '**作用**：记录当前线程正在执行的字节码指令地址。字节码解释器工作时就是靠改变这个值来选取下一条指令',
-                  '**为什么私有**：CPU 核数少于线程数，线程会被随时切换。切走时把 PC 存进私有区，切回来再恢复——**PC 就是每个线程各自的「暂停键」**',
-                  '**若共享会怎样**：线程 A 执行到第 10 行被切走，线程 B 跑了一段把 PC 改成第 50 行，A 回来接着从第 50 行跑——逻辑彻底错乱',
-                  '**唯一不会 OOM 的区域**：它只存一个行号，大小编译期即定，不随执行增长',
-                  '**native 方法时 PC 的值**：规范定义为 `undefined`。因为 native 方法由 C/汇编执行，没有字节码行号可记',
-                  '**分支/循环/异常/线程恢复**都依赖它——这五件事恰好是「执行流被打断后要能接上」的场合',
+                  'PC 私有、不抛 OOM、大小编译期确定——三件事互为因果。',
+                  '`long` / `double` 占两个 Slot,所以「参数个数」和「局部变量表大小」不是一回事。',
+                  '`-Xss` 调大能缓解 `StackOverflowError`,但每个线程都按这个值预留,线程一多总内存就上去了。',
                 ],
-                depth:
-                  '一个容易被追问的细节：既然 native 方法执行时 PC 是 undefined，那 native 方法返回后怎么知道回到哪？答案在**栈帧的返回地址**里，不在 PC 里。PC 只在**解释执行字节码**时有意义，一旦进入 native 或编译后的机器码，控制流由 CPU 的指令指针（x86 的 RIP）接管。所以「PC 记录行号」这个说法严格讲只对解释器成立——这也是为什么 JIT 编译后的代码在 `jstack` 里看到的栈帧信息会略少。',
-                followup:
-                  '「为什么用 PC 而不是直接用 CPU 的指令指针」——因为 JVM 是**栈式虚拟机**，字节码不是机器指令，CPU 不认识。PC 指向的是「方法区里 Code 属性的字节码数组下标」，是 JVM 自己的抽象。这也是「JVM 不是物理机器」的最好例证。',
               },
               {
                 kind: 'diagram',
-                title: '一个栈帧的内部：五件套与 Slot 分配',
+                title: '一个栈帧的内部:五件套与 Slot 分配',
                 diagram: {
                   type: 'memory',
                   regions: [
@@ -4426,164 +4119,88 @@ export default {
                     },
                   ],
                   caption:
-                    '两个结论值得记住：① **栈帧大小在编译期就确定**——局部变量表容量、操作数栈最大深度都写在 class 文件的 `Code` 属性里。所以「栈深度」是可预测的，`-Xss` 越小越容易 `StackOverflowError`。② **Slot 会复用**——离开作用域的局部变量，其 Slot 会被后面的变量占用，这就是为什么断点调试时看不到已出作用域的变量（它的槽已经被别人占了），也是为什么「把大对象声明在循环外」有时反而不利于 GC（引用一直有效）。',
+                    '这张图值得和上一个概念对照着看:栈帧的「五件套」一一对应「一个方法执行需要什么」——变量放哪(局部变量表)、算到哪(操作数栈)、调了谁(动态链接)、回哪去(返回地址)。[[一个方法调到最深有多少层,乘上单帧大小,就是这根线程要的栈空间]];超了就是 `StackOverflowError`。',
                 },
               },
               {
-                kind: 'question',
-                title: '一个方法从调用到返回，栈帧发生了什么？',
-                questionId: 'java-04-Q7',
-                intent:
-                  '要能按「入栈 → 执行 → 出栈」讲出一条时间线，并把「局部变量表 / 操作数栈 / 返回地址」各自的角色点出来。',
-                points: [
-                  '**调用前**：`invokevirtual` 等指令先在**调用者的操作数栈**上准备好 `this` 与实参',
-                  '**入栈**：JVM 为被调方法分配新栈帧，把实参从调用者操作数栈**弹出并写入**新栈帧的局部变量表（`this` 占 slot 0）',
-                  '**执行**：字节码在操作数栈上做运算——`iload_1` 把 slot 1 压栈、`iadd` 弹出两个相加再压回，栈式虚拟机的名字由此而来',
-                  '**正常返回**：`return` 指令把返回值压到**调用者栈帧的操作数栈**顶，然后当前栈帧出栈，PC 恢复到返回地址',
-                  '**异常返回**：没有返回值，异常对象沿栈帧链向上抛；每层查异常表，无人处理则栈帧出栈直到线程终止',
-                  '**栈溢出**：递归过深时新栈帧无法分配 → `StackOverflowError`（注意不是 OOM）',
+                kind: 'concept',
+                title: '堆为什么分代,以及 8:1:1 是怎么来的',
+                body: [
+                  '堆分代的唯一理由是**对象的寿命分布极不均匀**:绝大多数对象朝生夕死,极少数活得很久。分代让 GC 可以对「新生代」用廉价算法(复制,只扫少量存活对象),对「老年代」用昂贵但省空间的算法(标记整理),各取所长。',
+                  '默认比例是 **Eden : S0 : S1 = 8 : 1 : 1**,由 `-XX:SurvivorRatio=8` 控制。**为什么是两个 Survivor 而不是一个**——这是最常被追问的点:复制算法需要一块**空的落脚地**。一次 Minor GC 把 Eden 与「正在用的那个 Survivor」里的存活对象复制到另一个空 Survivor,然后整体清空前两者。[[两个 Surviver 轮流当「落脚地」,是为了让复制算法能一次完成搬家而不产生碎片]]。',
+                  '对象在 Survivor 之间每熬过一次 GC 就 `age + 1`,到阈值(默认 15,`-XX:MaxTenuringThreshold`)晋升老年代。此外还有两条提前晋升的规则:大对象直接进老年代(`-XX:PretenureSizeThreshold`,避免在 Survivor 间反复复制),以及**动态年龄判定**——如果 Survivor 中同龄对象总和超过它的一半,年龄大于等于该值的对象直接晋升。',
+                  '为什么 8:1:1 而不是 5:5?因为**经验上 90% 以上的对象活不过第一次 GC**,Eden 越大,一次能装下的「垃圾」越多,Minor GC 的频率越低。代价是单次回收要搬的对象也更多——所以这个比例是可调的,不是定律。',
                 ],
-                depth:
-                  '「为什么 Java 的方法调用比 C 慢」这个老问题，答案就在这条链路里：一次调用要做参数搬运、栈帧分配、动态链接解析。但 HotSpot 用两个手段把它抹平了——**方法内联**（把热点小方法的字节码直接贴进调用者，栈帧根本不创建）与**标量替换**（逃逸分析后把对象拆成局部变量，连堆分配都省了）。所以「Java 慢」在今天只对**未被 JIT 编译的冷代码**成立。',
-                followup:
-                  '「栈帧会不会很大」——会。局部变量表容量 = 参数 + 局部变量（`long`/`double` 双 Slot），加上操作数栈深度，一个复杂方法几百字节很正常。这也是「递归改成循环」之外的另一条经验：**方法里别声明太多局部变量**，它会直接增大栈帧、降低最大递归深度。',
-              },
-              {
-                kind: 'question',
-                title: '堆是如何分区的？Eden、Survivor、Old 的比例是多少？',
-                questionId: 'java-04-Q8',
-                intent:
-                  '基础题，但比例要说对：`8:1:1` 是**新生代内部**的划分，`1:2` 才是新生代与老年代。混着答是典型扣分点。',
                 points: [
-                  '**两分**：堆 = 新生代（Young）+ 老年代（Old）。默认 `-XX:NewRatio=2`，即新生代 : 老年代 = **1 : 2**',
-                  '**新生代三分**：Eden + Survivor0 + Survivor1。默认 `-XX:SurvivorRatio=8`，即 **Eden : 单个 Survivor = 8 : 1**，所以整体是 **8:1:1**',
-                  '**为什么要两块 Survivor**：复制算法需要一个**空的目标区**。GC 时把 Eden + 在用 Survivor 的存活对象复制到另一块 Survivor，然后整体清空 Eden 与原 Survivor——这样天然无碎片',
-                  '**为什么 Eden 这么大**：绝大多数对象朝生夕死（弱分代假说），让它们死在 Eden 里最省事——只需清空，不用复制',
-                  '**为什么老年代这么大**：老年代存活率高，复制算法在那里等于搬整座山，只能用标记清除/整理，成本高。给它大空间是为了**降低 Full GC 频率**',
-                  '**JDK 8 默认是 Parallel Scavenge + Parallel Old**；G1 起堆被切成等大 Region，不再有物理连续的新生代/老年代，但**逻辑分代仍然保留**',
+                  '`-Xmn` 定新生代总大小,Eden 与两个 Survivor 按比例再分;`-Xmx` 与 `-Xmn` 的差就是老年代。',
+                  '晋升阈值不是硬编码 15:动态年龄判定会提前把同龄对象整批送进老年代,这也是「老年代增长比预期快」的常见原因。',
+                  '大对象(长数组、大字符串)直接进老年代,频繁创建它们会绕过新生代的廉价回收,直接压老年代。',
                 ],
-                depth:
-                  '8:1:1 这个比例藏着一个精妙的算术：新生代容量为 `S`，则 Eden 是 `0.8S`，两块 Survivor 各 `0.1S`。一次 Minor GC 后，存活对象要全部塞进**一块** Survivor（容量 `0.1S`）。所以这个设计隐含了一个**赌注——存活率不超过 10%**。真实业务中若存活率超过 10%，就会触发**空间分配担保**：检查老年代剩余空间是否够，不够则直接 Full GC。这也解释了一个经典现象：**把新生代调大反而 Full GC 更多**——因为绝对存活量变大了，更容易突破 10% 这个隐含阈值。',
-                followup:
-                  '「Survivor 会不会太小」——会，且症状很隐蔽：存活对象塞不进 Survivor，就靠**分配担保**提前晋升老年代，造成「短命对象污染老年代」，进而频繁 Full GC。排查特征是 `jstat -gcutil` 里 `S0/S1` 一直是 100% 而 `O`（老年代）持续上涨。这也是为什么很多团队会把 `-XX:SurvivorRatio` 从 8 调到 4 或更小。',
               },
               {
                 kind: 'analogy',
-                title: 'JVM 内存像一栋写字楼：工位、会议室、档案室',
+                title: 'JVM 内存像一栋写字楼:工位、会议室、档案室',
                 text:
-                  '把 JVM 想成一栋写字楼。**虚拟机栈**是每个员工自己的**工位**——私有，别人不能用；桌上堆着正在处理的文件（栈帧），处理完一层收走一层。**堆**是**公共会议室**——所有部门共用，谁都能预订，但面积固定（`-Xmx`），订满了就得有人被清出去（GC）。**方法区**是**档案室**——全公司只有一份组织架构图与规章制度（类元信息），谁都能查但只有一份。**直接内存**是**楼外的临时仓库**——不占楼内面积，但要跟物业单独申请（`MaxDirectMemorySize`），而且**楼里楼外都算「你公司的占地」，物业费（RSS）一起算**。',
+                  '把 JVM 想成一栋写字楼。**虚拟机栈**是每个员工自己的**工位**——私有,别人不能用;桌上堆着正在处理的文件(栈帧),处理完一层收走一层。**堆**是**公共会议室**——所有部门共用,谁都能预订,但面积固定(`-Xmx`),订满了就得有人被清出去(GC)。**方法区**是**档案室**——全公司只有一份组织架构图与规章制度(类元信息),谁都能查但只有一份。**直接内存**是**楼外的临时仓库**——不占楼内面积,但要跟物业单独申请(`MaxDirectMemorySize`),而且**楼里楼外都算「你公司的占地」,物业费(RSS)一起算**。',
                 mapping: [
-                  { real: '每个员工自己的工位', tech: '虚拟机栈：线程私有，随线程生灭' },
-                  { real: '桌上待处理的文件摞', tech: '栈帧链：方法调用入栈、返回出栈' },
-                  { real: '公共会议室，面积固定', tech: '堆：共享、`-Xmx` 上限、GC 主战场' },
-                  { real: '会议室里长期占座的部门', tech: '老年代：熬过多次 GC 的长寿对象' },
-                  { real: '全公司唯一的档案室', tech: '方法区 / 元空间：类元信息只有一份' },
-                  { real: '楼外的临时仓库', tech: '直接内存：不受 `-Xmx` 管，但计入 RSS' },
-                  { real: '物业按总占地收费', tech: '容器按 RSS 判定 OOMKilled，看不到 Java 异常' },
-                  { real: '保洁定期清空无人认领的文件', tech: '可达性分析 + 回收：不可达才清' },
+                  { real: '每个员工自己的工位', tech: '虚拟机栈:线程私有,随线程生灭' },
+                  { real: '桌上待处理的文件摞', tech: '栈帧链:方法调用入栈、返回出栈' },
+                  { real: '公共会议室,面积固定', tech: '堆:共享、`-Xmx` 上限、GC 主战场' },
+                  { real: '会议室里长期占座的部门', tech: '老年代:熬过多次 GC 的长寿对象' },
+                  { real: '全公司唯一的档案室', tech: '方法区 / 元空间:类元信息只有一份' },
+                  { real: '楼外的临时仓库', tech: '直接内存:不受 `-Xmx` 管,但计入 RSS' },
+                  { real: '物业按总占地收费', tech: '容器按 RSS 判定 OOMKilled,看不到 Java 异常' },
+                  { real: '保洁定期清空无人认领的文件', tech: '可达性分析 + 回收:不可达才清' },
                 ],
                 limit:
-                  '这个类比有一处会骗人：真实写字楼的会议室**不会自动清理**，而堆会——GC 的存在是 JVM 与「手动 malloc/free」最本质的差别。另外「工位」并不像工位那么贵：平台线程的栈默认 1MB，一万个线程就是 10GB，这也是虚拟线程要出现的理由。',
+                  '这个类比有一处会骗人:真实写字楼的会议室**不会自动清理**,而堆会——GC 的存在是 JVM 与「手动 malloc/free」最本质的差别。另外「工位」并不像工位那么便宜:平台线程的栈默认 1MB,一万个线程就是 10GB,这也是虚拟线程要出现的理由。',
               },
               {
-                kind: 'question',
-                title: '方法区、永久代、元空间是什么关系？为什么 JDK 8 要换掉永久代？',
-                questionId: 'java-04-Q9',
-                intent:
-                  '高频题。三层关系要一句话说清：**方法区是规范概念，永久代与元空间是两个实现**。',
-                points: [
-                  '**方法区**：《JVM 规范》里的**抽象概念**，规定「存类元信息、常量、静态变量」，但不说存在哪、怎么实现',
-                  '**永久代（PermGen）**：HotSpot 在 **JDK 7 及之前**的实现，位于**堆内**，受 `-XX:MaxPermSize` 限制，必须启动时指定',
-                  '**元空间（Metaspace）**：HotSpot 在 **JDK 8 起**的实现，位于**本地内存**，默认只受物理内存限制，可用 `-XX:MaxMetaspaceSize` 限制',
-                  '**换掉原因①大小难调**：永久代容量启动即定，动态代理、Groovy 脚本、JSP 容器大量生成类时极易 `PermGen space` OOM',
-                  '**换掉原因②与堆解耦**：永久代挤在堆里，Full GC 要捎带扫描它，且 GC 管理复杂、性能差；元空间独立在本地内存，互不干扰',
-                  '**换掉原因③为融合铺路**：JRockit 本来就没有永久代，合并 HotSpot 时移除它是官方给出的直接动因',
-                  '**顺带的时间线**：字符串常量池在 **JDK 7** 就已移到堆（早于永久代被移除），JDK 8 时永久代里只剩类元信息，静态变量也随之迁入堆',
+                kind: 'concept',
+                title: '方法区、永久代、元空间:一个概念的两次搬家',
+                body: [
+                  '这三个词经常被混着说,其实分属两个层次。**方法区**是《JVM 规范》里的**抽象概念**——规定这里存类元信息、常量、静态变量,但不说存在哪、怎么实现。**永久代**是 HotSpot 在 JDK 7 及之前的实现,位于**堆内**,受 `-XX:MaxPermSize` 限制。**元空间**是 JDK 8 起的实现,位于**本地内存**,默认只受物理内存限制,可用 `-XX:MaxMetaspaceSize` 收口。',
+                  'JDK 8 换掉永久代有三个原因,面试答出前两个就够:**一是大小难调**——永久代容量启动即定,动态代理、Groovy 脚本、JSP 容器大量生成类时极易 `PermGen space` OOM,而这个值又很难预估;**二是它与堆耦合**——永久代挤在堆里,Full GC 要捎带扫描它,GC 管理复杂;元空间独立在本地内存,两者互不干扰。第三个是历史原因:合并 JRockit 时移除永久代是官方给出的直接动因。',
+                  '换到元空间之后**仍然会 OOM**,只是原因变了:元空间按需向 OS 申请,所以「类太多」通常不再是问题;真正的坑是 **ClassLoader 泄漏**——热部署时旧 `ClassLoader` 被某个静态变量意外持有,它加载的所有类都无法卸载,元空间就只涨不落。[[卸载一个类要同时满足三个条件:该类的所有实例已回收、加载它的 ClassLoader 已回收、Class 对象无引用]]——这三个条件里最容易断的是第二个。',
                 ],
-                depth:
-                  '这道题最容易被追问「那 JDK 8 之后 `-XX:PermSize` 还有用吗」——完全失效，JVM 会直接警告 `ignoring option PermSize; support was removed in 8.0`。更值得说的是**元空间为什么不会再轻易 OOM**：因为它按需向 OS 申请，且支持**类卸载**（条件是类的所有实例被回收 + 对应 ClassLoader 被回收 + Class 对象无引用）。所以元空间泄漏的典型场景不是「类太多」，而是「**ClassLoader 泄漏**」——比如热部署时旧 ClassLoader 被一个静态变量意外持有，它加载的所有类都无法卸载，元空间只涨不落。',
-                followup:
-                  '「元空间能无限大吗」——不能。它受三层约束：① `-XX:MaxMetaspaceSize`（默认 unlimited）；② 容器 cgroup 的内存 limit；③ 物理内存与 swap。生产环境**建议显式设置** `MaxMetaspaceSize`（如 256m–512m），否则一旦类泄漏，进程会先被 OS OOMKilled，而不是抛出可读的 Java 异常——一个可读异常远比一次静默被杀的排查成本低。',
+                points: [
+                  '`-XX:PermSize` 在 JDK 8 完全失效,JVM 会打印 `ignoring option PermSize; support was removed in 8.0`——这句话本身就是答案。',
+                  '元空间默认无上限不等于可以不管:容器里不设 `MaxMetaspaceSize`,元空间涨起来会直接吃掉本该留给堆的内存。',
+                  '`jstat -gc` 里的 `MC/MU` 是元空间容量与使用量,排查元空间问题先看这两个数。',
+                ],
               },
               {
-                kind: 'question',
-                title: '元空间还会 OOM 吗？MetaspaceSize 和 MaxMetaspaceSize 有什么区别？',
-                questionId: 'java-04-Q10',
-                intent:
-                  '承接上一题的追问链。要答出「会 OOM」+「两个参数一个是水位线一个是硬上限」。',
-                points: [
-                  '**会 OOM**：报 `java.lang.OutOfMemoryError: Metaspace`。默认无上限只意味着「不设人为上限」，不代表「用不完」',
-                  '**`-XX:MetaspaceSize`**：**首次**触发元空间 GC 的**水位线**（默认约 21MB）。注意它不是初始大小，而是「涨到这里就先做一次 GC 探探」',
-                  '**`-XX:MaxMetaspaceSize`**：**硬上限**，超过直接抛 OOM（默认 unlimited）',
-                  '**为什么需要水位线**：元空间扩容要付出 GC 代价。设一个低水位，让 JVM 在早期就做一次 GC 清掉无用类，避免一路猛涨到很晚才 GC、一次停顿特别长',
-                  '**常见成因**：CGLIB / Javassist 动态生成类无缓存、反射 `Proxy` 滥用、Groovy / JSP 脚本热加载、`ClassLoader` 泄漏导致类无法卸载',
-                  '**排查手段**：`jstat -gc` 看 `MC`（容量）/ `MU`（已用）、`jcmd <pid> GC.metaspace` 看明细、`-XX:+TraceClassLoading` 定位谁在造类',
+                kind: 'concept',
+                title: '三个「常量池」:位置各不相同,这是最爱考的一处',
+                body: [
+                  '「常量池在哪」之所以总被问,是因为这里有三个不同的东西共用一个名字。**class 文件里的常量池**是编译产物,是静态的;加载进 JVM 后变成**运行时常量池**,存放在方法区;而**字符串常量池**是一张全局的 `StringTable`,专门为字符串字面量做去重。',
+                  '关键的时间点是 **JDK 7**:字符串常量池从永久代**搬到了堆**。原因很实在:永久代空间小、回收频率极低(只在 Full GC 处理),而字符串字面量恰恰是最容易膨胀的数据;搬到堆里之后,没被引用的字面量可以被 Minor GC 带走。[[这一步比永久代被移除还早一年]],所以「JDK 8 之后字符串常量池才进堆」是错的。',
+                  '搬家还带来一个语义变化:JDK 6 的 `intern()` 要把字符串**复制**到永久代;JDK 7+ 池里只存**堆中对象的引用**,不需要复制内容。于是 `intern()` 从「重量级操作」变成「一次哈希查找」。但它仍有代价——池就是一张 `StringTable`(默认桶数 `-XX:StringTableSize=60013`),大量 `intern()` 会引发哈希冲突反而变慢,而且池本身成了 GC 要扫描的对象。',
                 ],
-                depth:
-                  '一个反直觉的点：**把 `MetaspaceSize` 设小反而更慢**。因为它只是水位线，每涨到水位就触发一次元空间 GC，频繁 GC 会拖慢启动。所以正确做法是：**`MetaspaceSize` 设成接近稳态值的量**（用 `jstat` 观测到的 `MU` 峰值，留 20% 余量），`MaxMetaspaceSize` 设成它的 1.5–2 倍作为兜底。这也解释了为什么很多团队「照抄网上的 `-XX:MetaspaceSize=512m`」后启动反而变快——他们其实把水位抬到了稳态之上，前期根本没触发 GC。',
-                followup:
-                  '「元空间和 Code Cache 是一回事吗」——不是。元空间存**类元数据**，Code Cache 存 **JIT 编出的机器码**。两者都在本地内存，都容易在「动态生成大量类」的场景同时膨胀，但报错不同：元空间溢出报 `Metaspace`，Code Cache 满了则**静默退化**——JIT 停止编译，程序悄悄变慢，只在 GC 日志里留一行 `CodeCache is full`。',
+                points: [
+                  '`String s = new String("abc")`:`"abc"` 字面量在堆的字符串常量池里,`new` 出来的对象也在堆里,但一个是池内共享、一个是独立对象——所以 `s == "abc"` 为 `false`。',
+                  '运行时常量池在方法区(元空间),字符串常量池在堆——两者物理上早已分开。',
+                  '`intern()` 适合「大量重复的固定字符串」(枚举值、状态码);不适合「每次都不一样」的动态拼接。',
+                ],
               },
               {
-                kind: 'question',
-                title: '字符串常量池在哪个区域？它的位置发生过什么变化？',
-                questionId: 'java-04-Q11',
-                intent:
-                  '「位置变迁」题。三个时间点必须记牢：JDK 6 在永久代、JDK 7 搬到堆、JDK 8 永久代没了但它已在堆里。',
-                points: [
-                  '**JDK 6 及之前**：字符串常量池在**永久代**（方法区的实现）里。大量 `intern()` 会撑爆 PermGen',
-                  '**JDK 7**：字符串常量池**移到堆中**。这是关键一步，比永久代被移除还早一年',
-                  '**JDK 8 及之后**：永久代被元空间取代，但字符串常量池**已经在堆里**，与元空间无关',
-                  '**为什么搬到堆**：① 永久代空间小且回收频率极低（只在 Full GC 处理），而字符串常量是最易膨胀的数据；② 堆里回收更及时，未引用的字面量可以被 Minor GC 带走',
-                  '**内存含义**：`String s = new String("abc")` 中，`"abc"` 字面量在**堆的字符串常量池**里，`new` 出来的对象也在**堆**里——两者可能紧挨着，但一个是池内共享、一个是独立对象',
-                  '**`intern()` 的作用**：若池中已有等值字符串则返回池内引用，否则放入池并返回。它是「用 CPU 换内存」的典型手段，适合大量重复字符串（如枚举值、状态码）',
+                kind: 'concept',
+                title: '直接内存:为什么堆很空,它却 OOM 了',
+                body: [
+                  '`ByteBuffer.allocateDirect()` 向**操作系统本地内存**申请连续空间,不属于 JVM 运行时数据区。NIO 用它是因为能省一次拷贝:堆内 Buffer 做 IO 时,数据要先从内核缓冲区拷到堆内数组;直接内存可以直接作为 DMA 的目标,配合 `FileChannel.transferTo` 就是所谓的零拷贝。',
+                  '它的大小由 `-XX:MaxDirectMemorySize` 控制,默认**等于 `-Xmx`**。超出时抛的是 `java.lang.OutOfMemoryError: Direct buffer memory`,而这个异常**往往发生在堆还很空的时候**——这是最迷惑人的地方。',
+                  '根因在回收机制:`DirectByteBuffer` 挂一个基于**虚引用**的 `Cleaner`,对象被 GC 回收时才 `free` 掉本地内存。也就是说,**释放堆外内存依赖 GC 先回收那个 Java 对象**;而 GC 的触发条件是**堆压力**,堆外内存增长不产生堆压力。极端场景就是:不断分配 `DirectByteBuffer`、每个对象都很快不可达,堆里毫无压力、GC 一直不跑,本地内存一路涨到上限。',
+                  '所以 Netty 自己实现了引用计数(`ReferenceCountUtil.release`)而不依赖 `Cleaner`——[[不能把资源释放交给 GC]],这是同一道理在文件句柄、数据库连接、锁上的复现。还有一个经典组合坑:开了 `-XX:+DisableExplicitGC` 之后 `System.gc()` 失效,`Cleaner` 更难触发,堆外内存只增不减。',
                 ],
-                depth:
-                  '「JDK 7 搬到堆里」带来的一个直接后果是 `intern()` 的语义变便宜了：在 JDK 6，`intern()` 要把字符串**复制**到永久代；在 JDK 7+，池里只存**堆中对象的引用**，不需要复制内容。这使得 `intern()` 从「重量级操作」变成「一次哈希查找」。但它仍有代价——池是一个 `StringTable`（默认桶数 `-XX:StringTableSize=60013`），大量 `intern()` 会引发哈希冲突，反而变慢。这也解释了为什么「JDK 8 里用 `intern()` 优化内存」有时会让 Young GC 变长：字符串常量池本身成了 GC 要扫描的对象。',
-                followup:
-                  '「`new String("abc")` 创建了几个对象」——**一个或两个**。若池中已有 `"abc"`，只创建堆里那一个 `String` 对象；若没有，则先创建池内字面量对象，再创建堆对象，共两个。严格讲还要考虑**字节码里 `ldc` 引用的解析时机**，但面试层面答「一个或两个，取决于池中是否已存在」就够。',
-              },
-              {
-                kind: 'question',
-                title: '运行时常量池和字符串常量池有什么区别？',
-                questionId: 'java-04-Q12',
-                intent:
-                  '最容易混淆的一对概念。记住：**一个属于 class 文件、一个属于 String 类**，不是同一层的东西。',
                 points: [
-                  '**运行时常量池（Runtime Constant Pool）**：**每个类一份**，是 class 文件里 `constant_pool` 的运行时表示。存符号引用（类名、字段名、方法名）与字面量（数字、字符串字面量）',
-                  '**字符串常量池（String Pool）**：**全 JVM 一份**，是一个 `StringTable`（哈希表），专门缓存字符串字面量与 `intern()` 结果，用于复用',
-                  '**层级关系**：字符串常量池在**逻辑上**是运行时常量池的一部分（字面量那一类），但**物理上**自 JDK 7 起独立在堆中',
-                  '**动态性**：运行时常量池比 class 文件常量池更强——它支持**运行时新增**（`String.intern()` 就是把新字符串加进池里）',
-                  '**位置**：运行时常量池在方法区（JDK 8+ 即元空间）；字符串常量池在堆',
-                  '**溢出表现**：运行时常量池溢出报 `Metaspace`（或旧版 `PermGen space`）；字符串常量池因为内容在堆里，表现为普通 `Java heap space`',
+                  '`MaxDirectMemorySize` 默认等于 `-Xmx`,但这只是「默认」,它和堆是两块独立的内存——堆 4G + 堆外 4G,进程可能就是 8G。',
+                  '排查堆外内存用 NMT(`-XX:NativeMemoryTracking=detail` + `jcmd VM.native_memory`)或 `BufferPoolMXBean`。',
+                  '容器里必须显式设 `MaxDirectMemorySize`:否则 JVM 按 `-Xmx` 推导,而容器 limit 可能只比堆大一点。',
                 ],
-                depth:
-                  '一个能镇场的细节：**运行时常量池的「符号引用」在解析后会变成「直接引用」**。class 文件里 `invokevirtual #12` 的 `#12` 是一个符号（字符串 `"java/lang/Object.toString"`），第一次解析时才换成方法在内存中的实际地址，并把这个位置标记为「已解析」。这就是为什么「类加载的解析阶段可以推迟到初始化之后」——动态绑定（`invokedynamic`、虚方法）本来就要在运行时才确定目标。',
-                followup:
-                  '「`String s = "a" + "b"` 编译期发生什么」——**常量折叠**。两个都是编译期常量，`javac` 直接把它算成 `"ab"` 写进 class 文件的常量池，运行时只是 `ldc` 取一个已存在的池内引用，不创建任何 `StringBuilder`。但若有一边是变量（`"a" + x`），就变成 `StringBuilder.append` 或 JDK 9+ 的 `invokedynamic makeConcatWithConstants`。',
-              },
-              {
-                kind: 'question',
-                title: '直接内存是什么？为什么 NIO 要用它？会 OOM 吗？',
-                questionId: 'java-04-Q13',
-                intent:
-                  '堆外内存题。三个要点：不属于运行时数据区、省一次拷贝、有自己的 OOM 信息。',
-                points: [
-                  '**是什么**：通过 `ByteBuffer.allocateDirect()` 向**操作系统本地内存**申请的连续空间，**不属于** JVM 运行时数据区',
-                  '**为什么 NIO 用**：堆内 Buffer 做 IO 时，数据要「内核缓冲区 → 堆内数组」拷贝一次；直接内存可以直接作为 DMA 目标，省掉这次拷贝（配合 `FileChannel.transferTo` 就是零拷贝）',
-                  '**大小限制**：`-XX:MaxDirectMemorySize`，默认**等于 `-Xmx`**',
-                  '**会 OOM**：报 `java.lang.OutOfMemoryError: Direct buffer memory`，发生在**堆还很空**的时候——这是最迷惑人的地方',
-                  '**回收机制**：`DirectByteBuffer` 挂一个 `Cleaner`（基于**虚引用**），对象被回收时才 `free` 掉本地内存。所以「回收本地内存」依赖 GC 先回收那个 Java 对象',
-                  '**经典坑**：开了 `-XX:+DisableExplicitGC` 后 `System.gc()` 失效 → `Cleaner` 得不到触发 → 堆外内存只增不减 → 堆外 OOM，而堆看起来毫无异常',
-                ],
-                depth:
-                  '为什么「堆外内存要靠 GC 来释放」这件事如此危险？因为 GC 的触发条件是**堆压力**，而堆外内存的增长**不增加堆压力**。极端场景：程序不断分配 `DirectByteBuffer` 但每个对象都很快不可达，堆里毫无压力，GC 一直不跑，本地内存一路涨到 `MaxDirectMemorySize`。Netty 因此**自己实现了引用计数**（`ReferenceCountUtil.release`）而不依赖 `Cleaner`——这是「不能把资源释放交给 GC」的教科书案例。同一个道理也适用于文件句柄、数据库连接、锁。',
-                followup:
-                  '「怎么排查堆外内存泄漏」——① `-XX:NativeMemoryTracking=summary` + `jcmd <pid> VM.native_memory summary`，看 `Other` / `Internal` 段的增长；② 通过 `BufferPoolMXBean`（JMX）读 `direct` 池的 `memoryUsed`；③ `pmap -x <pid>` 对比进程实际映射（注意 NMT **不覆盖**第三方 native 库，也不等于 RSS）；④ Netty 场景开 `-Dio.netty.leakDetection.level=paranoid` 直接定位未释放的 `ByteBuf`。',
               },
               {
                 kind: 'diagram',
-                title: 'OOM 归因表：一句「内存溢出」对应八种病',
+                title: 'OOM 归因表:一句「内存溢出」对应八种病',
                 diagram: {
                   type: 'matrix',
                   cols: ['触发条件', '典型错误信息', '首查工具'],
@@ -4598,99 +4215,69 @@ export default {
                     ['进程（非 Java）', '本地库泄漏 / glibc 碎片 / cgroup limit', '看不到 Java OOM，只有 OOMKilled', 'NMT、pmap、cgroup 指标'],
                   ],
                   caption:
-                    '这张表的价值在于：**同一句「内存溢出」落在不同区域，是完全不同的病，修法互不通用**。堆 OOM 要查对象为什么活下来；元空间 OOM 要查谁在造类；直接内存 OOM 要查谁没 release；`unable to create new native thread` 要查线程池配置与 `ulimit`——这几种情况里，只有第一种能靠「调大 `-Xmx`」缓解，其余三种调堆完全无用甚至更糟（堆越大，留给本地内存的越少）。',
+                    '这张表的价值在于:**同一句「内存溢出」落在不同区域,是完全不同的病,修法互不通用**。堆 OOM 要查对象为什么活下来;元空间 OOM 要查谁在造类;直接内存 OOM 要查谁没 release;`unable to create new native thread` 要查线程池配置与 `ulimit`——这几种情况里,只有第一种能靠「调大 `-Xmx`」缓解,其余三种调堆完全无用甚至更糟(堆越大,留给本地内存的越少)。',
                 },
               },
               {
-                kind: 'question',
-                title: 'JVM 中有哪些 OOM？分别在什么情况下发生？',
-                questionId: 'java-04-Q14',
-                intent:
-                  '记忆题，但要有组织：按「区域」分组报，每组补一句「怎么造出来」。能顺带区分 `StackOverflowError` 就是满分答案。',
-                points: [
-                  '**`Java heap space`**：堆不足。对象太多 / 泄漏 / `-Xmx` 太小。造法：`while(true) list.add(new byte[1MB])`',
-                  '**`GC overhead limit exceeded`**：GC 花超 98% 时间却只回收不到 2% 内存（默认开启）。本质仍是堆不足，但 JVM 提前认输避免「空转」',
-                  '**`Metaspace`**：元空间不足。动态类生成过多、`MaxMetaspaceSize` 太小、ClassLoader 泄漏。造法：`while(true) Enhancer.create(...)`',
-                  '**`Direct buffer memory`**：堆外超限。Netty/NIO 未释放、`DisableExplicitGC` 阻断 Cleaner。造法：循环 `allocateDirect` 且不释放',
-                  '**`unable to create new native thread`**：线程数超 OS 限制。线程池无界、每请求一线程。注意此时**堆往往很空**',
-                  '**`Requested array size exceeds VM limit`**：数组长度逼近 `int` 上限（约 2^31-1 减头部）。罕见',
-                  '**`StackOverflowError`**：**不是 OOM**。栈深度超限（递归无出口、栈帧过大、`-Xss` 太小）。它同属 `Error`，但不是 `OutOfMemoryError`',
-                  '**`Out of swap space?` / `OOMKilled`**：连本地内存都不够，OS 出手。容器里表现为退出码 137，日志里**没有任何 Java 异常**',
+                kind: 'compare',
+                title: '`StackOverflowError` 与 `OutOfMemoryError`:看着像,成因完全不同',
+                head: ['维度', '`StackOverflowError`', '`OutOfMemoryError`'],
+                rows: [
+                  ['归属', '`Error` 的子类', '`Error` 的子类（另一支）'],
+                  ['直接原因', '**栈深度**超过 `-Xss` 限制', '**申请不到**所需内存'],
+                  ['发生在哪', '单根线程的虚拟机栈', '堆 / 元空间 / 直接内存 / 线程创建'],
+                  ['调大哪个参数能缓解', '`-Xss`（每个线程栈变大）', '对应区域的上限（`-Xmx`、`MaxMetaspaceSize` 等）'],
+                  ['典型复现', '无终止条件的递归', '持续往集合里塞对象且不释放'],
+                  ['排查入口', '异常栈本身就指出了递归位置', '堆 dump / NMT / GC 日志'],
                 ],
-                depth:
-                  '两个容易答错的细节。第一，`GC overhead limit exceeded` **不是独立的病**，它是 `Java heap space` 的「提前预告」——JVM 发现再怎么 GC 也救不回来，就提前抛错而不是硬撑到真没内存。可以通过 `-XX:-UseGCOverheadLimit` 关掉，但那是自欺欺人。第二，`unable to create new native thread` 的根因常在**操作系统**而非 JVM：Linux 的 `ulimit -u`（每用户进程/线程数）、`/proc/sys/kernel/threads-max`、以及每个线程 1MB 的栈空间。所以修法不是调 `-Xmx`，而是**减少线程数（用线程池）或调 `ulimit`**；而且在容器里，`-Xss` 设小一点能明显提高可创建线程数。',
-                followup:
-                  '「怎么快速区分这几种」——看**错误信息全称**。`OutOfMemoryError: <detail>` 里的 `<detail>` 就是区域标记，这是规范留给实现的诊断字段，一定要完整读。运维层面还有一个判据：**进程是否直接消失**。抛 Java 异常说明 JVM 还活着（有栈可打）；进程无声消失、`dmesg` 里有 `Out of memory: Killed process`，说明是被 OS 或 cgroup 杀的，此时该查 RSS 而不是堆。',
+                note:
+                  '最容易答错的一句是「栈溢出也是一种 OOM」。从继承关系看它们都由 `Error` 派生但互不相干;从成因看,一个是[[空间不够深]],一个是[[空间不够大]]。所以「加大 `-Xss` 能不能解决栈溢出」的答案是:**能缓解,但如果在死循环递归,加多大都没用**。',
+                caption:
+                  '还有一种容易混淆的:`unable to create new native thread` 属于 `OutOfMemoryError`,但它既不是堆也不是栈深的问题,而是**进程级线程数或 `ulimit -u` 到了上限**——它和「栈太深」是完全不同的两件事。',
+              },
+              {
+                kind: 'concept',
+                title: '堆没满却占 6G:三个层次要分开看',
+                body: [
+                  '「内存高」这个描述太粗,至少要拆成三层:**Java 堆(受 `-Xmx` 管)、本地内存(元空间 + 直接内存 + Code Cache + 线程栈,部分参数管)、以及进程自身**(JVM 自身的结构、glibc 的 arena 碎片)。容器看的是第三层的总和,这就是「堆很空但 RSS 很高」的全部原因。',
+                  '再往下拆一层,**内存泄漏与内存溢出也不是一回事**:泄漏是「对象该被回收却还可达」,溢出是「申请不到内存」。泄漏**会导致**溢出,但溢出也可能是「一次性申请太大」或「上限配太小」。[[把两者混为一谈,就会出现「加内存解决泄漏」这种治标不治本的处置]]。',
+                  '真正有效的排查顺序是:先看**堆是否在 Full GC 后回落**(不回落才是泄漏)→ 再看**元空间与直接内存**(这两块堆 dump 里看不到)→ 最后看**线程数 × 栈大小**(容易算,也容易被忽略)。顺序反了就会拿着堆 dump 找一整天,而问题不在堆里。',
+                ],
+                points: [
+                  '堆泄漏的判据是「Full GC 后仍不回落」,单看「used 很高」不算证据——GC 还没跑时 used 高是正常的。',
+                  '元空间与直接内存在堆 dump 里**完全不可见**,这是排查最容易走错的一步。',
+                  '`pmap -x <pid>` 能看到进程各段内存;配合 NMT 才能把「本地内存」拆成 Java 与 native 两部分。',
+                ],
               },
               {
                 kind: 'question',
-                title: 'StackOverflowError 和 OutOfMemoryError 分别怎么产生？如何复现？',
-                questionId: 'java-04-Q15',
+                title: 'Q5 · JVM 运行时数据区包括哪些部分？哪些是线程私有的？',
+                questionId: 'java-04-Q5',
                 intent:
-                  '两者的区别要说得干净：**一个是「栈太深」，一个是「内存不够」**，虽然都继承 `Error`，但触发机制完全不同。',
+                  '这是整章的入口题。考的不是「能不能报出五个名字」,而是「知不知道划分依据」——只要说出「按生命周期归谁」这一条,私有与共享的归属就能自己推出来,不必死记。',
                 points: [
-                  '**`StackOverflowError`**：线程请求的栈深度超过 `-Xss` 允许的最大深度。**栈空间是固定的**，溢出的含义是「装不下更多栈帧」，不是「系统没内存」',
-                  '**复现 SOE**：`void f() { f(); }` 无限递归；或 `-Xss256k` 后跑稍深的递归。注意它是**单个线程**的问题，不影响其他线程',
-                  '**`OutOfMemoryError`**：某块区域**无法再申请到内存**。可以发生在堆、元空间、直接内存、线程数量等任一处',
-                  '**复现堆 OOM**：`List<byte[]> l = new ArrayList<>(); while(true) l.add(new byte[1024*1024]);`（`-Xmx64m` 下很快）',
-                  '**复现栈数量 OOM**：`while(true) new Thread(() -> { sleep(100000); }).start();` → `unable to create new native thread`',
-                  '**关键区别**：SOE 是**深度**问题（改算法 / 调 `-Xss`）；OOM 是**总量**问题（改容量 / 找泄漏）。SOE 发生后 JVM 通常还能继续跑，OOM 后往往整个进程不可用',
+                  '**判据先行**:划分依据是生命周期——随线程生灭的私有,随 JVM 生灭的共享',
+                  '**私有三块**:程序计数器(行号)、虚拟机栈(栈帧链)、本地方法栈(native 栈帧)',
+                  '**共享两块**:堆(对象实例)、方法区(类元信息、运行时常量池、静态变量)',
+                  '**编外三块**:直接内存、Code Cache、GC 辅助结构——不在规范里,但都计入 RSS',
+                  '**收口**:参数与错误都跟着区域走——`-Xss` 配栈、`-Xmx` 配堆,栈太深抛 `StackOverflowError`、堆不够抛 `Java heap space`',
                 ],
                 depth:
-                  '一个值得讲的边界：**递归到底该算 SOE 还是 OOM**？答案取决于实现细节——HotSpot 的平台线程栈是**固定大小**（`-Xss`），所以递归深了是 SOE；但**虚拟线程的栈在堆上、按需增长**，递归深了会先耗尽堆，报 **`OutOfMemoryError: Java heap space`**。同一个 `f()` 递归，在两种线程模型下报不同的错——这个例子能一举证明「你理解的是机制而不是结论」。这也解释了为什么虚拟线程里 `StackOverflowError` 反而少见。',
+                  '拉开分档的是能不能补上两个细节:一是「程序计数器是唯一不抛 OOM 的区域」,二是「字符串常量池物理上在堆里、逻辑上属方法区」。[[能主动说出这两句,说明不是背的五个名词,而是真的按区域在想问题]]。',
                 followup:
-                  '「SOE 的栈信息怎么读」——Java 会打印**固定长度的重复帧**（默认 1024 帧，`-XX:MaxJavaStackTraceDepth` 控制），中间用 `...` 省略，形如 `at X.f(X.java:3)` 重复上千次。定位时直接看**重复帧的前后文**：真正的问题往往在「第一次出现这个帧的地方」——那就是递归的入口。',
-              },
-              {
-                kind: 'question',
-                title: '堆没满但进程 RSS 很高，可能是什么原因？',
-                questionId: 'java-04-Q16',
-                intent:
-                  '区分「背过」与「做过」的分水岭题。核心是**把进程内存拆成一张加法表**，然后逐项排除。',
-                points: [
-                  '**先建公式**：进程内存 ≈ 堆 + 元空间 + 线程栈总量 + Code Cache + 直接内存 + GC 辅助结构 + JNI/本地库',
-                  '**线程栈**：每个平台线程默认 1MB。500 个线程就是 500MB——在 `-Xmx2g` 的进程里这是最大的一块「隐形内存」',
-                  '**直接内存**：Netty / NIO 用得多时涨得最快，且**不受 `-Xmx` 约束**（默认上限等于 `-Xmx`）',
-                  '**Code Cache**：JIT 机器码。默认 `ReservedCodeCacheSize` 240MB，动态生成大量类时可能吃满',
-                  '**`-Xms` 与 `-Xmx` 不一致 + 未开 `AlwaysPreTouch`**：堆是**虚拟预留、按需物理分配**，RSS 与 `-Xmx` 本来就不相等，这属于正常现象不是 bug',
-                  '**glibc 内存碎片**：`malloc` 用 `brk`/`mmap` 分配后不归还 OS（`M_MMAP_THRESHOLD`、arena 机制），表现为 RSS 只涨不落，`free` 了也没用',
-                  '**容器差异**：cgroup limit 低于 `-Xmx` 时会被 `OOMKilled`，退出码 137，**日志里没有任何 Java 异常**',
-                ],
-                depth:
-                  '排查顺序应当是**从便宜到昂贵**：① `jcmd <pid> GC.heap_info` 确认堆实际使用量（比 `-Xmx` 差多少）；② `jcmd <pid> VM.native_memory summary` 看 JVM 自己的账本（需启动时加 `-XX:NativeMemoryTracking=summary`，开销约 5–10%）；③ `pmap -x <pid>` 看真实映射，减去 NMT 的账，**差值就是第三方本地库**；④ `jstack <pid> | grep -c "java.lang.Thread.State"` 数线程数；⑤ 容器里还要 `cat /sys/fs/cgroup/memory.current`。注意 **NMT 不等于 RSS**——它不覆盖 JNI、glibc 开销、以及线程栈的实际提交部分，所以「NMT 加起来只有 1G 而 RSS 是 3G」是完全可能的。',
-                followup:
-                  '「`-Xms` 和 `-Xmx` 该不该设成一样」——**生产环境建议设成一样**。原因有三：① 避免堆反复扩容缩容带来的抖动与 Full GC；② 让内存占用可预测（否则 RSS 随机波动，容器 limit 难定）；③ 配合 `-XX:+AlwaysPreTouch` 可以在启动时就把物理内存全部摸一遍，把延迟从「运行时逐页缺页中断」挪到「启动时一次性付出」。代价是启动变慢、且 RSS 一开始就等于 `-Xmx`。',
-              },
-              {
-                kind: 'question',
-                title: '谈谈你对内存泄漏和内存溢出的理解，各举个例子',
-                questionId: 'java-04-Q17',
-                intent:
-                  '概念辨析题。一句话切开：**泄漏是「该释放的没释放」，溢出是「实在装不下了」**；泄漏是原因，溢出是结果之一。',
-                points: [
-                  '**内存泄漏**：对象已经不再被业务需要，但仍被 GC Roots 可达，因此无法回收。**内存泄漏不一定立刻溢出**，它只是让可用空间持续缩小',
-                  '**内存溢出**：某区域确实申请不到内存，抛 `OutOfMemoryError`。它可能由泄漏引起，也可能是「正常但量太大」（如一次性加载 10GB 文件）',
-                  '**Java 泄漏的典型形态**：长生命周期容器持有短生命周期对象——`static Map` 做缓存不清、`ThreadLocal` 用完不 `remove`、监听器注册后不注销',
-                  '**线程池 + `ThreadLocal` 的坑**：线程被复用，`ThreadLocalMap` 的 `Entry` 的 key 是弱引用（会被回收变 `null`），但 value 是强引用——**key 没了 value 还在**，于是泄漏',
-                  '**`ClassLoader` 泄漏**：热部署时旧 `ClassLoader` 被一个 `static` 字段意外持有，它加载的所有类连同元空间一起无法释放',
-                  '**判断方法**：多次 Full GC 后老年代占用仍持续上涨（`jstat -gcutil` 看 `O` 列单调上升）→ 基本可判定泄漏；用 MAT 看支配树和「到 GC Roots 的最短路径」定位持有者',
-                ],
-                depth:
-                  '为什么 Java 有 GC 还会泄漏？因为 GC 判断的是**可达性**，不是**有用性**。一个 `static List` 里塞满了早已过期的对象，它们全都「可达」，GC 无权回收——**这是逻辑问题，不是内存管理问题**。所以定位泄漏的正确问法不是「谁没 free」，而是「**谁还持有它，以及为什么它还该被持有**」。这也是 MAT 里最有用的一条功能：「Path to GC Roots → exclude weak/soft references」，它直接告诉你持有链。',
-                followup:
-                  '「内存泄漏一定会 OOM 吗」——不一定。如果泄漏速率低于进程重启周期，它可能永远不 OOM，但会持续推高 GC 频率与停顿（因为每次都要扫描那些垃圾对象），表现为**延迟抖动而非崩溃**。这类问题最容易被误判成「GC 参数没调好」，实际是代码里那个没清空的缓存。',
+                  '追问:JDK 8 之后元空间还会 OOM 吗?——会,但原因变了:不再是「类太多」,而是「ClassLoader 泄漏导致类无法卸载」。再追一句:那怎么确认是元空间而不是堆?“看 `jstat -gc` 的 `MC/MU` 是否持续上涨,以及堆 dump 里是否有大量 `ClassLoader` 实例”。',
               },
               {
                 kind: 'principle',
-                title: '一张图记住整节课：区域 → 参数 → 错误',
+                title: '收成一张图:区域 → 参数 → 错误',
                 body: [
-                  '运行时数据区这 17 道题，本质上都在回答同一个三元组：**这块内存在哪（区域）→ 谁能控制它（参数）→ 它崩了报什么（错误）**。把这三列对齐，就不需要死记任何结论。',
+                  '运行时数据区这一组题,本质上都在回答同一个三元组:**这块内存在哪(区域)→ 谁能控制它(参数)→ 它崩了报什么(错误)**。把这三列对齐,就不需要死记任何结论。',
                 ],
                 steps: [
                   {
                     title: '① 按「归属」分区',
                     detail:
-                      '私有（PC、虚拟机栈、本地方法栈）记录「执行到哪」，共享（堆、方法区）存放「大家共用的数据」。判据只有一条：每个线程都得有一份的，就是私有的。',
+                      '私有(PC、虚拟机栈、本地方法栈)记录「执行到哪」,共享(堆、方法区)存放「大家共用的数据」。判据只有一条:每个线程都得有一份的,就是私有的。',
                   },
                   {
                     title: '② 给每个区域配参数',
@@ -4700,16 +4287,16 @@ export default {
                   {
                     title: '③ 给每个区域配错误',
                     detail:
-                      '堆 → `Java heap space`；元空间 → `Metaspace`；堆外 → `Direct buffer memory`；栈深 → `StackOverflowError`；栈数 → `unable to create new native thread`；OS 层 → `OOMKilled` / 137。**错误信息里的 detail 就是区域标记**，读全它。',
+                      '堆 → `Java heap space`;元空间 → `Metaspace`;堆外 → `Direct buffer memory`;栈深 → `StackOverflowError`;栈数 → `unable to create new native thread`;OS 层 → `OOMKilled` / 137。**错误信息里的 detail 就是区域标记**,读全它。',
                   },
                   {
                     title: '④ 记住三条跨区域的规律',
                     detail:
-                      '堆越大，留给本地内存（元空间 + 直接内存 + 线程栈）的越少，容器里尤其明显；GC 只按可达性回收，所以堆外内存、文件句柄、连接都可能「泄漏」；字符串常量池在堆里、类元信息在元空间——**同一个「方法区」概念，物理上早已分裂成两处**。',
+                      '堆越大,留给本地内存(元空间 + 直接内存 + 线程栈)的越少,容器里尤其明显;GC 只按可达性回收,所以堆外内存、文件句柄、连接都可能「泄漏」;字符串常量池在堆里、类元信息在元空间——**同一个「方法区」概念,物理上早已分裂成两处**。',
                   },
                 ],
                 takeaway:
-                  '面试时若被问到任意一块区域，回答模板固定：**它在哪（私有/共享/本地内存）、存什么、谁管它（参数）、崩了报什么错、怎么排查**。五句话答完，比罗列名词有效得多——因为面试官真正想确认的是「你遇到 OOM 时知道往哪看」。',
+                  '面试时若被问到任意一块区域,回答模板固定:**它在哪(私有/共享/本地内存)、存什么、谁管它(参数)、崩了报什么错、怎么排查**。五句话答完,比罗列名词有效得多——因为面试官真正想确认的是「你遇到 OOM 时知道往哪看」。',
               },
             ],
           },
