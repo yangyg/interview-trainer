@@ -11,6 +11,7 @@ import aiFoundation from './ai/foundation.mjs'
 import aiServingPrompt from './ai/serving-prompt.mjs'
 import aiRagAgent from './ai/rag-agent.mjs'
 import aiProduction from './ai/production.mjs'
+import archDesign from './arch/design.mjs'
 
 /**
  * 全部课程作者源。
@@ -30,4 +31,5 @@ export const COURSES = [
   aiServingPrompt,
   aiRagAgent,
   aiProduction,
+  archDesign,
 ]

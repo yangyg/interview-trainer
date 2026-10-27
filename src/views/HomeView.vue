@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import { useCourseStore } from "@/stores/course";
 import { useDataStore } from "@/stores/data";
 import { useProgressStore } from "@/stores/progress";
-import { LANG_META } from "@/lib/langs";
+import { LANG_META, LANGUAGES } from "@/lib/langs";
 import type { Language } from "@/lib/types";
 
 const router = useRouter();
@@ -44,7 +44,7 @@ const masteryPct = computed(() =>
 const topTab = ref("java");
 const topList = computed(
   () =>
-    dataStore.index?.topLists[topTab.value as "java" | "go" | "ai"] ?? [],
+    dataStore.index?.topLists[topTab.value as Language] ?? [],
 );
 
 function topicLearned(topicId: string): number {
@@ -107,19 +107,24 @@ function goResume() {
   });
 }
 
+/** 有高频榜的语言(arch 等新语言未必有) */
+const topLangs = computed(() =>
+  LANGUAGES.filter((l) => (dataStore.index?.topLists[l]?.length ?? 0) > 0),
+);
+function topCount(l: Language) {
+  return dataStore.index?.topLists[l]?.length ?? 0;
+}
+
+/** 数据源描述:随语言列表自动扩展,避免新增语言时漏改文案 */
+const sourceLine = computed(() => LANGUAGES.map((l) => LANG_META[l].label).join(" / "));
+
+const countLine = computed(() =>
+  LANGUAGES.map((l) => `${LANG_META[l].label} ${dataStore.index?.counts[l] ?? 0}`).join(" · "),
+);
+
 function langCard(language: Language) {
-  const topics =
-    language === "java"
-      ? dataStore.javaTopics
-      : language === "go"
-        ? dataStore.goTopics
-        : dataStore.aiTopics;
-  const total =
-    language === "java"
-      ? (dataStore.index?.counts.java ?? 0)
-      : language === "go"
-        ? (dataStore.index?.counts.go ?? 0)
-        : (dataStore.index?.counts.ai ?? 0);
+  const topics = dataStore.topicsOf(language);
+  const total = dataStore.index?.counts[language] ?? 0;
   const learned = topics.reduce((sum, t) => sum + topicLearned(t.id), 0);
   return { topics, total, learned };
 }
@@ -154,7 +159,7 @@ function langCard(language: Language) {
             class="mt-2.5 max-w-prose text-pretty text-sm leading-relaxed text-muted-foreground"
           >
             {{ dataStore.total }} 道真题,按间隔重复安排复习,模拟真实面试节奏。
-            数据源:本地 Java / Golang 面试题库文档 · 更新于
+            数据源:本地 {{ sourceLine }} 题库文档 · 更新于
             {{ dataStore.index?.generatedAt.slice(0, 10) }}
           </p>
         </div>
@@ -184,11 +189,7 @@ function langCard(language: Language) {
           <p class="mt-1.5 text-2xl font-semibold tabular-nums">
             {{ dataStore.total }}
           </p>
-          <p class="text-xs text-muted-foreground">
-            Java {{ dataStore.index?.counts.java }} · Go
-            {{ dataStore.index?.counts.go }} · AI
-            {{ dataStore.index?.counts.ai }}
-          </p>
+          <p class="text-xs text-muted-foreground">{{ countLine }}</p>
         </CardContent>
       </Card>
       <Card
@@ -282,9 +283,9 @@ function langCard(language: Language) {
     </Card>
 
     <!-- 语言专题 -->
-    <div class="grid gap-3 lg:grid-cols-3">
+    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Card
-        v-for="lang in ['java', 'go', 'ai'] as Language[]"
+        v-for="lang in LANGUAGES"
         :key="lang"
         class="overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
       >
@@ -298,7 +299,7 @@ function langCard(language: Language) {
             </span>
             <div>
               <CardTitle class="text-base">{{
-                LANG_META[lang].label + (lang === "ai" ? "" : " 后端")
+                LANG_META[lang].title
               }}</CardTitle>
               <CardDescription
                 >{{ langCard(lang).total }} 题 · 已学
@@ -344,15 +345,14 @@ function langCard(language: Language) {
             </CardTitle>
             <Tabs v-model="topTab">
               <TabsList class="h-7">
-                <TabsTrigger value="java" class="px-2.5 text-xs"
-                  >Java Top 30</TabsTrigger
+                <TabsTrigger
+                  v-for="l in topLangs"
+                  :key="l"
+                  :value="l"
+                  class="px-2.5 text-xs"
                 >
-                <TabsTrigger value="go" class="px-2.5 text-xs"
-                  >Go Top 10</TabsTrigger
-                >
-                <TabsTrigger value="ai" class="px-2.5 text-xs"
-                  >AI Top 20</TabsTrigger
-                >
+                  {{ LANG_META[l].label }} Top {{ topCount(l) }}
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

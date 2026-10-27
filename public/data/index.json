@@ -1,10 +1,11 @@
 {
-  "generatedAt": "2026-10-25T12:24:24.715Z",
+  "generatedAt": "2026-10-27T05:56:26.214Z",
   "counts": {
     "java": 889,
     "go": 304,
     "ai": 136,
-    "total": 1329
+    "arch": 92,
+    "total": 1421
   },
   "topics": [
     {
@@ -966,6 +967,91 @@
           "count": 4
         }
       ]
+    },
+    {
+      "id": "arch-01",
+      "language": "arch",
+      "name": "架构基础与设计原则",
+      "file": "01-架构基础与设计原则.md",
+      "count": 20,
+      "chapters": [
+        {
+          "name": "第一章 架构的本质与目标",
+          "count": 17
+        },
+        {
+          "name": "第二章 拆分与协作的边界",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "id": "arch-02",
+      "language": "arch",
+      "name": "高可用与容灾设计",
+      "file": "02-高可用与容灾设计.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "第一章 可用性目标与度量",
+          "count": 11
+        },
+        {
+          "name": "第二章 容灾与流量调度",
+          "count": 7
+        }
+      ]
+    },
+    {
+      "id": "arch-03",
+      "language": "arch",
+      "name": "高性能与缓存架构",
+      "file": "03-高性能与缓存架构.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "第一章 性能指标与瓶颈定位",
+          "count": 9
+        },
+        {
+          "name": "第二章 提升吞吐的手段与代价",
+          "count": 9
+        }
+      ]
+    },
+    {
+      "id": "arch-04",
+      "language": "arch",
+      "name": "数据一致性与分布式架构",
+      "file": "04-数据一致性与分布式架构.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "第一章 分布式事务",
+          "count": 6
+        },
+        {
+          "name": "第二章 消息与协调",
+          "count": 12
+        }
+      ]
+    },
+    {
+      "id": "arch-05",
+      "language": "arch",
+      "name": "系统设计场景题",
+      "file": "05-系统设计场景题.md",
+      "count": 18,
+      "chapters": [
+        {
+          "name": "第一章 高频经典场景",
+          "count": 10
+        },
+        {
+          "name": "第二章 平台与基础组件",
+          "count": 8
+        }
+      ]
     }
   ],
   "topLists": {
@@ -1334,6 +1420,128 @@
         "location": "06 Agent",
         "questionId": "ai-06-Q7"
       }
+    ],
+    "arch": [
+      {
+        "rank": 1,
+        "title": "什么是软件架构？架构设计到底在决定什么？",
+        "location": "01 / Q1",
+        "questionId": "arch-01-Q1"
+      },
+      {
+        "rank": 2,
+        "title": "单体架构和微服务，什么时候该拆？拆早了会怎样？",
+        "location": "01 / Q5",
+        "questionId": "arch-01-Q5"
+      },
+      {
+        "rank": 3,
+        "title": "微服务的边界怎么划？DDD 的限界上下文能解决什么？",
+        "location": "01 / Q6",
+        "questionId": "arch-01-Q6"
+      },
+      {
+        "rank": 4,
+        "title": "CAP 到底在说什么？为什么说「三选二」是误读？",
+        "location": "01 / Q8",
+        "questionId": "arch-01-Q8"
+      },
+      {
+        "rank": 5,
+        "title": "SLA、SLO、SLI 分别是什么？错误预算怎么用？",
+        "location": "02 / Q1",
+        "questionId": "arch-02-Q1"
+      },
+      {
+        "rank": 6,
+        "title": "可用性是怎么算的？为什么串行链路是可用性的天敌？",
+        "location": "02 / Q2",
+        "questionId": "arch-02-Q2"
+      },
+      {
+        "rank": 7,
+        "title": "熔断器的原理是什么？参数怎么定？",
+        "location": "02 / Q5",
+        "questionId": "arch-02-Q5"
+      },
+      {
+        "rank": 8,
+        "title": "限流的四种算法，什么场景用哪个？",
+        "location": "02 / Q6",
+        "questionId": "arch-02-Q6"
+      },
+      {
+        "rank": 9,
+        "title": "重试为什么会导致雪崩？怎么正确重试？",
+        "location": "02 / Q10",
+        "questionId": "arch-02-Q10"
+      },
+      {
+        "rank": 10,
+        "title": "幂等怎么做？为什么说「幂等是分布式系统的地基」？",
+        "location": "02 / Q11",
+        "questionId": "arch-02-Q11"
+      },
+      {
+        "rank": 11,
+        "title": "缓存与数据库怎么保持一致？先删缓存还是先更新库？",
+        "location": "03 / Q4",
+        "questionId": "arch-03-Q4"
+      },
+      {
+        "rank": 12,
+        "title": "缓存穿透、击穿、雪崩有什么区别？分别怎么解？",
+        "location": "03 / Q5",
+        "questionId": "arch-03-Q5"
+      },
+      {
+        "rank": 13,
+        "title": "什么时候该分库分表？代价是什么？",
+        "location": "03 / Q8",
+        "questionId": "arch-03-Q8"
+      },
+      {
+        "rank": 14,
+        "title": "分布式事务有哪些方案？怎么选？",
+        "location": "04 / Q1",
+        "questionId": "arch-04-Q1"
+      },
+      {
+        "rank": 15,
+        "title": "TCC 的三个阶段各做什么？空回滚、悬挂、幂等怎么处理？",
+        "location": "04 / Q3",
+        "questionId": "arch-04-Q3"
+      },
+      {
+        "rank": 16,
+        "title": "本地消息表和事务消息，怎么保证「写库」和「发消息」原子？",
+        "location": "04 / Q5",
+        "questionId": "arch-04-Q5"
+      },
+      {
+        "rank": 17,
+        "title": "设计一个秒杀系统",
+        "location": "05 / Q2",
+        "questionId": "arch-05-Q2"
+      },
+      {
+        "rank": 18,
+        "title": "怎么防止库存超卖？几种方案的代价",
+        "location": "05 / Q8",
+        "questionId": "arch-05-Q8"
+      },
+      {
+        "rank": 19,
+        "title": "设计一个 Feed 流（关注/推荐信息流）",
+        "location": "05 / Q4",
+        "questionId": "arch-05-Q4"
+      },
+      {
+        "rank": 20,
+        "title": "线上接口变慢，你按什么顺序排查？",
+        "location": "03 / Q18",
+        "questionId": "arch-03-Q18"
+      }
     ]
   },
   "docs": [
@@ -1366,6 +1574,12 @@
       "language": "ai",
       "title": "AI 题库总览",
       "description": "2026 AI 岗考情、复习路径与最高频 20 题速查"
+    },
+    {
+      "id": "arch-readme",
+      "language": "arch",
+      "title": "架构设计题库总览",
+      "description": "语言无关的架构设计:五个专题、复习路径与最高频 20 题速查"
     },
     {
       "id": "go-profile",

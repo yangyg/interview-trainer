@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CourseCard from '@/components/course/CourseCard.vue'
+import { LANG_META, LANGUAGES } from '@/lib/langs'
 import { useCourseStore } from '@/stores/course'
 import type { CourseSummary, Language } from '@/lib/types'
 
@@ -17,11 +18,10 @@ const courseStore = useCourseStore()
 // ---------- 路由状态 ----------
 
 /** 与「题库浏览」保持一致:语言筛选落在 URL 上(/courses?lang=go),可分享、可前进后退 */
-const LANGS: readonly Language[] = ['java', 'go', 'ai']
 type LangFilter = 'all' | Language
 
 function isLangFilter(v: unknown): v is LangFilter {
-  return v === 'all' || (typeof v === 'string' && LANGS.includes(v as Language))
+  return v === 'all' || (typeof v === 'string' && LANGUAGES.includes(v as Language))
 }
 
 const tab = computed<LangFilter>({
@@ -42,7 +42,7 @@ function setTab(v: string) {
 
 const list = computed<CourseSummary[]>(() => {
   if (tab.value === 'all') {
-    return (['java', 'go', 'ai'] as Language[]).flatMap((l) => courseStore.coursesOf(l))
+    return LANGUAGES.flatMap((l) => courseStore.coursesOf(l))
   }
   return courseStore.coursesOf(tab.value)
 })
@@ -59,12 +59,11 @@ const overall = computed(() => {
   return { done, total, pct: total ? Math.round((done / total) * 100) : 0 }
 })
 
-const languageCount = computed(() => ({
-  all: courseStore.courses.length,
-  java: courseStore.coursesOf('java').length,
-  go: courseStore.coursesOf('go').length,
-  ai: courseStore.coursesOf('ai').length,
-}))
+const languageCount = computed(() => {
+  const out = { all: courseStore.courses.length } as Record<LangFilter, number>
+  for (const l of LANGUAGES) out[l] = courseStore.coursesOf(l).length
+  return out
+})
 
 const loading = computed(() => !courseStore.isIndexReady && !courseStore.indexError)
 </script>
@@ -89,9 +88,9 @@ const loading = computed(() => !courseStore.isIndexReady && !courseStore.indexEr
     <Tabs :model-value="tab" class="mb-4" @update:model-value="setTab(String($event))">
       <TabsList>
         <TabsTrigger value="all">全部 {{ languageCount.all }}</TabsTrigger>
-        <TabsTrigger value="java">Java {{ languageCount.java }}</TabsTrigger>
-        <TabsTrigger value="go">Golang {{ languageCount.go }}</TabsTrigger>
-        <TabsTrigger value="ai">AI {{ languageCount.ai }}</TabsTrigger>
+        <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l">
+          {{ LANG_META[l].label }} {{ languageCount[l] }}
+        </TabsTrigger>
       </TabsList>
     </Tabs>
 

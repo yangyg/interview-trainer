@@ -1,4 +1,4 @@
-export type Language = 'java' | 'go' | 'ai'
+export type Language = 'java' | 'go' | 'ai' | 'arch'
 
 export interface SourceRef {
   title?: string
@@ -53,9 +53,10 @@ export interface DocMeta {
 
 export interface IndexData {
   generatedAt: string
-  counts: { java: number; go: number; ai: number; total: number }
+  /** 各语言题数(arch = 无关语言的架构设计);旧产物可能缺字段,store 会按 topics 补齐 */
+  counts: Record<Language, number> & { total: number }
   topics: Topic[]
-  topLists: { java: TopItem[]; go: TopItem[]; ai: TopItem[] }
+  topLists: Partial<Record<Language, TopItem[]>>
   docs: DocMeta[]
 }
 

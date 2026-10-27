@@ -1,7 +1,8 @@
 import MiniSearch from 'minisearch'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
-import type { IndexData, Question, Topic, TopicData } from '@/lib/types'
+import { LANGUAGES } from '@/lib/langs'
+import type { IndexData, Language, Question, Topic, TopicData } from '@/lib/types'
 
 /** CJK 按二元组分词,拉丁词整词小写——让中文可前缀/模糊检索 */
 function cjkTokenizer(text: string): string[] {
@@ -36,14 +37,14 @@ export const useDataStore = defineStore('data', {
     topics(): Topic[] {
       return this.index?.topics ?? []
     },
-    javaTopics(): Topic[] {
-      return this.topics.filter((t) => t.language === 'java')
+    /** 按语言取专题——语言列表来自 LANG_META,新增语言不需要改这里 */
+    topicsOf(): (language: Language) => Topic[] {
+      return (language: Language) => this.topics.filter((t) => t.language === language)
     },
-    goTopics(): Topic[] {
-      return this.topics.filter((t) => t.language === 'go')
-    },
-    aiTopics(): Topic[] {
-      return this.topics.filter((t) => t.language === 'ai')
+    /** 有题目的语言(按 LANGUAGES 顺序),供首页/筛选栏渲染 */
+    activeLanguages(): Language[] {
+      const seen = new Set(this.topics.map((t) => t.language))
+      return LANGUAGES.filter((l) => seen.has(l))
     },
     allQuestions(): Question[] {
       return Object.values(this.questionsById)
@@ -69,11 +70,14 @@ export const useDataStore = defineStore('data', {
         const indexRes = await fetch(`${base}data/index.json`)
         if (!indexRes.ok) throw new Error(`加载索引失败(${indexRes.status})`)
         const index = (await indexRes.json()) as IndexData
-        // 兼容旧产物:counts 可能缺字段(曾漏写 ai),缺失时按 topics 求和补齐,
+        // 兼容旧产物:counts 可能缺字段(曾漏写 ai、后来漏写 arch),缺失时按 topics 求和补齐,
         // 否则首页会显示「AI 0 题」。JSON 是外部输入,不能只靠类型断言。
-        const derived: IndexData['counts'] = { java: 0, go: 0, ai: 0, total: 0 }
-        for (const t of index.topics) derived[t.language] += t.count
-        derived.total = derived.java + derived.go + derived.ai
+        const derived = { total: 0 } as IndexData['counts']
+        for (const l of LANGUAGES) derived[l] = 0
+        for (const t of index.topics) {
+          derived[t.language] = (derived[t.language] ?? 0) + t.count
+          derived.total += t.count
+        }
         index.counts = { ...derived, ...index.counts }
         this.index = index
 

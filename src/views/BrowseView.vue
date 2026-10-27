@@ -33,10 +33,10 @@ import EmptyState from '@/components/EmptyState.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
 import StatusActions from '@/components/StatusActions.vue'
 import { cn } from '@/lib/utils'
-import { LANG_META } from '@/lib/langs'
+import { LANG_META, LANGUAGES } from '@/lib/langs'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
-import type { Question, Topic } from '@/lib/types'
+import type { Language, Question, Topic } from '@/lib/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,12 +48,12 @@ const progress = useProgressStore()
 const lang = computed<string>({
   get: () => {
     const t = route.query.lang as string
-    if (t === 'java' || t === 'go' || t === 'ai') return t
+    if (LANGUAGES.includes(t as Language)) return t
     return currentTopic.value?.language ?? 'java'
   },
   set: (v) => {
     // 切语言时自动选中该语言第一个专题,避免列表区空白
-    const first = (v === 'go' ? dataStore.goTopics : v === 'ai' ? dataStore.aiTopics : dataStore.javaTopics)[0]?.id
+    const first = dataStore.topicsOf(v as Language)[0]?.id
     router.replace({ query: { ...route.query, lang: v, topic: first, q: undefined } })
   },
 })
@@ -73,12 +73,13 @@ const currentTopic = computed<Topic | undefined>(() => {
 
 const questionId = computed<string | undefined>(() => (route.query.q as string) || undefined)
 
-// 首次进入:选中第一个专题
+// 首次进入:选中「当前语言下」的第一个专题(带 ?lang=arch 进来时不能落到 java-01)
 watch(
   () => dataStore.isReady,
   (ready) => {
     if (ready && !topicId.value) {
-      router.replace({ query: { ...route.query, topic: dataStore.topics[0]?.id } })
+      const first = dataStore.topicsOf(lang.value as Language)[0]?.id ?? dataStore.topics[0]?.id
+      router.replace({ query: { ...route.query, topic: first } })
     }
   },
   { immediate: true },
@@ -167,9 +168,7 @@ function topicProgress(t: Topic): { learned: number; total: number; pct: number 
   return { learned, total, pct: total ? Math.round((learned / total) * 100) : 0 }
 }
 
-const langTopics = computed(() =>
-  lang.value === 'go' ? dataStore.goTopics : lang.value === 'ai' ? dataStore.aiTopics : dataStore.javaTopics,
-)
+const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
 </script>
 
 <template>
@@ -189,9 +188,9 @@ const langTopics = computed(() =>
       <aside class="hidden w-56 shrink-0 flex-col gap-3 self-start md:sticky md:top-14 md:flex md:max-h-[calc(100vh-3.5rem)]">
         <Tabs :model-value="lang" @update:model-value="lang = String($event)">
           <TabsList class="w-full">
-            <TabsTrigger value="java" class="flex-1">Java</TabsTrigger>
-            <TabsTrigger value="go" class="flex-1">Golang</TabsTrigger>
-            <TabsTrigger value="ai" class="flex-1">AI</TabsTrigger>
+            <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l" class="flex-1">
+              {{ LANG_META[l].label }}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -227,9 +226,9 @@ const langTopics = computed(() =>
         <div class="mb-3 flex gap-2 md:hidden">
           <Tabs :model-value="lang" class="shrink-0" @update:model-value="lang = String($event)">
             <TabsList>
-              <TabsTrigger value="java">Java</TabsTrigger>
-              <TabsTrigger value="go">Golang</TabsTrigger>
-              <TabsTrigger value="ai">AI</TabsTrigger>
+              <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l">
+                {{ LANG_META[l].label }}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           <Select :model-value="topicId" @update:model-value="topicId = String($event)">

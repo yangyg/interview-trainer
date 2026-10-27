@@ -16,7 +16,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
-import type { Question } from '@/lib/types'
+import { LANG_META, LANGUAGES } from '@/lib/langs'
+import type { Language, Question } from '@/lib/types'
 
 const router = useRouter()
 const dataStore = useDataStore()
@@ -29,13 +30,7 @@ const frequency = ref('all')
 const statusFilter = ref('all')
 
 const topicOptions = computed(() =>
-  lang.value === 'all'
-    ? dataStore.topics
-    : lang.value === 'go'
-      ? dataStore.goTopics
-      : lang.value === 'ai'
-        ? dataStore.aiTopics
-        : dataStore.javaTopics,
+  lang.value === 'all' ? dataStore.topics : dataStore.topicsOf(lang.value as Language),
 )
 
 const results = computed<Question[]>(() => {
@@ -83,9 +78,9 @@ function openQuestion(q: Question) {
         <Tabs v-model="lang">
           <TabsList>
             <TabsTrigger value="all">全部</TabsTrigger>
-            <TabsTrigger value="java">Java</TabsTrigger>
-            <TabsTrigger value="go">Go</TabsTrigger>
-            <TabsTrigger value="ai">AI</TabsTrigger>
+            <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l">
+              {{ LANG_META[l].label }}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </div>

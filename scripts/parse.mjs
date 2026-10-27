@@ -19,6 +19,8 @@ const DOCS_ROOT = path.resolve(APP_ROOT, '..')
 const JAVA_DIR = path.join(DOCS_ROOT, 'java')
 const GO_DIR = path.join(DOCS_ROOT, 'golang')
 const AI_DIR = path.join(DOCS_ROOT, 'ai')
+/** 无关语言的架构设计题库(与 Java 分册同格式,复用 parseJavaTopic) */
+const ARCH_DIR = path.join(DOCS_ROOT, 'arch')
 const OUT_DIR = path.join(APP_ROOT, 'public', 'data')
 const OUT_DOCS_DIR = path.join(OUT_DIR, 'docs')
 
@@ -27,6 +29,7 @@ const EXPECTED = {
   java: { 'java-01': 97, 'java-02': 61, 'java-03': 80, 'java-04': 72, 'java-05': 94, 'java-06': 90, 'java-07': 80, 'java-08': 89, 'java-09': 76, 'java-10': 56, 'java-11': 94 },
   go: { 'go-01': 75, 'go-02': 35, 'go-03': 21, 'go-04': 17, 'go-05': 32, 'go-index': 177 },
   ai: { 'ai-01': 22, 'ai-02': 20, 'ai-03': 18, 'ai-04': 18, 'ai-05': 20, 'ai-06': 22, 'ai-07': 16 },
+  arch: { 'arch-01': 20, 'arch-02': 18, 'arch-03': 18, 'arch-04': 18, 'arch-05': 18 },
 }
 
 // ---------- Markdown 渲染(marked + highlight.js,构建时执行) ----------
@@ -531,6 +534,10 @@ function parseAiTopList() {
   return parseTopTableList(path.join(AI_DIR, 'README.md'))
 }
 
+function parseArchTopList() {
+  return parseTopTableList(path.join(ARCH_DIR, 'README.md'))
+}
+
 function parseGoTopList() {
   const text = fs.readFileSync(path.join(GO_DIR, 'README.md'), 'utf8')
   const start = text.indexOf('Top 10 高频题')
@@ -797,6 +804,24 @@ function main() {
     fs.writeFileSync(path.join(OUT_DIR, `${topicId}.json`), JSON.stringify({ topicId, questions: qs }))
   }
 
+  // 架构设计专题(语言无关,与 Java 分册同格式)
+  const archDirExists = fs.existsSync(ARCH_DIR)
+  for (const { file, topicId } of archDirExists ? listTopicFiles(ARCH_DIR, 'arch') : []) {
+    const qs = parseJavaTopic(path.join(ARCH_DIR, file), topicId, 'arch')
+    if (!qs.length) continue
+    parsedCounts[topicId] = qs.length
+    allQuestions.push(...qs)
+    topics.push({
+      id: topicId,
+      language: 'arch',
+      name: topicDisplayName(file),
+      file,
+      count: qs.length,
+      chapters: chapterCounts(qs),
+    })
+    fs.writeFileSync(path.join(OUT_DIR, `${topicId}.json`), JSON.stringify({ topicId, questions: qs }))
+  }
+
   // 特殊文档整体渲染
   const docs = [
     { id: 'java-readme', language: 'java', file: path.join(JAVA_DIR, 'README.md'), title: 'Java 题库总览', description: '总说明、复习路径与最高频 30 题速查' },
@@ -804,6 +829,7 @@ function main() {
     { id: 'go-interviews', language: 'go', file: path.join(GO_DIR, '06-真实面经汇编.md'), title: '真实面经汇编', description: '字节/腾讯/美团等 17 家公司分轮次真题' },
     { id: 'go-careers', language: 'go', file: path.join(GO_DIR, '07-岗位职责与就业方向分析.md'), title: '岗位与就业方向分析', description: '岗位职责、薪资与就业方向调研' },
     { id: 'ai-readme', language: 'ai', file: path.join(AI_DIR, 'README.md'), title: 'AI 题库总览', description: '2026 AI 岗考情、复习路径与最高频 20 题速查' },
+    { id: 'arch-readme', language: 'arch', file: path.join(ARCH_DIR, 'README.md'), title: '架构设计题库总览', description: '语言无关的架构设计:五个专题、复习路径与最高频 20 题速查' },
   ]
   if (goProfileDoc) docs.push(goProfileDoc)
   for (const d of docs) {
@@ -818,16 +844,17 @@ function main() {
   const javaTop = parseJavaTopList().map((r) => ({ ...r, questionId: match(r.title) }))
   const goTop = parseGoTopList().map((r) => ({ ...r, questionId: match(r.title) }))
   const aiTop = parseAiTopList().map((r) => ({ ...r, questionId: match(r.title) }))
+  const archTop = archDirExists ? parseArchTopList().map((r) => ({ ...r, questionId: match(r.title) })) : []
 
   // 三语言计数必须与 IndexData.counts 的声明保持一致(此前漏写 ai,导致首页显示 0 题)
-  const counts = { java: 0, go: 0, ai: 0, total: allQuestions.length }
+  const counts = { java: 0, go: 0, ai: 0, arch: 0, total: allQuestions.length }
   for (const q of allQuestions) counts[q.language] += 1
 
   const index = {
     generatedAt: new Date().toISOString(),
     counts,
     topics,
-    topLists: { java: javaTop, go: goTop, ai: aiTop },
+    topLists: { java: javaTop, go: goTop, ai: aiTop, arch: archTop },
     docs: docs.map(({ id, language, title, description }) => ({ id, language, title, description })),
   }
   fs.writeFileSync(path.join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2))
@@ -854,9 +881,13 @@ function main() {
     console.log(`!! 空答案题目: ${noAnswer.join(', ')}`)
     failed = true
   }
-  const linked = javaTop.filter((r) => r.questionId).length + goTop.filter((r) => r.questionId).length + aiTop.filter((r) => r.questionId).length
-  console.log(`\n高频榜深链: ${linked}/${javaTop.length + goTop.length + aiTop.length}`)
-  console.log(`合计(去重后): Java ${counts.java} 题, Go ${counts.go} 题, AI ${counts.ai} 题, 共 ${counts.total} 题`)
+  const topAll = [...javaTop, ...goTop, ...aiTop, ...archTop]
+  const linked = topAll.filter((r) => r.questionId).length
+  console.log(`\n高频榜深链: ${linked}/${topAll.length}`)
+  console.log(
+    `合计(去重后): Java ${counts.java} 题, Go ${counts.go} 题, AI ${counts.ai} 题, ` +
+      `架构 ${counts.arch} 题, 共 ${counts.total} 题`,
+  )
   if (failed) {
     console.error('\n自检未通过:题数与基准不符,请检查解析规则!')
     process.exit(1)

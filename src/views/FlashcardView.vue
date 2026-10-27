@@ -27,7 +27,8 @@ import StatusActions from '@/components/StatusActions.vue'
 import { dueText } from '@/lib/srs'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
-import type { GradeResult, Question } from '@/lib/types'
+import { LANG_META, LANGUAGES } from '@/lib/langs'
+import type { GradeResult, Language, Question } from '@/lib/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,17 +44,9 @@ const pool = ref('all')
 const count = ref('20')
 const order = ref('random')
 
-const topicOptions = computed(() => {
-  const list =
-    lang.value === 'all'
-      ? dataStore.topics
-      : lang.value === 'go'
-        ? dataStore.goTopics
-        : lang.value === 'ai'
-          ? dataStore.aiTopics
-          : dataStore.javaTopics
-  return list
-})
+const topicOptions = computed(() =>
+  lang.value === 'all' ? dataStore.topics : dataStore.topicsOf(lang.value as Language),
+)
 
 const matched = computed<Question[]>(() => {
   let list = dataStore.allQuestions
@@ -173,9 +166,9 @@ onUnmounted(() => {
             <Tabs v-model="lang">
               <TabsList class="w-full">
                 <TabsTrigger value="all" class="flex-1">全部</TabsTrigger>
-                <TabsTrigger value="java" class="flex-1">Java</TabsTrigger>
-                <TabsTrigger value="go" class="flex-1">Golang</TabsTrigger>
-                <TabsTrigger value="ai" class="flex-1">AI</TabsTrigger>
+                <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l" class="flex-1">
+                  {{ LANG_META[l].label }}
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

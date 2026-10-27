@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "sourceIndexGeneratedAt": "2026-10-25T12:24:24.715Z",
-  "buildHash": "15a2083933e0",
+  "sourceIndexGeneratedAt": "2026-10-27T05:56:26.214Z",
+  "buildHash": "9e0d6dabd32e",
   "courses": [
     {
       "id": "java-lang-collections",
@@ -294,6 +294,26 @@
       "lessonCount": 3,
       "uniqueQuestionCount": 16,
       "estimatedMinutes": 168
+    },
+    {
+      "id": "arch-design",
+      "language": "arch",
+      "title": "架构设计方法",
+      "subtitle": "从「会用」到「敢定」:判断、拆分、撑住、表达",
+      "level": "expert",
+      "prerequisites": [],
+      "outcomes": [
+        "把模糊的「要高性能/要高可用」翻译成可验收的数字",
+        "用耦合信号与聚合边界判断系统该怎么拆、什么时候别拆",
+        "在没有标准答案的取舍里给出可辩护的决策,并写下代价",
+        "按五步骨架拆解任意一道系统设计场景题"
+      ],
+      "order": 14,
+      "firstLessonId": "arch-thinking",
+      "stageCount": 3,
+      "lessonCount": 6,
+      "uniqueQuestionCount": 92,
+      "estimatedMinutes": 245
     }
   ]
 }

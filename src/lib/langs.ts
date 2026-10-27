@@ -1,8 +1,42 @@
 import type { Language } from './types'
 
-/** 三语言的视觉识别体系:徽章底色 / 进度条颜色 / 缩写 */
-export const LANG_META: Record<Language, { label: string; short: string; badge: string; bar: string }> = {
-  java: { label: 'Java', short: 'J', badge: 'bg-amber-500', bar: 'bg-amber-500' },
-  go: { label: 'Golang', short: 'Go', badge: 'bg-cyan-600', bar: 'bg-cyan-600' },
-  ai: { label: 'AI', short: 'AI', badge: 'bg-violet-500', bar: 'bg-violet-500' },
+/** 全部语言,顺序即 UI 展示顺序(首页卡片 / 题库与课程的语言切换) */
+export const LANGUAGES: readonly Language[] = ['java', 'go', 'ai', 'arch']
+
+/**
+ * 各语言的视觉识别体系:徽章底色 / 进度条颜色 / 缩写 / 卡片标题。
+ * 新增语言时只需改这里 + types 里的 Language 联合类型。
+ */
+export const LANG_META: Record<
+  Language,
+  { label: string; title: string; short: string; badge: string; bar: string }
+> = {
+  java: {
+    label: 'Java',
+    title: 'Java 后端',
+    short: 'J',
+    badge: 'bg-amber-500',
+    bar: 'bg-amber-500',
+  },
+  go: {
+    label: 'Golang',
+    title: 'Golang 后端',
+    short: 'Go',
+    badge: 'bg-cyan-600',
+    bar: 'bg-cyan-600',
+  },
+  ai: {
+    label: 'AI',
+    title: 'AI 应用与大模型',
+    short: 'AI',
+    badge: 'bg-violet-500',
+    bar: 'bg-violet-500',
+  },
+  arch: {
+    label: '架构设计',
+    title: '架构设计与系统设计',
+    short: 'A',
+    badge: 'bg-emerald-600',
+    bar: 'bg-emerald-600',
+  },
 }
