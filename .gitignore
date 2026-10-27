@@ -27,3 +27,9 @@ dist-ssr
 .workbuddy/
 scripts/curriculum/.report.json
 
+
+# 本地质量度量脚本（产出见 docs/term-coverage-report.md）
+.audit2.mjs
+.qa.mjs
+.term.mjs
+.sp2.py
