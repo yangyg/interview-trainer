@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { RouteIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -9,9 +10,35 @@ import CourseCard from '@/components/course/CourseCard.vue'
 import { useCourseStore } from '@/stores/course'
 import type { CourseSummary, Language } from '@/lib/types'
 
+const route = useRoute()
+const router = useRouter()
 const courseStore = useCourseStore()
 
-const tab = ref<'all' | Language>('java')
+// ---------- 路由状态 ----------
+
+/** 与「题库浏览」保持一致:语言筛选落在 URL 上(/courses?lang=go),可分享、可前进后退 */
+const LANGS: readonly Language[] = ['java', 'go', 'ai']
+type LangFilter = 'all' | Language
+
+function isLangFilter(v: unknown): v is LangFilter {
+  return v === 'all' || (typeof v === 'string' && LANGS.includes(v as Language))
+}
+
+const tab = computed<LangFilter>({
+  get: () => {
+    const q = route.query.lang
+    return isLangFilter(q) ? q : 'java'
+  },
+  set: (v) => {
+    // 默认值 java 不写进 URL,保持 /courses 干净;其余值显式带上
+    router.replace({ query: { ...route.query, lang: v === 'java' ? undefined : v } })
+  },
+})
+
+function setTab(v: string) {
+  // 忽略非法/空值:Tabs 在挂载阶段可能发出空串,直接回落成 java 会冲掉 URL 上的筛选
+  if (isLangFilter(v)) tab.value = v
+}
 
 const list = computed<CourseSummary[]>(() => {
   if (tab.value === 'all') {
@@ -59,7 +86,7 @@ const loading = computed(() => !courseStore.isIndexReady && !courseStore.indexEr
       </div>
     </div>
 
-    <Tabs v-model="tab" class="mb-4">
+    <Tabs :model-value="tab" class="mb-4" @update:model-value="setTab(String($event))">
       <TabsList>
         <TabsTrigger value="all">全部 {{ languageCount.all }}</TabsTrigger>
         <TabsTrigger value="java">Java {{ languageCount.java }}</TabsTrigger>
