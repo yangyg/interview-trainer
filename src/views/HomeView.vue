@@ -336,7 +336,9 @@ function langCard(language: Language) {
 
     <!-- 高频榜 + 资料 -->
     <div class="grid gap-3 lg:grid-cols-5">
-      <Card class="lg:col-span-3">
+      <!-- 左侧不参与行高计算:行高由右侧资料卡决定,列表在剩余高度内滚动,
+           避免 30 条内容把整行撑长、也不留下卡片内空白 -->
+      <Card class="lg:col-span-3 lg:[contain:size]">
         <CardHeader class="pb-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <CardTitle class="flex items-center gap-2 text-base">
@@ -358,8 +360,8 @@ function langCard(language: Language) {
           </div>
           <CardDescription>来自 README 跨面经统计,点击直达题目</CardDescription>
         </CardHeader>
-        <CardContent class="p-0">
-          <div class="max-h-96 overflow-y-auto">
+        <CardContent class="flex min-h-0 flex-1 flex-col p-0">
+          <div class="max-h-96 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1">
             <button
               v-for="item in topList"
               :key="item.rank"
