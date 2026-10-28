@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { Question } from '@/lib/types'
+import { reportStorageError } from '@/lib/storage-health'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
 
@@ -107,11 +108,14 @@ export function renderAiMarkdown(md: string): string {
 }
 
 export const useAiStore = defineStore('ai', () => {
-  const config = useLocalStorage<AiConfig>('interview-trainer/ai-config-v1', defaultConfig(), { mergeDefaults: true })
+  const config = useLocalStorage<AiConfig>('interview-trainer/ai-config-v1', defaultConfig(), {
+    mergeDefaults: true,
+    onError: (e) => reportStorageError('AI 配置', e),
+  })
   const chats = useLocalStorage<Record<string, AiMessage[]>>('interview-trainer/ai-chats-v1', {}, {
     mergeDefaults: true,
     // 配额写失败默认是静默的:这里显式暴露,便于用户感知「对话将不被保存」
-    onError: (e) => console.warn('[ai] 对话写入 localStorage 失败(可能已超出配额):', e),
+    onError: (e) => reportStorageError('AI 对话', e),
   })
 
   const isConfigured = computed(() => {

@@ -2,6 +2,7 @@ import { useLocalStorage } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import { isDue, nextDue, newRecord, todayKey } from '@/lib/srs'
+import { reportStorageError } from '@/lib/storage-health'
 import type { CardRecord, GradeResult, ProgressData } from '@/lib/types'
 
 const STORAGE_KEY = 'interview-trainer/progress-v1'
@@ -18,6 +19,8 @@ export const useProgressStore = defineStore('progress', () => {
   const data = useLocalStorage<ProgressData>(STORAGE_KEY, defaultData(), {
     listenToStorageChanges: true,
     mergeDefaults: true,
+    // 配额写满时默认是静默失败——学习进度丢了必须让用户看见
+    onError: (e) => reportStorageError('学习进度', e),
   })
 
   const cards = computed(() => data.value.cards)

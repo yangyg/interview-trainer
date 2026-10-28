@@ -15,18 +15,20 @@ import { MAIN_NAV } from '@/lib/nav'
 import { LANG_META } from '@/lib/langs'
 import { useCourseStore } from '@/stores/course'
 import { useDataStore } from '@/stores/data'
-import { useEventListener } from '@vueuse/core'
+import { useDebounce, useEventListener } from '@vueuse/core'
 
 const open = defineModel<boolean>('open', { default: false })
 const query = ref('')
+/** 与搜索页一致:逐键检索会放大索引查询与列表渲染开销 */
+const debouncedQuery = useDebounce(query, 150)
 
 const router = useRouter()
 const dataStore = useDataStore()
 const courseStore = useCourseStore()
 
-const results = computed(() => dataStore.searchQuestions(query.value, 20))
+const results = computed(() => dataStore.searchQuestions(debouncedQuery.value, 20))
 
-/** ⌘K 面板里也能直接搜课程名,不必先记住它在哪个语言下 */
+/** 课程名过滤是内存字符串匹配,不必跟随检索防抖 */
 const courseHits = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return courseStore.courses.slice(0, 6)
@@ -34,6 +36,9 @@ const courseHits = computed(() => {
     .filter((c) => `${c.title} ${c.subtitle}`.toLowerCase().includes(q))
     .slice(0, 6)
 })
+
+/** 输入已追上防抖值,此时「空结果」才是真的空 */
+const settled = computed(() => debouncedQuery.value === query.value)
 
 useEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -54,9 +59,9 @@ function go(to: Parameters<typeof router.push>[0]) {
   router.push(to)
 }
 
-/** 内部过滤改为简单包含匹配(minisearch 已负责真正的检索,内置 Intl 过滤对中文不友好) */
-function simpleFilter(value: string, search: string): number {
-  return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+/** 结果已由 minisearch 与课程名过滤产出,关闭 cmdk 的二次过滤,避免防抖窗口内误判为空 */
+function keepAll(): number {
+  return 1
 }
 </script>
 
@@ -66,7 +71,7 @@ function simpleFilter(value: string, search: string): number {
     title="搜索题目"
     description="按标题或答案内容检索,回车跳转"
     class="command-dialog"
-    :filter-function="simpleFilter"
+    :filter-function="keepAll"
   >
     <CommandInput v-model="query" placeholder="搜索题目 / 关键词,如:HashMap、GMP、索引" />
     <CommandList class="max-h-[60vh]">
@@ -91,7 +96,9 @@ function simpleFilter(value: string, search: string): number {
       </CommandGroup>
 
       <template v-if="query">
-        <CommandEmpty v-if="!results.length && !courseHits.length">没有匹配的题目</CommandEmpty>
+        <CommandEmpty v-if="!dataStore.searchReady && !dataStore.searchError">正在建立搜索索引…</CommandEmpty>
+        <CommandEmpty v-else-if="dataStore.searchError">搜索索引构建失败:{{ dataStore.searchError }}</CommandEmpty>
+        <CommandEmpty v-else-if="settled && !results.length && !courseHits.length">没有匹配的题目</CommandEmpty>
         <CommandGroup v-else-if="results.length" heading="题目">
           <CommandItem
             v-for="q in results"

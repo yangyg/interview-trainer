@@ -1,32 +1,21 @@
-import MiniSearch from 'minisearch'
 import { defineStore } from 'pinia'
+import type MiniSearch from 'minisearch'
 import { markRaw } from 'vue'
 import { LANGUAGES } from '@/lib/langs'
+import { createQuestionSearch } from '@/lib/search'
 import type { IndexData, Language, Question, Topic, TopicData } from '@/lib/types'
-
-/** CJK 按二元组分词,拉丁词整词小写——让中文可前缀/模糊检索 */
-function cjkTokenizer(text: string): string[] {
-  const tokens: string[] = []
-  for (const m of text.matchAll(/[a-zA-Z0-9]+|[\u3400-\u9fff]+/g)) {
-    const seg = m[0]
-    if (/^[a-zA-Z0-9]+$/.test(seg)) {
-      tokens.push(seg.toLowerCase())
-      continue
-    }
-    if (seg.length === 1) {
-      tokens.push(seg)
-      continue
-    }
-    for (let i = 0; i < seg.length - 1; i++) tokens.push(seg.slice(i, i + 2))
-  }
-  return tokens
-}
 
 export const useDataStore = defineStore('data', {
   state: () => ({
     index: null as IndexData | null,
     loading: false,
     loadError: '' as string,
+    /** 题库正文是否已全部载入——页面渲染只依赖它,不等搜索索引 */
+    contentReady: false,
+    /** 全文索引是否可用;在首屏渲染后空闲时构建 */
+    searchReady: false,
+    searchBuilding: false,
+    searchError: '' as string,
     /** topicId -> questions(保持文档原序) */
     topicQuestions: {} as Record<string, Question[]>,
     questionsById: {} as Record<string, Question>,
@@ -53,7 +42,7 @@ export const useDataStore = defineStore('data', {
       return this.index?.counts.total ?? 0
     },
     isReady(): boolean {
-      return !!this.index && !!this.search
+      return this.contentReady
     },
     topicName(): (topicId: string) => string {
       return (topicId: string) => this.topics.find((t) => t.id === topicId)?.name ?? topicId
@@ -62,7 +51,7 @@ export const useDataStore = defineStore('data', {
 
   actions: {
     async init() {
-      if (this.loading || this.isReady) return
+      if (this.loading || this.contentReady) return
       this.loading = true
       this.loadError = ''
       try {
@@ -81,6 +70,8 @@ export const useDataStore = defineStore('data', {
         index.counts = { ...derived, ...index.counts }
         this.index = index
 
+        // 全量预载:当前 1421 题约 3MB。增长到 ~3000 题前应改为按语言分片,
+        // 否则首屏请求数与内存会随题库线性增长。
         await Promise.all(
           this.index.topics.map(async (topic) => {
             const res = await fetch(`${base}data/${topic.id}.json`)
@@ -94,22 +85,47 @@ export const useDataStore = defineStore('data', {
           }),
         )
 
-        this.search = new MiniSearch({
-          fields: ['title', 'searchText', 'tags', 'no', 'chapter'],
-          storeFields: ['id'],
-          tokenize: cjkTokenizer,
-          searchOptions: {
-            boost: { title: 6, tags: 3, no: 2 },
-            prefix: true,
-            fuzzy: 0.2,
-            combineWith: 'AND',
-          },
-        })
-        this.search.addAll(Object.values(this.questionsById))
+        this.contentReady = true
+        this.scheduleSearchIndex()
       } catch (e) {
         this.loadError = e instanceof Error ? e.message : String(e)
       } finally {
         this.loading = false
+      }
+    },
+
+    /** 首屏渲染后空闲再建索引:600ms 级别的构建不能挡住页面门控 */
+    scheduleSearchIndex() {
+      const run = () => void this.buildSearchIndex()
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        window.requestIdleCallback(run, { timeout: 2000 })
+      } else {
+        setTimeout(run, 0)
+      }
+    },
+
+    /**
+     * 分片构建,每片之间让出主线程,避免一次 600ms 长任务卡住输入。
+     * 索引建好前 searchQuestions 返回空,由调用方显示「索引构建中」。
+     */
+    async buildSearchIndex() {
+      if (this.searchReady || this.searchBuilding || !this.index) return
+      this.searchBuilding = true
+      this.searchError = ''
+      try {
+        const mini = createQuestionSearch()
+        const all = Object.values(this.questionsById)
+        const CHUNK = 100
+        for (let i = 0; i < all.length; i += CHUNK) {
+          mini.addAll(all.slice(i, i + CHUNK))
+          if (i + CHUNK < all.length) await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+        this.search = markRaw(mini)
+        this.searchReady = true
+      } catch (e) {
+        this.searchError = e instanceof Error ? e.message : String(e)
+      } finally {
+        this.searchBuilding = false
       }
     },
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useDebounce } from '@vueuse/core'
 import { useRouter } from 'vue-router'
-import { SearchXIcon } from '@lucide/vue'
+import { SearchXIcon, SearchIcon } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import {
@@ -24,6 +25,8 @@ const dataStore = useDataStore()
 const progress = useProgressStore()
 
 const query = ref('')
+/** 单次检索最坏 ~18ms(桌面),逐键直搜在移动端会明显掉帧 */
+const debouncedQuery = useDebounce(query, 180)
 const lang = ref('all')
 const topicId = ref('all')
 const frequency = ref('all')
@@ -35,8 +38,8 @@ const topicOptions = computed(() =>
 
 const results = computed<Question[]>(() => {
   let list: Question[]
-  if (query.value.trim()) {
-    list = dataStore.searchQuestions(query.value, 200)
+  if (debouncedQuery.value.trim()) {
+    list = dataStore.searchQuestions(debouncedQuery.value, 200)
   } else {
     list = dataStore.allQuestions
   }
@@ -122,7 +125,21 @@ function openQuestion(q: Question) {
       </div>
 
       <EmptyState
-        v-if="query && !results.length"
+        v-if="query && dataStore.searchError"
+        :icon="SearchXIcon"
+        title="搜索索引构建失败"
+        :description="dataStore.searchError"
+      />
+
+      <EmptyState
+        v-else-if="query && !dataStore.searchReady"
+        :icon="SearchIcon"
+        title="正在建立搜索索引"
+        description="题库正文已就绪,全文索引在后台构建,通常不到一秒。"
+      />
+
+      <EmptyState
+        v-else-if="query && !results.length"
         :icon="SearchXIcon"
         title="没有匹配的题目"
         description="换个关键词试试,中文支持任意连续两字匹配。"

@@ -38,6 +38,13 @@ npm run dev
 # 或生产构建后本地预览
 npm run build
 npm run preview
+
+# 部署到子路径(如 GitHub Pages 的 /repo/)必须显式指定 base,
+# 否则 data/*.json 与静态资源会按根路径请求而 404
+npm run build -- --base=/repo/
+
+# 单测:SRS 间隔与中文分词
+npm test
 ```
 
 浏览器打开提示的地址(默认 http://localhost:5173)。文档更新后重新执行 `npm run parse` 即可刷新数据。

@@ -1,6 +1,7 @@
 import { useLocalStorage } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
+import { reportStorageError } from '@/lib/storage-health'
 import type {
   Course,
   CourseIndex,
@@ -36,6 +37,7 @@ export const useCourseStore = defineStore('course', () => {
   const progress = useLocalStorage<CourseProgressData>(STORAGE_KEY, defaultProgress(), {
     listenToStorageChanges: true,
     mergeDefaults: true,
+    onError: (e) => reportStorageError('课程进度', e),
   })
 
   const index = shallowRef<CourseIndex | null>(null)
