@@ -231,7 +231,7 @@ export default {
                   ['AOT（native-image）', '编译期静态优化', '无，直接机器码', '高但缺运行时信息', 'Serverless、CLI、容器冷启动敏感'],
                 ],
                 note:
-                  '分层编译（Java 7 起默认）就是「先 C1 后 C2」:方法先被 C1 编译快速跑起来,攒够 profile 再交给 C2 重编。`-XX:+PrintCompilation` 能看到这个过程——[[想亲眼看一次 JIT 在干活,这个参数是最省事的入口]]。',
+                  '分层编译（JDK 7 引入、JDK 8 起默认）就是「先 C1 后 C2」:方法先被 C1 编译快速跑起来,攒够 profile 再交给 C2 重编。`-XX:+PrintCompilation` 能看到这个过程——[[想亲眼看一次 JIT 在干活,这个参数是最省事的入口]]。',
                 caption:
                   '这张表的读法:每一行都在拿「启动」换「峰值」。没有一行是全面更优的,所以真实系统里它们是**并存**的——这也是为什么「Java 到底快不快」这个问题没有单一答案,取决于你的进程活多久。',
               },
@@ -673,12 +673,12 @@ export default {
                 kind: 'concept',
                 title: 'String 内部就是一个「被锁住的数组」',
                 body: [
-                  '打开 JDK 8 的源码，String 的三个核心字段是 `private final char value[]`、`private int hash`、`private final int count`。JDK 9 之后 value 变成 `byte[]` 加一个 `byte coder` 标记编码，这就是 **Compact Strings**：内容全是 Latin-1 字符（英文、数字）时每字符只占 1 字节，含中文才退化成 UTF-16。',
+                  'String 的字段随版本变过：JDK 6 是 `char[] value`、`int offset`、`int count`、`int hash`；JDK 7–8 去掉了 offset/count，只剩 `char[] value` 与 `int hash`。JDK 9 之后 value 变成 `byte[]` 加一个 `byte coder` 标记编码，这就是 **Compact Strings**：内容全是 Latin-1 字符（英文、数字）时每字符只占 1 字节，含中文才退化成 UTF-16。',
                   '关键不在 `final` 修饰符，而在于 **String 从不把 value 数组暴露出去**：没有 `getValue()`，构造时做防御性拷贝，任何「修改」方法（substring、concat、replace）都返回新对象。所以哪怕用反射把 final 改了，也只是你自己玩坏了自己的引用，别人手里的那个 String 依然是安全的。',
                 ],
                 term: {
                   name: '不可变对象（Immutable Object）',
-                  def: '对象创建后其内部状态不可被观察者改变。实现手段有三条：所有字段 final、不提供修改方法、构造时对可变字段做防御性拷贝、不返回内部可变引用。String 是把这三条都做到位的典型。',
+                  def: '对象创建后其内部状态不可被观察者改变。实现手段有四条：所有字段 final、不提供修改方法、构造时对可变字段做防御性拷贝、不返回内部可变引用。String 是把这四条都做到位的典型。',
                 },
                 points: [
                   '**JDK 8**：`final char[] value`，每字符固定 2 字节',
@@ -3829,7 +3829,7 @@ if (newCapacity - MAX_ARRAY_SIZE > 0) newCapacity = hugeCapacity(minCapacity);`,
         },
         {
           id: 'java-new-feat',
-          title: 'Java 8 → 21 新特性',
+          title: 'Java 8 → 25 新特性',
           kind: 'concept',
           sources: [{ topic: 'java-01', chapters: ['Java 新特性'] }],
           content: {
@@ -3840,7 +3840,7 @@ if (newCapacity - MAX_ARRAY_SIZE > 0) newCapacity = hugeCapacity(minCapacity);`,
                 kind: 'concept',
                 title: '三层归类法：语言、类库、虚拟机',
                 body: [
-                  '面试官问「Java 8 有什么新特性」，期待的不是流水账，而是**分类**。最实用的一刀切是按层次：**语言层**（改变写法：lambda、方法引用、default 方法、var、record、sealed、模式匹配、文本块）、**类库层**（新增 API：Stream、Optional、java.time、HttpClient）、**虚拟机层**（运行时能力：元空间替代永久代、G1 默认、ZGC、虚拟线程）。同样一个版本，这三层的变化量往往不对等——Java 8 是语言层的大年，Java 21 是虚拟机层的大年。',
+                  '面试官问「Java 8 有什么新特性」，期待的不是流水账，而是**分类**。最实用的一刀切是按层次：**语言层**（改变写法：lambda、方法引用、default 方法；var、record、sealed、模式匹配、文本块是后续版本）、**类库层**（新增 API：Stream、Optional、java.time、HttpClient）、**虚拟机层**（运行时能力：元空间替代永久代、G1 默认、ZGC、虚拟线程）。同样一个版本，这三层的变化量往往不对等——Java 8 是语言层的大年，Java 21 是虚拟机层的大年。',
                   'Java 8 值得单独记全，因为它是使用最广的 LTS，也是「现代 Java 写法」的起点：lambda + 函数式接口、Stream API、Optional、接口 default/static 方法、`java.time`（线程安全，替代 `Date`/`Calendar`）、方法引用、重复注解；虚拟机层把永久代换成了元空间，`HashMap` 在链表过长时转红黑树把最坏查找从 O(n) 压到 O(log n)。这一串能顺口说出来，就够回答 80% 的「Java 8 新特性」。',
                 ],
                 points: [
@@ -3861,7 +3861,7 @@ if (newCapacity - MAX_ARRAY_SIZE > 0) newCapacity = hugeCapacity(minCapacity);`,
                     ['JDK 11', '2018.09', 'var（10 引入）、HttpClient 标准化、ZGC 实验、单文件源码运行'],
                     ['JDK 17', '2021.09', 'record、sealed、instanceof 模式匹配、文本块（15）'],
                     ['JDK 21', '2023.09', '虚拟线程、分代 ZGC、switch 模式匹配、record 解构'],
-                    ['JDK 25', '2025.09', '紧凑对象头等；继续推进结构化并发与作用域值'],
+                    ['JDK 25', '2025.09', '紧凑对象头、作用域值转正、分代 Shenandoah；结构化并发第五次预览'],
                   ],
                   caption:
                     '节奏规律：**JDK 9 起每半年一个版本，约每两年一个 LTS**（8 → 11 → 17 → 21 → 25）。非 LTS 版本不适合生产，但新特性通常先在它们那里预览一到两版才转正——所以「预览」与「转正」的版本差经常被考（record 是 14 预览 / 16 转正，文本块是 13 / 15，虚拟线程是 19 预览 / 21 转正）。被问到具体版本号而记不准时，坦白说「JEP 编号我要查一下，但方向是降低内存开销与简化并发」比硬编一个错版本更安全。',
@@ -6481,7 +6481,7 @@ if (newCapacity - MAX_ARRAY_SIZE > 0) newCapacity = hugeCapacity(minCapacity);`,
               },
               {
                 kind: 'principle',
-                title: 'checkForComodification 的三步闭环',
+                title: 'checkForComodification 的四步闭环',
                 body: [
                   '整个 fail-fast 只有三个字段和一行判断，但每一处位置都不是随便放的。理解「为什么放在这里」，就理解了它的设计边界。',
                 ],

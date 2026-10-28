@@ -67,7 +67,7 @@ Pinia · vue-router · ECharts · minisearch · dayjs / @vueuse/core
 app/
 ├── scripts/parse.mjs        # 文档解析:三套格式归一化 + 近似题去重 + 题数自检
 ├── scripts/build-courses.mjs # 课程构建:选择器 → 课程 JSON + 覆盖率校验
-├── scripts/curriculum/      # 课程作者源(13 门课的选择器 + 手写讲义),按语言分目录
+├── scripts/curriculum/      # 课程作者源(14 门课的选择器 + 手写讲义),按语言分目录
 ├── public/data/             # 解析产物(index.json + 每专题 JSON + docs/,已入库)
 ├── public/data/courses/     # 课程产物(index.json + 每门课 JSON,已入库)
 └── src/

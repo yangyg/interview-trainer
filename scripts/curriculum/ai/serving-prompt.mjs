@@ -347,9 +347,9 @@ export default {
               },
               {
                 kind: 'principle',
-                title: '连续批处理的四步:一个请求的生命周期',
+                title: '连续批处理的四步 + 换出:一个请求的生命周期',
                 body: [
-                  '连续批处理(Continuous Batching,也叫 iteration-level scheduling)的核心思想是:**调度的粒度从「一批」降到「一步」**。理解这四步,就理解了为什么它能提升 2~10 倍吞吐。',
+                  '连续批处理(Continuous Batching,也叫 iteration-level scheduling)的核心思想是:**调度的粒度从「一批」降到「一步」**。理解这四步（以及第⑤步的换出），就理解了为什么它能提升 2~10 倍吞吐。',
                 ],
                 steps: [
                   {
@@ -441,7 +441,7 @@ export default {
               },
               {
                 kind: 'principle',
-                title: '投机解码的四步:为什么它是「无损」的',
+                title: '投机解码的四步 + 调参:为什么它是「无损」的',
                 body: [
                   '投机解码最容易讲错的地方是「验证」这一步。它不是一个模糊的「大模型觉得行就行」,而是一个有严格数学保证的拒绝采样过程——[[正是这个保证让它能被称为无损加速]]。',
                 ],
@@ -1456,7 +1456,7 @@ export default {
               },
               {
                 kind: 'principle',
-                title: 'Prompt 变更的四步:把「今天必须改」变成一次可控发布',
+                title: 'Prompt 变更的四步 + 降级开关:把「今天必须改」变成一次可控发布',
                 body: [
                   '「产品要求今天必须改 prompt」是真实场景。硬顶不行，直接上更不行。四步能让它在一天内完成且风险可控。',
                 ],

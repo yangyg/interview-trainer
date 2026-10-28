@@ -6939,7 +6939,7 @@
                   "**JDK 8 的经典组合**：Serial + Serial Old（客户端/小堆）、ParNew + CMS（低停顿）、Parallel Scavenge + Parallel Old（吞吐优先，JDK 8 服务端默认）",
                   "**为什么 CMS 不能配 Parallel Scavenge**：两者都直接继承自 `Serial` 与 `Parallel` 的旧实现体系，Parallel Scavenge 的框架（`ParallelScavengeHeap`）不提供 CMS 所需的分代对象访问接口，于是 HotSpot 专门做了 ParNew 这个「能对接 CMS 的新生代」",
                   "**JDK 9 之后**：G1 成为默认，一路通吃新生代与老年代；CMS 在 JDK 9 被标记废弃，JDK 14 移除",
-                  "**JDK 15+**：ZGC 转正（JDK 21 有分代版）、Shenandoah 在 OpenJDK 中可用。两者都是「不分代（或分代）、全堆并发」的现代方案"
+                  "**JDK 15+**：ZGC 转正（JDK 21 有分代版）、Shenandoah 在 OpenJDK 中可用（JDK 25 有分代版）。两者都是「不分代（或分代）、全堆并发」的现代方案"
                 ],
                 "depth": "一个容易忽略的历史细节：**Parallel Scavenge 与 CMS 的不兼容是工程事故而非理论限制**。Parallel Scavenge 为了实现「自适应大小策略」（`UseAdaptiveSizePolicy`），在堆布局上做了很多自己的假设，它的 `Space` 实现与 CMS 期望的接口对不上。当年为了赶在 JDK 5 支持 CMS，Sun 直接把 Serial 多线程化做出 ParNew，而不是改造 Parallel Scavenge。所以面试里说「CMS 只能配 Serial 或 ParNew」是准确的，但原因是实现耦合，不是算法冲突。",
                 "followup": "「G1 需要搭配别的收集器吗」——不需要。G1 是「全堆收集器」，同时管理新生代与老年代，`-XX:+UseG1GC` 一开就接管整个堆。这也是它相对于「新生代 + 老年代两两配对」模式的结构性优势：**再也不用担心搭配错误**，也不用为跨代引用维护两套机制（G1 用统一的 RSet）。"
@@ -7477,11 +7477,11 @@
                   "**核心差异：并发整理技术**。Shenandoah 用 **Brooks 转发指针**（每个对象多一个 8 字节字段，指向「自己或新地址」）；ZGC 用**着色指针**（状态存在指针高位，不占对象内存）",
                   "**内存开销**：转发指针让每个对象多 8 字节——小对象多的时候膨胀明显；着色指针不占对象额外空间，但占用指针高位（限 4TB 堆、不能压缩指针）",
                   "**访问路径**：Shenandoah 读对象要先读对象头里的转发指针（多一次间接）；ZGC 直接解引用，只在颜色不对时自愈",
-                  "**生态**：ZGC 由 Oracle 维护，JDK 21 已有分代版；Shenandoah 由 Red Hat 主导，**不在 Oracle JDK 中提供**（只在 OpenJDK 及部分发行版），且**至今没有官方分代版**",
+                  "**生态**：ZGC 由 Oracle 维护，JDK 21 已有分代版；Shenandoah 由 Red Hat 主导，**不在 Oracle JDK 中提供**（只在 OpenJDK 及部分发行版），**JDK 24 实验性支持分代模式，JDK 25 转正（JEP 521）**",
                   "**启用**：`-XX:+UseShenandoahGC`（需要发行版支持）；`-XX:+UseZGC`（JDK 15+ 全平台）"
                 ],
                 "depth": "Brooks 转发指针的原始设计更「重」：每次访问对象都要经过转发指针做一次间接跳转，即使没在 GC 也一样。Shenandoah 做了优化——用 **mark word 里的位**代替独立的转发字段（只在转移期间把对象头改造成转发指针），所以实际内存开销没有「每个对象 8 字节」那么夸张，但对象头布局更复杂、与偏向锁等特性冲突（这也是 Shenandoah 早期必须关闭偏向锁的原因之一）。**这类「对象头被征用」的代价，是所有低延迟收集器共同的难题**：状态总得存在某个地方，要么放指针里（ZGC），要么放对象头里（Shenandoah），要么放侧表里（增加一次查表）。",
-                "followup": "「生产上怎么选」——看发行版：用 Oracle JDK 就只有 ZGC；用 OpenJDK / 阿里 Dragonwell / 腾讯 Kona 等，两者都可能有。技术上，**大堆 + 分代需求选 ZGC（JDK 21+）**；若发行版只提供 Shenandoah 且堆不算太大，Shenandoah 也够用。真正决定的因素往往是「运维团队熟悉哪个」——两者的调优参数与 GC 日志格式都不同，熟悉度比理论优势更影响线上稳定性。"
+                "followup": "「生产上怎么选」——看发行版：用 Oracle JDK 就只有 ZGC；用 OpenJDK / 阿里 Dragonwell / 腾讯 Kona 等，两者都可能有。技术上，**大堆 + 分代需求选 ZGC（JDK 21+）或 Shenandoah（JDK 25+）**；若发行版只提供 Shenandoah 且堆不算太大，Shenandoah 也够用。真正决定的因素往往是「运维团队熟悉哪个」——两者的调优参数与 GC 日志格式都不同，熟悉度比理论优势更影响线上稳定性。"
               },
               {
                 "kind": "question",
