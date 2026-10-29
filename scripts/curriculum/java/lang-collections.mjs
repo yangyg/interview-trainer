@@ -1663,7 +1663,7 @@ if (newCapacity - MAX_ARRAY_SIZE > 0) newCapacity = hugeCapacity(minCapacity);`,
                     { label: '全冲突 1000', value: 1000, display: '≤1000 次', note: '退化线性' },
                   ],
                   caption:
-                    '这就解释了树化的意义：把最坏情况从 O(n) 压到 O(log n)。但如果所有 key 的 hashCode 都相同，树化也只能救到 log n——所以「分布均匀」比「树化」更根本，这也是重写 hashCode 时要用 31 这类质数的原因。',
+                    '这就解释了树化的意义：把最坏情况从 O(n) 压到 O(log n)。但如果所有 key 的 hashCode 都相同，树化也只能救到 log n——所以「分布均匀」比「树化」更根本，这也是重写 hashCode 时要用 31 这类质数的原因。（示意：对数刻度，非实测数据）',
                 },
               },
               {

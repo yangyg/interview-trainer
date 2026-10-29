@@ -300,6 +300,12 @@ function validateSections(sections, ids, where) {
     }
     // 版本与验证状态:字段存在才算数,不写就不渲染 —— 但不能写错类型静默失效
     if (s.kind === 'code') {
+      if (typeof s.code !== 'string' || !s.code.trim()) {
+        fail(`${at}: code 必须是字符串(写成 { language, code } 对象会把整个对象渲染到页面上)`)
+      }
+      if (!s.lang || typeof s.lang !== 'string') {
+        fail(`${at}: code 缺少 lang(语言标签会渲染为空)`)
+      }
       if (s.version !== undefined && typeof s.version !== 'string') {
         fail(`${at}: code.version 应为字符串(如 'MySQL 8.0' / 'JDK 21')`)
       }

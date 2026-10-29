@@ -609,6 +609,8 @@ export default {
                   { real: '正式章盖完，临时单作废', tech: '`addSingleton` 放入一级缓存，清理二、三级' },
                   { real: '临时单不能当正式文件对外用', tech: '早期引用**属性未填充、未初始化**，只能用于「先存着」' },
                 ],
+                limit:
+                  '这个类比只对应**单例 Bean 的字段注入/Setter 注入**:构造器注入没有「先交材料」这一步,Spring 会直接检测到环并抛错,不会发临时单。临时单(早期引用)也只能先存着,拿到它的人不能立刻调用业务方法——此时属性还没填、初始化还没跑;而三级缓存只是把环绕过去,并没有真正解除两个部门之间的依赖,设计上仍应尽量拆环。',
               },
               {
                 kind: 'concept',
@@ -1025,6 +1027,8 @@ export default {
                   { real: '把前台摆到门口这个动作', tech: '织入（Weaving）：生成并替换为代理' },
                   { real: '访客翻墙直接进工位', tech: '自调用（`this`）/ 对象不是 Spring Bean → 失效' },
                 ],
+                limit:
+                  '前台只能说明「调用要经过代理」,说明不了代理怎么生成、什么时候失效。真实 Spring AOP 只拦截从代理对象进入的调用:同类 `this` 调用、私有/静态/final 方法、非 Spring Bean 都不经过前台;JDK 代理要求接口,CGLIB 不能代理 final 类。前台是「一个人」,真实通知链却是递归的一串拦截器,顺序与异常传播都由这条链决定。',
               },
               {
                 kind: 'diagram',
@@ -2168,11 +2172,9 @@ export default {
                 body: [
                   '把上面的链路落地成一个能跑的最小样例:一个属性类、一个自动配置类、一份清单文件。重点看三处条件写在哪里——**类上放「有没有依赖」,方法上放「用户有没有自己配」**。这个分工不是风格问题,写反了就会出现「整段配置莫名不生效」的故障。',
                 ],
-                code: {
-                  language: 'java',
-                  code:
-                    "// ① 自动配置类:全部逻辑都藏在条件里\n@AutoConfiguration                       // 等价于「配置类 + 参与排序」\n@ConditionalOnClass(SmsClient.class)     // 依赖没引 → 整段不生效\n@ConditionalOnProperty(name = \"sms.enabled\", havingValue = \"true\", matchIfMissing = true)\n@EnableConfigurationProperties(SmsProperties.class)\npublic class SmsAutoConfiguration {\n\n    @Bean\n    @ConditionalOnMissingBean             // 用户自己定义了同类型 Bean → 我这个不生效\n    public SmsClient smsClient(SmsProperties props) {\n        return new SmsClient(props.getEndpoint(), props.getAccessKey());\n    }\n}\n\n// ② 属性类:前缀 + 默认值\n@ConfigurationProperties(prefix = \"sms\")\npublic class SmsProperties {\n    private String endpoint = \"https://sms.example.com\";\n    private String accessKey;\n    private int timeoutMillis = 3000;\n    // getter / setter 省略\n}\n\n// ③ 清单文件:src/main/resources/META-INF/spring/\n//    org.springframework.boot.autoconfigure.AutoConfiguration.imports\n//    内容只有一行(多个就多行):\n//    com.example.sms.SmsAutoConfiguration",
-                },
+                lang: 'java',
+                code:
+                  "// ① 自动配置类:全部逻辑都藏在条件里\n@AutoConfiguration                       // 等价于「配置类 + 参与排序」\n@ConditionalOnClass(SmsClient.class)     // 依赖没引 → 整段不生效\n@ConditionalOnProperty(name = \"sms.enabled\", havingValue = \"true\", matchIfMissing = true)\n@EnableConfigurationProperties(SmsProperties.class)\npublic class SmsAutoConfiguration {\n\n    @Bean\n    @ConditionalOnMissingBean             // 用户自己定义了同类型 Bean → 我这个不生效\n    public SmsClient smsClient(SmsProperties props) {\n        return new SmsClient(props.getEndpoint(), props.getAccessKey());\n    }\n}\n\n// ② 属性类:前缀 + 默认值\n@ConfigurationProperties(prefix = \"sms\")\npublic class SmsProperties {\n    private String endpoint = \"https://sms.example.com\";\n    private String accessKey;\n    private int timeoutMillis = 3000;\n    // getter / setter 省略\n}\n\n// ③ 清单文件:src/main/resources/META-INF/spring/\n//    org.springframework.boot.autoconfigure.AutoConfiguration.imports\n//    内容只有一行(多个就多行):\n//    com.example.sms.SmsAutoConfiguration",
               },
               {
                 kind: 'diagram',
@@ -3142,11 +3144,9 @@ export default {
                 body: [
                   '把上面五个坑一次填完。注意线程名前缀、拒绝策略、异常处理器、优雅关闭、上下文传递这五处——每一处都对应一次真实故障。',
                 ],
-                code: {
-                  language: 'java',
-                  code:
-                    "@Configuration\n@EnableAsync\npublic class AsyncConfig implements AsyncConfigurer {\n\n    @Bean(\"bizExecutor\")\n    public ThreadPoolTaskExecutor bizExecutor() {\n        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();\n        ex.setCorePoolSize(8);\n        ex.setMaxPoolSize(16);\n        ex.setQueueCapacity(500);\n        ex.setKeepAliveSeconds(60);\n        ex.setThreadNamePrefix(\"biz-async-\");          // ① 线程名:排查问题的第一手线索\n        ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy()); // ② 背压\n        ex.setWaitForTasksToCompleteOnShutdown(true);   // ③ 停机不丢任务\n        ex.setAwaitTerminationSeconds(30);\n        // ④ 把日志上下文传到异步线程\n        ex.setTaskDecorator(runnable -> {\n            Map<String, String> ctx = MDC.getCopyOfContextMap();\n            return () -> {\n                if (ctx != null) MDC.setContextMap(ctx);\n                try { runnable.run(); } finally { MDC.clear(); }\n            };\n        });\n        ex.initialize();\n        return ex;\n    }\n\n    @Override\n    public Executor getAsyncExecutor() { return bizExecutor(); }\n\n    @Override\n    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {\n        // ⑤ 返回值为空的方法,异常在这里收口;默认实现只打日志、极易被忽略\n        return (ex, method, params) ->\n                log.error(\"async failed: {}\", method.getName(), ex);\n    }\n}\n\n// 使用:显式指定线程池,不要依赖默认\n@Async(\"bizExecutor\")\npublic CompletableFuture<Order> loadOrder(Long id) {\n    return CompletableFuture.completedFuture(orderMapper.selectById(id));\n}",
-                },
+                lang: 'java',
+                code:
+                  "@Configuration\n@EnableAsync\npublic class AsyncConfig implements AsyncConfigurer {\n\n    @Bean(\"bizExecutor\")\n    public ThreadPoolTaskExecutor bizExecutor() {\n        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();\n        ex.setCorePoolSize(8);\n        ex.setMaxPoolSize(16);\n        ex.setQueueCapacity(500);\n        ex.setKeepAliveSeconds(60);\n        ex.setThreadNamePrefix(\"biz-async-\");          // ① 线程名:排查问题的第一手线索\n        ex.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy()); // ② 背压\n        ex.setWaitForTasksToCompleteOnShutdown(true);   // ③ 停机不丢任务\n        ex.setAwaitTerminationSeconds(30);\n        // ④ 把日志上下文传到异步线程\n        ex.setTaskDecorator(runnable -> {\n            Map<String, String> ctx = MDC.getCopyOfContextMap();\n            return () -> {\n                if (ctx != null) MDC.setContextMap(ctx);\n                try { runnable.run(); } finally { MDC.clear(); }\n            };\n        });\n        ex.initialize();\n        return ex;\n    }\n\n    @Override\n    public Executor getAsyncExecutor() { return bizExecutor(); }\n\n    @Override\n    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {\n        // ⑤ 返回值为空的方法,异常在这里收口;默认实现只打日志、极易被忽略\n        return (ex, method, params) ->\n                log.error(\"async failed: {}\", method.getName(), ex);\n    }\n}\n\n// 使用:显式指定线程池,不要依赖默认\n@Async(\"bizExecutor\")\npublic CompletableFuture<Order> loadOrder(Long id) {\n    return CompletableFuture.completedFuture(orderMapper.selectById(id));\n}",
               },
               {
                 kind: 'diagram',
