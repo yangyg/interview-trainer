@@ -75,6 +75,7 @@ app/
 ├── scripts/parse.mjs        # 文档解析:三套格式归一化 + 近似题去重 + 题数自检
 ├── scripts/build-courses.mjs # 课程构建:选择器 → 课程 JSON + 覆盖率校验
 ├── scripts/curriculum/      # 课程作者源(14 门课的选择器 + 手写讲义),按语言分目录
+├── scripts/curriculum/audit.mjs # 块指纹 + 教学审计规则
 ├── public/data/             # 解析产物(index.json + 每专题 JSON + docs/,已入库)
 ├── public/data/courses/     # 课程产物(index.json + 每门课 JSON,已入库)
 └── src/
@@ -135,6 +136,43 @@ app/
 课后手写 `sections` 的一节课,构建期强制满足:**≥5 个区块(上限 20)、正文 ≥1100 字、必须含 `concept` + `principle` + 一个 `question`、且至少有一种 `analogy`/`diagram`/`compare`**;`handwrite` 还要求思路 ≥2 步、有参考实现、骨架里至少留一个 `TODO`。没写 `sections` 的老课时仍按旧规则校验,可以逐课升级。
 
 课时时长不再是「题数 × 1.2」,而是按正文 320 字/分钟 + 每题 1.1 分钟估算。
+
+### 块指纹与教学审计
+
+构建除了写课程 JSON,还在本地生成 `scripts/curriculum/.blockindex.json`(不入库):每节课的区块都有一条 `课程/阶段/课时#s序号` 地址和内容指纹,用来定位单个区块、判断改动范围。
+
+审计把《规范》里「值得修、但不该阻断构建」的条款固化成警告(代码块缺 `version`/`env`/`verified`、类比缺边界、图示缺 caption、量级图未标「示意」、真题拆解缺 `depth`/`followup`、阶段无练习、课程无 `explore`)。默认输出按规则聚合的计数,`node scripts/build-courses.mjs --audit` 打印逐条地址;明细同样写进 `.report.json`。
+
+### 按地址改区块
+
+`npm run course -- <命令>` 按 AST 位置改作者源里的单个区块,不做文本模式替换:
+
+```bash
+npm run course -- list java-mysql-redis                            # 阶段 / 课时 / 区块数
+npm run course -- list java-mysql-redis/mysql-index/mysql-engine   # 区块地址 + kind + 指纹
+npm run course -- show java-mysql-redis/mysql-index/mysql-engine#s3 [--json]
+npm run course -- patch  <地址> --from block.json --expect <指纹> [--dry-run]
+npm run course -- insert <地址> --from block.json --expect <指纹> [--before]
+npm run course -- rm     <地址> --expect <指纹>
+```
+
+- `--expect` 用 list / show 给出的指纹做乐观并发:对不上说明区块已被改过,拒绝写入(确定要覆盖加 `--force`)。
+- 写入前按 `BLOCK_FIELDS` 卡字段白名单;写入后自动跑 `courses:check`,校验失败自动还原原文件。
+- 插入 / 删除会移动同课后继区块的序号,旧地址与指纹随之失效;换行风格跟随源文件(CRLF 不会被改成 LF)。
+
+### 两段式成稿:先出计划,再逐块填
+
+```bash
+npm run course -- plan                     # 全部课程的待办摘要
+npm run course -- plan java-lang-collections            # 阶段 / 课时 / 待办明细
+npm run course -- plan java-lang-collections/collections/map-other --prompt
+npm run course -- plan <课时> --prompt --action practice|metadata   # 指定动作
+```
+
+- 计划只列三类动作:**阶段缺新场景练习**、**课程缺 explore**、**代码块缺元数据**;`--json` 输出完整数据(含每节课的区块地址、指纹、题目覆盖情况)。
+- 存量题库不要求全量拆解:未拆解真题作为 `gaps` 信息保留,不自动生成动作,避免凭空造出几百块内容债。
+- 目标课时已满 20 个区块时,动作带 `blocked`,提示词不给插入命令——先合并或替换。
+- `--prompt` 输出的是单块填充提示词:课时上下文、关联真题、目标区块的字段契约与约束、写入命令(含锚点指纹)。把模型返回的 JSON 存成 `block.json` 直接执行提示词里的 `insert` 即可。
 
 课程完成度与 SRS 进度是**两套独立真源**:课时是否完成看 `course-v1`,复习间隔仍由 `progress-v1` 决定。
 

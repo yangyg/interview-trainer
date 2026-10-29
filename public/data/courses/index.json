@@ -1,7 +1,7 @@
 {
   "version": 1,
   "sourceIndexGeneratedAt": "2026-10-27T05:56:26.214Z",
-  "buildHash": "2e0c5c514e88",
+  "buildHash": "495d0483bb02",
   "courses": [
     {
       "id": "java-lang-collections",
@@ -22,7 +22,7 @@
       "stageCount": 4,
       "lessonCount": 17,
       "uniqueQuestionCount": 158,
-      "estimatedMinutes": 776
+      "estimatedMinutes": 779
     },
     {
       "id": "java-concurrency-jvm",

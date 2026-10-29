@@ -18,7 +18,7 @@
   "stageCount": 4,
   "lessonCount": 17,
   "uniqueQuestionCount": 158,
-  "estimatedMinutes": 776,
+  "estimatedMinutes": 779,
   "stages": [
     {
       "id": "foundation",
@@ -7224,6 +7224,29 @@
                   "`LinkedHashSet` / `TreeSet` 分别是 `LinkedHashMap` / `TreeMap` 的包装"
                 ],
                 "depth": "被追问「为什么 HashSet 的 value 用常量」：因为只需要 key 的集合语义，value 不承载信息；用同一个静态常量可以省掉每个元素一个对象的内存开销。"
+              },
+              {
+                "kind": "explore",
+                "title": "大表扩容为什么不能「停一下」：三种边用边搬的写法",
+                "from": "这一节最容易被忽略的一点，是 CHM 的扩容并不是「一个线程搬完再放开」：它把旧表按区间分给多个线程一起搬，搬运期间读写都不停。[[把一次 O(n) 的停顿摊到很多次操作里]]，这个动作不只属于 CHM。",
+                "branches": [
+                  {
+                    "direction": "lateral",
+                    "related": "Go 的 sync.Map（read / dirty 双表）",
+                    "basis": "两者都在读多写少的场景下避免「读也要抢全局锁」。CHM 选择细粒度锁桶，sync.Map 选择只读快照加写时复制，目标相同、代价不同。",
+                    "shared": "读路径都不加锁；都把更新限制在更小的范围内（CHM 锁单个桶，sync.Map 只锁 dirty）；迭代都只提供弱一致视图，不承诺快照。",
+                    "diff": "CHM 原地改桶，读写共享同一份数据，所以写要抢桶锁、扩容要协同搬；sync.Map 把读放在原子读取的只读 read 表，写先落 dirty 表（带互斥锁），未命中累积到阈值才把 dirty 提升为新的 read。[[代价是写放大和两份数据]]，因此它适合键集合稳定、读远多于写；CHM 更适合写也不少、需要遍历和 size 的场景。",
+                    "value": "选型问题从「哪个更快」变成两个可判断的条件：读写比例多少，键集合是否稳定。这也是被追问「CHM 和 sync.Map 怎么选」时唯一站得住的答法。"
+                  },
+                  {
+                    "direction": "cross",
+                    "related": "Redis 的渐进式 rehash 与 Go map 的增量扩容",
+                    "basis": "三者回答同一个问题：哈希表扩容时必须重建所有桶，怎么才能不产生一次长停顿。CHM 的答案是并发协同搬，另外两个是单线程或写操作顺带搬。",
+                    "shared": "都保留旧表，新表建好后逐步迁移；迁移期间读写要能同时定位两张表；都把单次搬迁成本摊到多次操作上。",
+                    "diff": "CHM 让多个线程按区间领取任务并行搬，读遇到「已迁移」标记就转发到新表；Redis 单线程，每次命令顺带搬一个桶，查询同时查两张表；Go 在写入触达某个旧桶时才搬那个桶。[[谁搬、什么时候搬，决定了扩容期间的最坏延迟和实现复杂度]]。",
+                    "value": "以后看到任何「大表扩缩容」，先问三个问题：谁负责搬、什么时候搬、搬的过程中读怎么找到数据。带着这三问去看分库分表迁移、LSM 的 compaction、缓存重建，都是同一套骨架。"
+                  }
+                ]
               }
             ],
             "outline": [
@@ -7250,7 +7273,7 @@
             "java-02-Q40",
             "java-02-Q41"
           ],
-          "estimatedMinutes": 50
+          "estimatedMinutes": 53
         },
         {
           "id": "set-queue",

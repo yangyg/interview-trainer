@@ -26,6 +26,7 @@ dist-ssr
 # 本地工作记录与构建产物
 .workbuddy/
 scripts/curriculum/.report.json
+scripts/curriculum/.blockindex.json
 
 
 # 本地质量度量脚本（产出见 docs/term-coverage-report.md）

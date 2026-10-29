@@ -14,6 +14,10 @@
  *   node scripts/build-courses.mjs --skeleton 跳过讲义长度校验(骨架阶段)
  *   node scripts/build-courses.mjs --partial  跳过全局覆盖率校验(分批写作时)
  *   node scripts/build-courses.mjs --verbose  逐课打印首末题
+ *   node scripts/build-courses.mjs --audit    打印教学审计的逐条警告(默认只给计数)
+ *
+ * 除课程产物外,还会写出 scripts/curriculum/.blockindex.json(块地址 → 指纹),
+ * 供 scripts/course-tool.mjs 定位与改块;该文件不入库。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -30,6 +34,7 @@ import {
   EXPLORE_DIRECTIONS,
   EXPLORE_BRANCH_MAX,
 } from './curriculum/schema.mjs'
+import { hashBlock, hashSections, auditCourses, summarizeAudit } from './curriculum/audit.mjs'
 
 /** explore 分支必填字段的中文名,报错时直接告诉作者该写什么 */
 const EXPLORE_FIELD_LABEL = {
@@ -45,12 +50,14 @@ const ROOT = path.resolve(__dirname, '..')
 const DATA_DIR = path.join(ROOT, 'public/data')
 const OUT_DIR = path.join(DATA_DIR, 'courses')
 const REPORT_PATH = path.join(__dirname, 'curriculum/.report.json')
+const BLOCK_INDEX_PATH = path.join(__dirname, 'curriculum/.blockindex.json')
 
 const flags = new Set(process.argv.slice(2))
 const CHECK_ONLY = flags.has('--check')
 const SKELETON = flags.has('--skeleton')
 const PARTIAL = flags.has('--partial')
 const VERBOSE = flags.has('--verbose')
+const SHOW_AUDIT = flags.has('--audit')
 
 const problems = []
 const fail = (msg) => problems.push(msg)
@@ -776,6 +783,33 @@ const courseIndex = {
   })),
 }
 
+// ---------- 块索引与教学审计 ----------
+
+/**
+ * 块地址 = `课程/阶段/课时#s序号`(序号从 1 起,对应 sections 数组)。
+ * 指纹让工具能判断「我看到的这个块还是不是当前这个块」,也给改块提供乐观并发。
+ */
+function buildBlockIndex(courses, buildHash) {
+  const lessons = {}
+  for (const course of courses) {
+    for (const stage of course.stages) {
+      for (const lesson of stage.lessons) {
+        const key = `${course.id}/${stage.id}/${lesson.id}`
+        const sections = lesson.content.sections ?? []
+        lessons[key] = {
+          hash: hashSections(sections),
+          blocks: sections.map((block, i) => ({
+            addr: `${key}#s${i + 1}`,
+            kind: block.kind,
+            hash: hashBlock(block),
+          })),
+        }
+      }
+    }
+  }
+  return { version: 1, buildHash, lessons }
+}
+
 function writeIfChanged(file, data) {
   const text = JSON.stringify(data, null, 2) + '\n'
   if (fs.existsSync(file) && fs.readFileSync(file, 'utf8') === text) return false
@@ -787,6 +821,7 @@ let written = 0
 if (!CHECK_ONLY) {
   fs.mkdirSync(OUT_DIR, { recursive: true })
   if (writeIfChanged(path.join(OUT_DIR, 'index.json'), courseIndex)) written++
+  if (writeIfChanged(BLOCK_INDEX_PATH, buildBlockIndex(resolvedCourses, buildHash))) written++
 
   const keep = new Set()
   for (const course of resolvedCourses) {
@@ -799,6 +834,9 @@ if (!CHECK_ONLY) {
     if (file.endsWith('.json')) fs.rmSync(path.join(OUT_DIR, file))
   }
 }
+
+const auditWarnings = auditCourses(resolvedCourses)
+const auditSummary = summarizeAudit(auditWarnings)
 
 const report = {
   sourceIndexGeneratedAt: index.generatedAt,
@@ -820,6 +858,7 @@ const report = {
     minutes: c.estimatedMinutes,
     excluded: [...excludedAll.entries()].filter(([, v]) => v.startsWith(c.id + ':')).map(([k]) => k),
   })),
+  audit: { summary: auditSummary, warnings: auditWarnings },
 }
 if (!CHECK_ONLY) fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2) + '\n')
 
@@ -856,6 +895,20 @@ if (gaps.length && PARTIAL) {
   console.log('\n  尚未覆盖(分批写作中,忽略):')
   for (const t of gaps) console.log(`    ${t.topicId}  ${t.assigned}/${t.total}`)
 }
+if (auditWarnings.length) {
+  console.log(
+    `  教学审计 ${auditWarnings.length} 条警告(不阻断构建${SHOW_AUDIT ? '' : ',加 --audit 看明细'}):`,
+  )
+  for (const row of auditSummary) {
+    console.log(`    ${row.rule.padEnd(19)} ${String(row.count).padStart(4)}`)
+  }
+  if (SHOW_AUDIT) {
+    console.log('')
+    for (const w of auditWarnings) console.log(`    - ${w.addr ?? w.where}: ${w.message}`)
+  }
+  console.log('')
+}
+
 console.log(
   `\n✓ 校验通过${CHECK_ONLY ? '（未写盘）' : written ? `,写入 ${written} 个文件` : ',内容无变化未重写'}\n`,
 )

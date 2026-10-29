@@ -12,6 +12,7 @@
     "parse": "node scripts/parse.mjs",
     "courses": "node scripts/build-courses.mjs",
     "courses:check": "node scripts/build-courses.mjs --check",
+    "course": "node scripts/course-tool.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -32,6 +33,7 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.11",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.19.2",
     "@vitejs/plugin-vue": "^6.0.10",
