@@ -3944,5 +3944,785 @@ export default {
         },
       ],
     },
+    {
+      id: 'observe',
+      title: 'E · 可观测:出了问题,你能不能五分钟内说出哪里坏了',
+      goal: '让「一次请求」和「一次故障」都能被追出来——日志能串成一条线,指标能算得出分位数,排障有固定入口而不是靠猜',
+      summary:
+        '前四个阶段都在让系统「跑得对」,这一阶段解决「坏了以后你怎么知道、怎么定位」。三种证据各有分工:日志记录离散事实,指标记录聚合趋势,pprof 记录调用栈现场。它们的共同前提是**身份**——没有 trace id,一次请求在日志里散成四片互不相干的记录;没有路由模板,指标会被业务数据撑爆;没有独立端口,排障工具本身变成攻击面。验收标准同样是可测量的事实:trace id 能从响应头一路追到 Kafka 消费并落进同一行日志、300 个短码在指标里只占 1 条时间序列、一个「PV 永远是 0」的故障能靠 lag 加四个计数器在五分钟内定位到具体那一行代码。',
+      checkpoint: {
+        questionIds: [
+          'go-index-Q129',
+          'go-index-Q101',
+          'go-index-Q103',
+          'go-index-Q104',
+          'go-index-Q111',
+          'go-index-Q71',
+        ],
+        passRatio: 0.8,
+      },
+      lessons: [
+        {
+          id: 'trace-and-log',
+          title: 'trace id 与结构化日志:让一次请求在日志里连成一条线',
+          kind: 'concept',
+          questionIds: [
+            'go-index-Q101',
+            'go-index-Q129',
+            'go-index-Q49',
+            'go-index-Q50',
+          ],
+          content: {
+            intro:
+              '一次跳转在生产环境里至少留下四行日志:访问日志、缓存决定、SQL、打点。它们是四个不同的组件写的,时间戳差几毫秒,顺序还不一定对。没有身份的时候,你只能靠「时间接近」把它们猜到一起——而线上同一毫秒里有几十个请求在跑,猜错是常态。这一节做三件事:给每个请求一个 32 位十六进制的身份证、让它在跨进程时走标准头、让每一条日志自动带上它。落地会看到三个坑,它们共同的特征是**不报错**:用 `slog.Info` 而不是 `InfoContext` 会让身份证失效,Handler 忘了重写 `WithAttrs` 会让 `.With` 之后静默丢字段,`WithGroup` 会把字段塞进组里、导致查询写 `trace_id="..."` 一条都查不到。',
+            outline: [
+              '一次请求在日志里为什么会散成四片,以及「时间接近」为什么不可靠',
+              'trace id 的三条来路:生成、继承、兜底,以及为什么拒绝宽松解析',
+              '为什么注入点在 handler 层,而不是每个调用点手写一遍',
+              '跨进程传播:为什么走 Kafka header 而不是消息正文',
+            ],
+            pitfalls: [
+              '用 `slog.Info` 而不是 `slog.InfoContext`:前者内部传的是 `context.Background()`,handler 取不到 id。日志看起来一切正常,只是没有 trace_id——**故障时才会发现,而那时你已经在排障了。**',
+              'Handler 包了,但 `WithAttrs` 直接返回内层:`main` 里一句 `logger.With("component", "api")` 之后,trace_id 全部消失,同样不报错。',
+              '把 trace id 塞进消息正文:正文是生产者与消费者的数据契约,加一个字段就多一次版本协商;传播信息属于传输层,不属于数据。',
+            ],
+            sections: [
+              {
+                kind: 'concept',
+                title: '一次请求为什么会散成四片',
+                body: [
+                  '一个 302 跳转在本项目里会写四种日志:中间件写的访问日志(`POST /:code 302 1.2ms`)、cache-aside 写的缓存决定(`cache hit`)、GORM 慢查询日志(超过阈值才写)、打点管线写的批次日志(`flush batch=20`)。写它们的是四个组件,拿到的上下文各不相同。',
+                  '最容易想到的办法是「按时间戳拼」:找 `20:18:37.112` 前后几毫秒的所有日志。这在本地开发时工作得很好,因为一秒只有一个请求。线上不一样——同一毫秒里有几十个请求在跑,**你拼出来的四行里,可能有一行属于别人的请求。** 而拼错比拼不出来更糟:你会沿着一条错误的线索查上半小时。',
+                  '第二种办法是「按用户标识拼」,比如带上 IP 或用户 ID。它的问题是粒度不对:一个用户可能同时开五个页面、点十个链接,你还是分不清哪四个日志属于同一次点击。',
+                  '所以在日志这个维度里,唯一可靠的关联手段是**给每一次物理请求分配一个唯一的、随请求流动的 id**。它必须满足三个条件:全局唯一(不能撞)、能跨进程(HTTP 到 HTTP、HTTP 到 Kafka)、不依赖业务字段(否则又绕回第二种办法)。这三条正好定义了 trace id。',
+                ],
+              },
+              {
+                kind: 'principle',
+                title: 'trace id 的三条来路:生成、继承、兜底',
+                body: [
+                  '三条路有严格的优先级,顺序错了会出现「同一条链路被上游切断」这类很难查的现象。',
+                ],
+                steps: [
+                  {
+                    title: '① 继承:请求头里已经有 id,就用它的',
+                    detail:
+                      '标准是 W3C Trace Context 的 `traceparent` 头,格式固定四段:`版本-traceid-spanid-flags`,例如 `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`。只要上游是网关、另一个 Go 服务、或者任何接了 OpenTelemetry 的组件,它就会带上这个头。继承下来,你在 Jaeger 或 Loki 里才能看到「一个请求穿过三个服务」的完整瀑布图。',
+                  },
+                  {
+                    title: '② 兜底:没有标准头,但有一个非标准的 `X-Request-ID`',
+                    detail:
+                      '很多网关只发 `X-Request-ID`,不发 `traceparent`。这个头**是不可信输入**——任何人都能发一个 3000 字符的字符串、带控制字符、带换行(日志注入)。所以它必须先过白名单:只留 `[0-9a-zA-Z-_]`,截到 64 字符,不合格就当作没给。',
+                  },
+                  {
+                    title: '③ 生成:两个都没有,自己造一个',
+                    detail:
+                      '16 字节 `crypto/rand` → 32 个十六进制字符。为什么是 16 字节而不是 8:因为 W3C 规范里 trace-id 就是 16 字节。宽度对齐之后,将来接 OpenTelemetry 不用改字段长度、不用重刷历史日志的索引。`2^64` 在单机上确实够用,但**「够用」和「不用迁移」是两件事**。',
+                  },
+                ],
+                takeaway:
+                  '顺序必须是「继承 → 兜底 → 生成」,不能反过来:一旦自己先生成,上游的 id 就被丢弃,链路在你这一个服务处断开,而断点的特征恰恰是「上游有日志、下游也有日志,但两边对不上」。[[trace 的价值全在连续性上,断一次等于零。]]',
+              },
+              {
+                kind: 'diagram',
+                title: '一个 id 怎么穿过 HTTP、Redis、Kafka 三种边界',
+                diagram: {
+                  type: 'sequence',
+                  actors: ['客户端', 'API 进程', 'Redis', 'Kafka', 'worker'],
+                  messages: [
+                    {
+                      from: '客户端',
+                      to: 'API 进程',
+                      text: '`GET /1n0I6`(无 traceparent,只有 `X-Request-ID: abc` 这种网关头)',
+                    },
+                    {
+                      from: 'API 进程',
+                      to: 'API 进程',
+                      text: 'RequestID 中间件:sanitize(`abc`) → 写进 `context.Context` → 回显到响应头',
+                    },
+                    { from: 'API 进程', to: 'Redis', text: '`GET link:1n0I6` —— 不传 id,Redis 不需要它' },
+                    { from: 'Redis', to: 'API 进程', text: 'MISS' },
+                    {
+                      from: 'API 进程',
+                      to: 'API 进程',
+                      text: '回源 MySQL、写日志 —— 每行日志由 TraceHandler 自动补 `trace_id`',
+                    },
+                    {
+                      from: 'API 进程',
+                      to: 'Kafka',
+                      text: '打点事件:正文里**没有** trace_id,id 放 message header',
+                    },
+                    {
+                      from: 'Kafka',
+                      to: 'worker',
+                      text: 'Fetch 后从 header 读回 id,塞进 ctx;落库日志与 API 日志同 id',
+                    },
+                  ],
+                  caption:
+                    '注意 Redis 那一跳:内部缓存调用不传 trace id 是刻意的。传了反而会让 Redis 的慢日志里出现业务 id,而那属于「业务数据泄进了基础设施日志」。**只在你需要跨它做关联的边界上传**——HTTP 边界和消息边界,恰好是仅有的两个。',
+                },
+              },
+              {
+                kind: 'code',
+                title: '`ParseTraceparent`:55 个字符,一个都不多',
+                lang: 'go',
+                code: 'func ParseTraceparent(s string) (string, bool) {\n\t// 32 + 16 + 2 个字符 + 3 个分隔符;长度不对就不必再 split。\n\tif len(s) != 55 {\n\t\treturn "", false\n\t}\n\tif s[2] != \'-\' || s[35] != \'-\' || s[52] != \'-\' {\n\t\treturn "", false\n\t}\n\tversion, traceID, spanID, flags := s[0:2], s[3:35], s[36:52], s[53:55]\n\tif version != "00" {\n\t\t// ff 是规范明确保留且非法的版本号。\n\t\treturn "", false\n\t}\n\tif !isHex(traceID) || !isHex(spanID) || !isHex(flags) {\n\t\treturn "", false\n\t}\n\tif allZero(traceID) || allZero(spanID) {\n\t\t// 全 0 是规范禁止的:trace id 全 0 无法和「没有 id」区分开。\n\t\treturn "", false\n\t}\n\treturn traceID, true\n}',
+                version: 'Go 1.24 + 标准库',
+                env: 'internal/obs 十条用例全绿,含长度错、分隔符错位、版本非 00、非 hex、全 0 五个负例',
+                verified: true,
+                caption:
+                  '这里刻意写得比「宽容」严格得多。宽松解析(接受任意长度、跳过版本校验)看起来更健壮,实际后果是:一个拼错的头会被当成合法 id 接受,于是这条链路以一个**错误但看起来正常**的 id 继续往下走——排查时你会在两个本该连起来的日志中间发现断口,而没有任何报错提示。[[宁可拒绝,让上游把 id 生成好;也不要接受一个半对的 id,让它在链路中间制造断层。]]',
+              },
+              {
+                kind: 'code',
+                title: '`TraceHandler`:在 handler 层补字段',
+                lang: 'go',
+                code: 'func (h *TraceHandler) Handle(ctx context.Context, r slog.Record) error {\n\tid := TraceID(ctx)\n\tif id == "" {\n\t\treturn h.Handler.Handle(ctx, r)\n\t}\n\n\t// 调用点如果已经显式加了 trace_id,就不再重复 —— 否则输出里会出现\n\t// 两个同名键,而 JSON 解析器取第一个还是最后一个取决于实现。\n\tdup := false\n\tr.Attrs(func(a slog.Attr) bool {\n\t\tif a.Key == FieldTrace {\n\t\t\tdup = true\n\t\t\treturn false\n\t\t}\n\t\treturn true\n\t})\n\tif dup {\n\t\treturn h.Handler.Handle(ctx, r)\n\t}\n\n\t// Record 是按值传递的,但内部属性数组是共享的:必须 Clone 后再 AddAttrs,\n\t// 否则会写到上一条记录(或调用方的)缓冲区里。\n\tr2 := r.Clone()\n\tr2.AddAttrs(slog.String(FieldTrace, id))\n\treturn h.Handler.Handle(ctx, r2)\n}\n\n// WithAttrs 必须重新包一层。\n// 直接返回 h.Handler.WithAttrs(as) 会丢掉包装,于是\n// logger.With("component", "x") 之后的所有日志**都不再有 trace_id**。\nfunc (h *TraceHandler) WithAttrs(as []slog.Attr) slog.Handler {\n\treturn &TraceHandler{Handler: h.Handler.WithAttrs(as)}\n}',
+                version: 'Go 1.21+ log/slog',
+                env: 'obs 包八条用例全绿,含「With 之后仍注入」「组内嵌套行为」「不重复注入」',
+                verified: true,
+                caption:
+                  '三个必须写对的地方:`Clone()`(不 Clone 会污染上一条记录)、去重判断(否则 JSON 里两个 `trace_id`,取哪个取决于解析器)、以及 `WithAttrs` 重新包装。最后这一条是这类 Handler 最容易漏的——它在 `main` 里一定会被触发,而症状是「加了字段之后 trace_id 就没了」。',
+              },
+              {
+                kind: 'why',
+                title: '为什么注入点必须在 handler 层,而不是每个调用点手写',
+                body: [
+                  '最直觉的做法是让每个调用点自己带上:`logger.Info("cache hit", "trace_id", id, "code", code)`。它在示例代码里工作得很好,因为示例只有三个调用点。',
+                  '本项目的调用点在十个以上,分布在 handler、service、repo、stats、worker 五个包里。手写的后果不是「多打几个字」,而是**漏一个是必然的**——而漏掉的那一条,往往正好是排障要看的那一条(比如某个只在错误分支里打的日志)。',
+                ],
+                without:
+                  '如果真要手写,你还需要把 id 从 `ctx` 里取出来的样板代码复制十遍。等到想改字段名(比如从 `trace_id` 改成 `traceId` 对齐前端约定),这十个地方全都要改,而漏改一处的结果是新旧字段并存——看板上一半的日志查不到。',
+                real:
+                  '在 handler 层做,只需要一个前提:`slog` 的 `Handle(ctx, r)` 本来就收 `ctx`。这是标准库设计好的路径,不是 hack。而且它天然满足「只改一处」:换字段名、加采样、接 OpenTelemetry 的 SpanContext,都只动这一个文件。[[能由框架保证的事,不要交给纪律;纪律会在第 137 个调用点上失效。]]',
+              },
+              {
+                kind: 'concept',
+                title: '两个「不报错」的失效点',
+                body: [
+                  '第一个是 `slog.Info` 与 `slog.InfoContext` 的区别。前者的签名是 `Info(msg string, args ...any)`,内部用 `context.Background()` 调用 handler——于是 `TraceID(ctx)` 返回空串,注入被静默跳过。编译通过、测试通过、日志格式完全正常,只是缺一个字段。本项目因此把所有日志调用都改成了 `InfoContext`/`ErrorContext`,并在 `AGENTS.md` 里写成硬规则:**在请求路径上不允许出现不带 ctx 的日志调用。**',
+                  '第二个是 `WithGroup`。它把后续所有属性塞进一个嵌套对象,handler 注入的 `trace_id` 也不例外。写 `logger.WithGroup("http")` 之后,日志会变成 `{"http":{"trace_id":"...","method":"GET"}}`——查询时写 `trace_id="abc"` 一条都查不到,必须写 `http.trace_id`。',
+                  '这不是 slog 的 bug,是 `WithGroup` 的语义就该如此:组的含义是「下面所有属性都属于这个命名空间」。但它带来的运维后果很实在——**日志字段的路径变成了代码结构的函数**,而代码结构会变。所以本项目的结论是:请求级字段(需要被聚合查询的)不进组,组件级字段(只在人眼看时有用)才进组。',
+                  '顺带说清 `context.Context` 在这里的角色。为什么 id 挂 ctx 而不是塞进一个全局的 goroutine-local?因为 Go 没有 goroutine-local,而 `ctx` 就是它显式的替代品:它随调用链向下传递、随请求结束被回收、并且 `context.WithValue` 明确要求 key 是不可导出的自定义类型——这正是为了防撞车。这条设计约束在 `go-index-Q49` 里有完整展开。',
+                ],
+              },
+              {
+                kind: 'code',
+                title: '跨进程:走 header,不走正文',
+                lang: 'go',
+                code: '// 生产侧:explicitly 放到 message header\nif e.TraceID != "" {\n\tmsg.Headers = []kafka.Header{{Key: obs.HeaderTrace, Value: []byte(e.TraceID)}}\n}\n\n// 消费侧:Fetch 成功、反序列化之后立刻读回来\ne.TraceID = traceFromHeaders(m.Headers)\n\nfunc traceFromHeaders(hs []kafka.Header) string {\n\tfor _, h := range hs {\n\t\tif h.Key != obs.HeaderTrace {\n\t\t\tcontinue\n\t\t}\n\t\tv := string(h.Value)\n\t\t// 先按标准 traceparent 解析;不是这个格式就当作裸 id(兼容自己发的)\n\t\tif id, ok := obs.ParseTraceparent(v); ok {\n\t\t\treturn id\n\t\t}\n\t\treturn v\n\t}\n\treturn ""\n}',
+                version: 'Go 1.24 + kafka-go',
+                env: 'stats 包用例全绿,含「正文里不含 trace_id」「两种形式都能读回」',
+                verified: true,
+                caption:
+                  '`TraceID` 字段的 JSON tag 是 `json:"-"`,它结构上就不可能进正文——这是用类型系统兜住约定,而不是靠注释提醒。消费侧先试标准格式、再当裸 id,是为了兼容「别的服务用标准头、我们自己发裸 id」这种混用状态。',
+              },
+              {
+                kind: 'concept',
+                title: '一批消息里没有「那一个」id',
+                body: [
+                  '同步请求里,一份上下文对应一个 id,天经地义。异步批次里这个对应关系不存在了:一个 flush 批次有 20 条事件,来自 20 个不同的请求,20 个不同的 trace id。',
+                  '这时候人会本能地想「那取第一个吧」——但要意识到这是个**语义降级**:批次日志里的 `sample_trace` 不是你正在查的那个请求,它只是「这批里恰好排第一的那个」。本项目的做法是明确叫它 `sample_trace`,并在文档里写清「要查具体某次点击,用它的 id 去 grep,不要用批次日志里的 sample」。',
+                  '更进一步的做法是让批次本身也有 id(一个 batch_id),然后把「哪些事件属于哪个批次」记下来。本项目没做,理由是收益不够:打点链路的排障需求集中在「有没有丢」和「算得对不对」,而不是「这一条为什么慢」——后者是同步链路的活。[[给一个标识符赋予它承载不了的语义,是排障文档里最常见的错误来源。]]',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'Q129 · 链路追踪的原理是什么?trace id 怎么在服务间传递?',
+                questionId: 'go-index-Q129',
+                intent:
+                  '这题的标准答法是「trace id + span id + 上报」,但那只说清了「是什么」。真正的分水岭在于:你能不能说清**传播**这件事的边界条件——哪些地方要传、哪些地方不该传、传不过去时怎么发现。',
+                points: [
+                  '三个标识各管一段:trace id 管整条链路(全局唯一、跨进程不变),span id 管一个节点内部的一次操作(每跳新生成),`parent_span_id` 管父子关系。链路树是靠 parent 指针拼出来的,不是靠时间排序——时间只用来算耗时。',
+                  '传播格式的既成标准是 W3C Trace Context 的 `traceparent` 头:`00-<32hex traceid>-<16hex spanid>-<flags>`。`flags` 的最低位是采样标记,它必须**随链路继承**:上游决定采样,下游不该重新掷骰子,否则一条链路只有一半被记录下来。',
+                  '跨进程的三种边界各有各的走法:HTTP 走 header、消息队列走消息头(不能走正文)、gRPC 走 metadata。第三种常被忽略:RPC 框架的拦截器要负责注入和提取,漏了它就等于在这一跳断链。',
+                  '进程内的传播靠 `context.Context`,而它有一个硬约束:跨 goroutine 要用 `context.WithValue` 派生后显式传下去,**不要用全局变量或 goroutine-local 模拟**。Go 没有 goroutine-local 是设计选择,不是缺陷。',
+                  '采样是必需品不是优化:全量上报的成本随 QPS 线性涨。常见策略是头部采样(在入口决定,简单但会漏掉慢请求)和尾部采样(等链路结束按耗时/错误决定,准但要有缓冲)。[[面试里能说出「尾部采样要缓存整条链路」的人,通常是真接过。]]',
+                ],
+                depth:
+                  '再深一层会问「异步任务怎么串」。答案是不能串成一条链路,只能串成两条并用 link 关联:定时任务触发的那次执行,与当初写入任务的那次请求之间没有因果关系的时间连续性,强行接上会得到一个长达几小时的假 span。OpenTelemetry 为此专门有 `Link`,而不是 `parent`。',
+                followup:
+                  '追问常到「没有 trace 系统时怎么排障」。答:退化成「一个请求 id + 结构化日志 + grep」,也就是本节实现的东西。它的能力边界要清楚:能回答「这一次请求发生了什么」,回答不了「这次慢在哪个环节占比多少」——后者需要 span 级别的耗时分解。',
+              },
+              {
+                kind: 'question',
+                title: 'Q101 · log/slog 相比 zap/logrus 有什么优势?结构化日志该怎么设计?',
+                questionId: 'go-index-Q101',
+                intent:
+                  '对比三个库的 API 是最低档的答法。中档答法讲性能差异,高档答法讲**接口设计的可组合性**——slog 真正赢的地方是 Handler,而不是它属于标准库。',
+                points: [
+                  'slog 的核心抽象是 `Handler`:`Enabled` 决定要不要记、`Handle` 决定怎么写、`WithAttrs`/`WithGroup` 决定怎么派生。三件事分开之后,「加字段」「改格式」「加采样」「接 trace」全都是实现一个 Handler,而不是改业务代码。',
+                  '性能上 slog 的默认 JSONHandler 确实比 zap 慢(反射 + 分配更多),但差距在「每秒十万条」这个量级才明显。判据不是跑分,是**你的日志量**:一个日活百万的服务,日志通常是每秒几百条,这时候可维护性远比 2 倍 CPU 重要。真到了瓶颈,换个 Handler 实现就行,接口不变。',
+                  '结构化日志的设计有四条硬规则:① 字段名全项目统一(`trace_id` 不是 `traceId`);② 值是机器可解析的(数字就是数字,别写成 `"123"`);③ 消息体是给人看的一句话,变量全进字段(别拼字符串);④ 一定要有级别,而级别的语义要事先约定——`Error` 意味着「需要人看」,不是「出错了」。',
+                  '最后一条最容易被违反:`Error` 被用来记「查库失败但降级成功」,于是告警天天响,人就学会忽略它。本项目的约定是 `Error` 只用于「本次请求对用户不可用」,可恢复的降级用 `Warn`。',
+                ],
+                depth:
+                  '再往上会问「日志要不要采样」。答:入口处按请求采样(1% 的请求记全量),而不是按行采样——按行采样会把一次请求的日志砍成碎片,反而不可读。错误日志永远不采样,但要做速率限制(同一错误每秒最多 N 条 + 计数),否则一个死循环能写满磁盘。',
+                followup:
+                  '可能追问「日志和 trace 的关系」。答:日志是离散事实的集合,trace 是把它们按请求串起来的索引。没有 trace 的日志是「一堆行」,有 trace 的日志是「一条时间线」。这也是本节先做 trace id 再做日志格式的原因。',
+              },
+              {
+                kind: 'question',
+                title: 'Q49 · context 有哪几种派生方式?各自用途是什么?',
+                questionId: 'go-index-Q49',
+                intent:
+                  '这题看着是背 API,实际考的是「你是否理解 ctx 只该传两类东西」。能答清「为什么 Value 要限制用途」,比背出六个函数名有用得多。',
+                points: [
+                  '`WithCancel` 手动取消,`WithTimeout` 到期取消,`WithDeadline` 到点取消——三者的区别只有触发方式,下游行为完全一样:都关闭 `Done()` channel。生产代码里 `WithTimeout` 用得最多,因为它表达的是「我等不了那么久」,这是业务语义而不是绝对时刻。',
+                  '`WithValue` 只该传**请求作用域的元数据**:trace id、用户身份、语言、租户。不该传的:数据库连接、logger、配置、函数参数。判据是「这个值是不是每次调用的输入」——是的话它就是参数,不是上下文。',
+                  '`WithCancelCause`(Go 1.20)让取消原因可查,`context.Cause(ctx)` 能拿到具体是谁取消的。这在多层嵌套取消里很有价值:日志里能写清是「客户端断开」还是「上游超时」,而不是笼统的 `context canceled`。',
+                  '`WithoutCancel`(Go 1.21)派生一个不会被父 ctx 取消的 ctx,专门给「父请求结束了,但这个操作必须做完」的场景——比如审计日志落盘、异步补偿。用它的时候要自己加超时,否则就变成了「永不结束的后台任务」。',
+                  '等价关系要清楚:`WithTimeout` 就是 `WithDeadline(now+timeout)`,而 `WithCancel` 是所有派生的基础。[[四个函数塌缩成两个语义:带截止时间的取消,和不带截止时间的取消。]]',
+                ],
+                depth:
+                  '深一层会问「ctx 该不该存进 struct」。答案是几乎永远不该:存进 struct 就脱离了调用链,取消信号传不进来,而 `go vet` 也会报。唯一例外是「struct 本身代表一次请求的生命周期」,但那种情况通常说明你该把它做成参数传。',
+                followup:
+                  '追问常到「ctx 能不能当参数传给 goroutine」。答:能传,但**必须在启动 goroutine 之前捕获**。在 goroutine 里读外层的 ctx 变量是数据竞争;正确写法是把 ctx 作为函数第一个参数传进去。',
+              },
+              {
+                kind: 'question',
+                title: 'Q50 · context 使用中有哪些坑?',
+                questionId: 'go-index-Q50',
+                intent:
+                  '这题的价值全在具体案例。答「要用 ctx 控制超时」是常识,答「哪些写法会让 ctx 静默失效」才是经验。',
+                points: [
+                  '坑一:`context.Background()` 满天飞。日志调用传 Background,trace id 就丢了;HTTP 请求传 Background,客户端断开时下游还在跑。判据很简单:**在请求路径上,除了最外层,不应该出现 Background。**',
+                  '坑二:派生后忘了 `defer cancel()`。`WithTimeout` 返回的 cancel 不调用,计时器会一直活到超时——在长连接服务里这是最隐蔽的内存泄漏之一(每请求一个 timer)。`go vet` 的 `lostcancel` 检查能抓一部分,但抓不到「传给了别人」。',
+                  '坑三:把 ctx 存进 struct 或全局 map。前者脱离调用链,后者等于用 ctx 实现 goroutine-local——两件事都破坏了「显式传递」这个前提。',
+                  '坑四:判断取消原因时不看 `ctx.Err()`。`Err() == context.Canceled` 说明是主动取消(可能是正常的客户端断开),`DeadlineExceeded` 说明是超时(通常是需要告警的)。把两者混成一个「请求失败」,会让正常的连接关闭污染错误率。',
+                  '坑五:在 `select` 里只等业务 channel,不等 `ctx.Done()`。这样即使上游已经放弃,goroutine 还是会等到业务结果——如果业务本身卡住,goroutine 就永久泄漏。这是 `go-index-Q70` 那个问题的最常见成因。',
+                ],
+                depth:
+                  '再往上会问「ctx 的取消是同步还是异步」。答:关闭 `Done()` 是同步的,但**你的处理是异步的**——取消信号到达和你实际停止工作之间总有延迟。所以幂等和可重入不是可选项:任何可能被取消的操作,都必须能安全地在中途停下并重试。',
+                followup:
+                  '可能追问「超时了要不要回滚」。答:看语义。读操作超时不用回滚(什么都没改);写操作超时**必须**当作「可能已成功」处理,也就是重试要带幂等键——这正好接上阶段 D 的接口幂等。',
+              },
+            ],
+          },
+        },
+        {
+          id: 'metrics-cardinality',
+          title: '指标:为什么 /metrics 必须长在另一个端口上',
+          kind: 'concept',
+          questionIds: ['go-index-Q116', 'go-index-Q112', 'go-index-Q97', 'go-index-Q139'],
+          content: {
+            intro:
+              '上一节解决「一次请求发生了什么」,这一节解决「整体正在变好还是变坏」。两者的工程量级完全不同:日志按条产生,指标按秒聚合,所以你不可能给每个业务维度都建指标——除非你打算让 Prometheus 替你 OOM。落地会看到四个决定:为什么 `c.FullPath()` 和 `c.Request.URL.Path` 差着一个数量级的成本;为什么默认分桶对一个 200 微秒的跳转毫无分辨率;为什么管理端口必须和业务端口分开监听;以及为什么「用 0 表示读不到」是最坏的一种指标设计。',
+            outline: [
+              '日志、指标、调用栈:三种证据各回答什么问题',
+              '/metrics 走独立端口的三个理由(侦察报告、CPU 消耗、内存快照)',
+              '基数爆炸:500 万张短链为什么会变成 500 万条时间序列',
+              '分桶决定分辨率:为什么不能用 DefBuckets',
+              '注册一个恒为 0 的指标,比不注册更糟',
+            ],
+            pitfalls: [
+              '用 `c.Request.URL.Path` 当标签值 —— 每个短码一条时间序列,而且**不报错**:系统照常运行,监控慢慢把自己吃死。',
+              '用 `prometheus.DefBuckets` —— 起点 5ms,一次 200µs 的跳转全落进第一个桶,p50/p90/p99 全都等于「≤5ms」,看起来有数据,其实没有分辨率。',
+              '依赖全局默认 registry —— 测试里重复注册直接 panic,任何被 import 的库都能往里塞指标,最后没人说得清那 200 行是谁贡献的。',
+            ],
+            sections: [
+              {
+                kind: 'concept',
+                title: '三种证据,三个问题',
+                body: [
+                  '排障时你说的每一句话,背后都要有证据。证据只有三类,能力边界各不相同。',
+                  '**日志**回答「这一次发生了什么」:离散、带完整上下文、贵(每条都要序列化 + 写盘 + 建索引)。它的优势是细节,劣势是无法聚合——你不能对一亿条日志做 `sum` 然后得到一条曲线。',
+                  '**指标**回答「整体趋势如何」:定长、按时间聚合、便宜(一个计数器就是一个数字)。它的优势是能算分位数、能画图、能告警,劣势是没有上下文——`http_requests_total{route="/:code",status="500"}` 涨了,但它不会告诉你「哪个短码、什么错误」。',
+                  '**调用栈(pprof)** 回答「现在卡在哪一行」:现场快照、能定位到函数和行号、但开销大(CPU 采样要占一个核,heap 快照要 STW)。所以它是按需触发的工具,不是常驻的。',
+                  '三者的关系是漏斗:指标先告警(便宜、全天候),日志再缩小范围(按 trace id 捞出那一次),pprof 最后定位(在出问题的实例上抓现场)。[[顺序反了就会很痛苦:一上来就 pprof,你会得到一张火焰图,却不知道该在哪个时间点抓。]]',
+                ],
+              },
+              {
+                kind: 'why',
+                title: '为什么 /metrics 不能和业务端口共享一个监听',
+                body: [
+                  '把 `/metrics` 和 `/debug/pprof` 挂在业务路由上,是本地开发最省事的做法:一个端口、一个 curl、什么都能拿到。它在生产环境有三个必须拆开的理由,而且这三个理由互不重叠。',
+                ],
+                without:
+                  '`/metrics` 的输出是一份**侦察报告**:所有路由、错误码分布、依赖健康状况、队列积压、甚至业务量。它等于把系统的内部结构打印出来贴在门口。挂在公网端口上,任何一次扫描都能拿到;而挂在管理端口上,你可以在 Kubernetes 里只让它在集群内网监听,业务端口才对外。',
+                real:
+                  '另外两个理由更硬。第一,`pprof.Profile` 是 CPU 消耗型接口:`?seconds=60` 会真的占满一个核 60 秒,谁触发谁就是一次小型 DoS。第二,业务端口的 `WriteTimeout=15s` 会让 `seconds=30` 的采样在写入中途被截断——排障的人看到的不是报错,而是「这次采样什么都没抓到」,于是他会怀疑工具,而不是怀疑超时配置。**管理端口的 `WriteTimeout` 必须是 0**,这是它和业务端口最本质的区别。',
+              },
+              {
+                kind: 'code',
+                title: '`NewAdminServer`:显式 mux,WriteTimeout 为 0',
+                lang: 'go',
+                code: 'func NewAdminServer(opt AdminOptions) *http.Server {\n\tmux := http.NewServeMux()\n\n\tif opt.Metrics != nil {\n\t\tmux.Handle("/metrics", opt.Metrics.Handler())\n\t}\n\n\tif opt.Pprof {\n\t\t// Index 会按 URL 路径分发到具体的 profile(heap/goroutine/…)\n\t\tmux.HandleFunc("/debug/pprof/", pprof.Index)\n\t\tmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)\n\t\tmux.HandleFunc("/debug/pprof/profile", pprof.Profile)\n\t\tmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)\n\t\tmux.HandleFunc("/debug/pprof/trace", pprof.Trace)\n\t}\n\n\treturn &http.Server{\n\t\tAddr:    opt.Addr,\n\t\tHandler: mux,\n\t\t// 只留 header 超时防慢速攻击。\n\t\t// WriteTimeout 必须是 0:pprof 的 profile/trace 可以跑几分钟,\n\t\t// 设成 15s 的后果不是报错,而是采样到一半被截断成一个空文件。\n\t\tReadHeaderTimeout: 5 * time.Second,\n\t}\n}',
+                version: 'Go 1.24 + net/http',
+                env: 'e2e 断言:管理端口 19090 输出 70 条 shortlink_ 序列;pprof 默认返回 404',
+                verified: true,
+                caption:
+                  '两个容易漏的点。第一,**用显式 mux 而不是 `http.DefaultServeMux`**:`net/http/pprof` 的 `init()` 会把自己注册到默认 mux 上,用它就意味着「只要 import 了 pprof,它就一定被暴露」——开关变成了摆设。第二,**pprof 默认关闭**:它是运维动作,不是默认值。',
+              },
+              {
+                kind: 'concept',
+                title: '基数爆炸:500 万张短链变成 500 万条时间序列',
+                body: [
+                  'Prometheus 的存储单元是「时间序列」= 指标名 + 一组标签值。每出现一个新的标签组合,就多一条序列,每条占 1~2KB 内存和独立的磁盘 block。这个设计让查询非常灵活,也让一个手误变成灾难。',
+                  '本项目的跳转路由是 `/:code`。如果指标中间件用 `c.Request.URL.Path` 当标签值,那么每张短链都会生成一组独立的标签组合:`/1aB3xK`、`/2bC4yL`、`/3cD5zM`……500 万张短链就是 500 万条序列。这个数字不是「大」,是「必死」:Prometheus 单实例的经验上限在百万级序列,而且它死之前会先拖慢所有查询。',
+                  '更糟的是**它不报错**。服务照常运行,指标端点照常返回,只是响应体越来越大、抓取越来越慢,直到某天 Prometheus OOM 或者抓取超时。你不会在代码里看到任何异常,只会在几周后发现监控挂了——而监控挂了这件事,恰好是在你需要它的时候才被发现。',
+                  '解法是 `c.FullPath()`,它返回的是**路由模板**而不是实际路径:`/:code`。基数从此由「代码里写了几个路由」决定,而不是由「用户创建了多少数据」决定。本项目实测:300 个不同短码的请求,用模板只有 1 条序列,用原始路径是 300 条。',
+                  '同样的道理适用于两个常被忽略的维度:**未匹配路由**(扫描器会请求 `/wp-admin`、`/.env`、`/phpmyadmin`,每个都不同 → 全部归一成 `unmatched`)和**HTTP 方法**(扫描器会发 `PROPFIND`、`FOO` 这类任意 token → 归一成 7 个合法方法 + `other`)。',
+                ],
+              },
+              {
+                kind: 'code',
+                title: '全项目最关键的一行是 `c.FullPath()`',
+                lang: 'go',
+                code: 'func (r *Registry) HTTPMiddleware() gin.HandlerFunc {\n\treturn func(c *gin.Context) {\n\t\troute := c.FullPath()\n\t\tif skipRoutes[route] {\n\t\t\tc.Next()\n\t\t\treturn\n\t\t}\n\t\tif route == "" {\n\t\t\troute = routeUnmatched\n\t\t}\n\t\tmethod := normalizeMethod(c.Request.Method)\n\n\t\tstart := time.Now()\n\t\tc.Next()\n\t\telapsed := time.Since(start)\n\n\t\t// 先记状态码再记耗时:万一 Observe 里出错(不该发生),\n\t\t// 请求数也不会少记一条。\n\t\tr.httpRequests.WithLabelValues(route, method, statusLabel(c.Writer.Status())).Inc()\n\t\tr.httpDuration.WithLabelValues(route, method).Observe(elapsed.Seconds())\n\t}\n}',
+                version: 'Go 1.24 + Gin + client_golang',
+                env: 'metrics 包十四条用例 + 基准全绿;e2e 断言「指标里不含真实短码」',
+                verified: true,
+                caption:
+                  '`skipRoutes` 里排除了 `/healthz`、`/readyz`、`/version`、`/metrics`。理由不是「它们不重要」,而是**它们会污染分位数**:3 个副本 × 每 2 秒一次 readyz = 每天 13 万次探针,耗时恒定在几十微秒,数量上能超过真实业务请求,把「业务 p99」压成「探针耗时」,让人以为服务很快。[[把探针算进延迟指标,是自欺欺人的标准姿势。]]',
+              },
+              {
+                kind: 'diagram',
+                title: '每个标签都要付基数的代价',
+                diagram: {
+                  type: 'matrix',
+                  cols: ['取值来源', '基数由什么决定', '出错后果'],
+                  rows: [
+                    ['`route`', '`c.FullPath()` 路由模板', '代码里写了几条路由', '正确:与业务数据量无关'],
+                    ['`route`', '`URL.Path` 原始路径', '用户创建了多少短链', '500 万条序列,Prometheus OOM'],
+                    ['`status`', '响应码字符串(100–599 预生成)', '有限集合', '正确:66 个可能值'],
+                    ['`method`', '白名单归一化', '7 + other', '正确:挡住扫描器的任意 token'],
+                    ['`source`', 'Resolve 的四条出口', '代码分支数', '正确:四值之和必须等于总请求数'],
+                    ['`code`(反例)', '真实短码', '业务数据量', '绝不允许:这就是爆炸本身'],
+                  ],
+                  caption:
+                    '判据可以压成一句话:**这个标签的取值集合,是不是由代码决定的**。由代码决定的(路由、状态码、方法、来源分支)可以放心加;由数据决定的(短码、用户 id、URL)一个都不能加。中间地带要小心,比如「错误码」——它由代码决定但是可能无限新增,所以只能放收敛后的类别,不能放原始错误消息。',
+                },
+              },
+              {
+                kind: 'why',
+                title: '分桶决定分辨率:为什么不能用 DefBuckets',
+                body: [
+                  'Prometheus 的直方图不是存每个观测值,而是存「落进每个桶的数量」。分位数是**从桶边界插值**算出来的,所以桶不覆盖真实量级时,算出来的数字就是装饰品。',
+                ],
+                without:
+                  '`prometheus.DefBuckets` 是 `{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}`,起点 5 毫秒。而本项目一次跳转的实测量级是 200 微秒——所有观测值全部落进第一个桶。这时候 `histogram_quantile(0.99, ...)` 会返回 5ms,`p50` 也是 5ms,`p99` 还是 5ms。图表上有一条漂亮的线,而它对应的是「所有请求都 ≤5ms」这个几乎没有信息量的结论。',
+                real:
+                  '自定义桶从 100µs 起、到 10s 封顶:下面覆盖跳转(0.1–2ms),上面覆盖创建接口和回源(5–200ms),再往上留给「已经出事了」的那一段。桶的密度应该集中在**正常值附近**,而不是均匀铺开——分位数的精度只在正常值附近才有意义,异常值你只需要知道它「大于 1 秒」。',
+              },
+              {
+                kind: 'code',
+                title: '`DurationBuckets`:从 100µs 起',
+                lang: 'go',
+                code: 'var DurationBuckets = []float64{\n\t0.0001, 0.00025, 0.0005, 0.001, 0.0025,\n\t0.005, 0.01, 0.025, 0.05, 0.1,\n\t0.25, 0.5, 1, 2.5, 5, 10,\n}',
+                version: 'Go 1.24 + client_golang',
+                env: 'TestBucketsResolveSubMillisecond / TestDurationBucketsStartBelowOneMillisecond',
+                verified: true,
+                caption:
+                  '两条用例分别守住两件事:① 200µs 与 900µs 必须落在**不同**的桶里(否则「有没有分辨率」这件事无法回归);② 第一个边界必须小于 1 毫秒(防止有人改回默认值)。这类「配置的意图」用用例钉住,比写在注释里可靠。',
+              },
+              {
+                kind: 'concept',
+                title: '用合法值表示缺失,是最坏的一种指标设计',
+                body: [
+                  '一个反例:worker 想暴露消费积压(lag),但某些情况下拿不到(比如用的是不支持查询 lag 的客户端)。最省事的做法是「拿不到就报 0」。',
+                  '后果很具体:lag = 0 在监控上的含义是「没有积压,一切正常」。于是「读不到 lag」和「真的没积压」变成了同一个信号,而它们的处理方式完全相反——前者要去修采集,后者什么都不用做。看板会一直显示绿色,直到报表出错你才回头怀疑数据。',
+                  '本项目的做法是把「能力」变成返回值的一部分:`LagFunc() (func() float64, bool)`,第二个返回值表示「这个客户端到底支不支持」。不支持时**根本不注册这个指标**。这样监控上就是「没有这条序列」,而「缺失」在告警规则里可以单独表达(`absent()`),不会被误读成正常。',
+                  '同一个原则还体现在 `TapCounters` 上:它的类型是 `func() TapCounters`,传 nil 表示「本进程不打点」,这时候 tap 相关的四个计数器一个都不注册。注册一个恒为 0 的计数器比不注册更糟——看板上会显示「一切正常」,而实际上整条打点管线都不存在。',
+                  '这条原则可以推广成一句判据:**一个指标的值域里,有没有一个值被用来表示「没有值」**。如果有,这个指标的每一个读数都不可信。',
+                ],
+              },
+              {
+                kind: 'principle',
+                title: '九个指标,各自回答一个问题',
+                body: [
+                  '指标列表不该按「能测什么」来设计,而该按「要回答什么问题」来设计。本项目九个指标,每一个都对应排障时的一句具体提问。',
+                ],
+                steps: [
+                  {
+                    title: '① `http_requests_total{route,method,status}` / `http_request_duration_seconds{route,method}`',
+                    detail:
+                      '回答「哪里在出错、哪里在变慢」。按路由模板分组,所以能直接看出是跳转坏了还是创建坏了。这是唯一需要基数纪律的两个指标。',
+                  },
+                  {
+                    title: '② `resolve_total{source}`',
+                    detail:
+                      '回答「这次变慢是缓存没挡住还是数据库慢了」。四个来源:cache、negative、merged、db。**四者之和必须等于总请求数**——这条恒等式本身就是自检,哪天多了一条出口忘了报数,总和立刻对不上。',
+                  },
+                  {
+                    title: '③ `lock_acquire_total{result}`',
+                    detail:
+                      '回答「跨实例锁是帮忙还是添乱」。三个结果:ok、locked、error。`error` 涨说明 Redis 出问题了,而这时候锁会退化成「全部放行」——回源次数会突然翻倍。',
+                  },
+                  {
+                    title: '④ `consumer_events_total{result}` / `consumer_lag_messages`',
+                    detail:
+                      '回答「统计为什么不准」。lag 涨 = 在追积压(等);lag 不动而 PV 不动 = 真的没消费到(查 worker);lag 为 0 而 PV 也不动 = 上游根本没打点(查 API)。三种原因、三种修法,而它们在报表上的表象完全一样。',
+                  },
+                  {
+                    title: '⑤ `tap_{published,accepted,dropped,failed}_total`',
+                    detail:
+                      '回答「打点丢在哪一段」。published 是进队列,accepted 是出队列,dropped 是队列满(主动丢),failed 是下游失败(被动丢)。四个数字的差就是丢失发生的准确位置。',
+                  },
+                ],
+                takeaway:
+                  '九个指标里只有两个需要基数纪律(带 route 的),其余都是有限枚举。这说明**基数风险集中在「带业务维度」的指标上**——而这类指标恰恰是最想加的。[[每次想给指标加一个业务维度时,先问:它的取值集合由代码决定,还是由数据决定。]]',
+              },
+              {
+                kind: 'question',
+                title: 'Q112 · 服务 p99 延迟有毛刺,可能是哪些原因?',
+                questionId: 'go-index-Q112',
+                intent:
+                  '这题的分水岭是「先看形状」。毛刺有三种形态,每种形态的成因几乎不重叠;不看形状就开始列原因,你会得到一张二十条的可能性清单,然后一条也验证不了。',
+                points: [
+                  '第一种是**偶发尖刺**:单点很高、间隔无规律、前后都正常。典型成因是依赖抖动(Redis 的一次 fork、MySQL 的一个大事务)、或者本机的页缓存未命中。判据是尖刺在多个实例上**不同时出现**——同时出现就是依赖问题。',
+                  '第二种是**周期性毛刺**:固定间隔复现。最常见的是 GC(与分配率相关)、定时任务(清理、对账、全量扫描)、以及日志轮转导致的 fsync。判据是周期长度本身——30 秒一次多半是 GC 或 scrape,整分钟一次多半是 cron。',
+                  '第三种是**阶梯**:涨上去不再下来。这不是毛刺,是容量问题:连接池被打满、文件描述符耗尽、或者某个缓存开始频繁淘汰。它的特征是基线稳定上移,而不是单点尖峰。',
+                  '必须排除的两个观测陷阱:① 直方图桶没覆盖真实量级(用 DefBuckets 测 200µs 的请求,p99 会恒等于 5ms),② 探针请求混进了业务直方图(每天十几万次探针足以把 p99 拉到几十微秒量级)。**这两个陷阱的共同点是「看起来一切正常」。**',
+                  '定位到具体请求还得靠 trace:毛刺发生时段的慢请求,用 trace id 把它的各环节耗时捞出来,和正常请求比,差在哪个 span 一目了然。这也是为什么 trace id 和指标要一起建——指标告诉你「什么时候」,trace 告诉你「哪里」。',
+                ],
+                depth:
+                  '再深一层要能说出「尾部延迟放大」:一个请求要串行访问 10 个下游,每个下游有 1% 的概率慢 100ms,那么这个请求至少慢 100ms 的概率是 1-(0.99)^10,约 9.6%。所以 p99 毛刺往往不是「有一个慢服务」,而是「很多个偶尔慢一点的服务串起来」——修法是减少串行跳数或改成并行,而不是去追那一个慢服务。',
+                followup:
+                  '追问常到「怎么区分 GC 毛刺和业务毛刺」。答:把 `go_gc_duration_seconds` 的 p99 和业务 p99 画在同一张图上,看尖刺是否同步。同步就是 GC;不同步就去看 `resolve_total{source}` 的比例有没有在同一时刻变化。',
+              },
+              {
+                kind: 'question',
+                title: 'Q97 · database/sql 的连接池参数怎么理解?常见配置错误是什么?',
+                questionId: 'go-index-Q97',
+                intent:
+                  '连接池是「容量」这件事最具体的一面。答得出四个参数的语义是入门,答得出「配错的症状长什么样」才是经验——因为配错从不报错,只表现为延迟和随机错误。',
+                points: [
+                  '四个参数:`SetMaxOpenConns` 是并发上限,`SetMaxIdleConns` 是保留的复用连接数,`SetConnMaxLifetime` 是连接的最大存活时间,`SetConnMaxIdleTime` 是空闲多久回收。**只有第一个限制并发,后三个影响的是复用率和「被中间件静默断开」的概率。**',
+                  '最常见的错误:`MaxIdleConns` 保持默认的 2。它在低流量下毫无问题,一到高峰就变成「每次请求都新建连接」——TCP 握手加 MySQL 认证要几毫秒,于是 p99 直接涨一个数量级,而 CPU 和数据库负载看起来都不高。',
+                  '第二个常见错误:不设 `ConnMaxLifetime`。MySQL 的 `wait_timeout`(默认 8 小时)或中间的负载均衡会静默断开空闲连接,连接池并不知道,下一次取出来用就报 `invalid connection`。设成 30 分钟到 1 小时,让连接在被别人断开之前自己先换掉。',
+                  '第三个:`MaxOpenConns` 设得离谱地大。连接数不是越多越快——数据库每连接一份线程与内存开销,超过核数量级之后吞吐反而下降。经验值是核数的 2 到 4 倍,并且必须小于数据库的 `max_connections` 除以副本数。',
+                  '配错了怎么看:暴露 `sql.DBStats` 里的 `WaitCount` 和 `WaitDuration`。`WaitDuration` 一涨就说明请求在等连接——这时候要么加池子(治标),要么缩短单次占用时长(治本:超时加批量)。这两个数字接到管理端口的指标上,才能在 p99 涨的时候一眼排除「是不是池子满了」。',
+                ],
+                depth:
+                  '再往上会问「池子满了请求会怎样」。答:阻塞等待,直到拿到连接或 ctx 超时。这个行为的后果很具体——它不会立刻报错,而是让 p99 慢慢涨,涨到超过上游超时才开始出现错误。所以「错误率突然上升」往往已经是池子满了好几分钟之后的事。',
+                followup:
+                  '可能追问「为什么事务里不能做网络调用」。答:事务持有连接直到提交或回滚,中间任何一次外部调用(HTTP、另一个库)都在拉长单次占用时长,而池子大小是固定的——占用时长翻倍,等于池子容量减半。',
+              },
+              {
+                kind: 'question',
+                title: 'Q139 · 灰度发布、蓝绿部署、金丝雀发布有什么区别?',
+                questionId: 'go-index-Q139',
+                intent:
+                  '这三者常被混着说,其实它们不是同一层的概念。答清「能力」与「策略」的区别,比背三个定义有用——因为真实系统里三者会叠加使用。',
+                points: [
+                  '**蓝绿**是两套完整环境加一次整体切换:回滚就是把流量切回去,速度以秒计。代价是资源翻倍,而且切换瞬间所有连接都要重建——对有长连接的场景(WebSocket、gRPC 流)并不温和。',
+                  '**金丝雀**是按比例放量:1% 到 5% 到 25% 到 100%,每一步观察指标再决定下一步。它解决的是「新版本有隐藏问题」,代价是发布变慢,而且要能**按版本分组观测**,否则你看到的仍是混合后的数字。',
+                  '**灰度**更像是底层的**能力**:按规则把请求路由到不同版本(用户 ID 取模、地域、请求头)。金丝雀是使用这个能力的一种**策略**,蓝绿也可以用同一套能力实现(把 100% 切过去)。[[三者不是三选一,是「能力加策略」的组合。]]',
+                  '没有观测就没有灰度。判据很具体:你的指标里有没有 `version` 这个维度?能不能在同一时间窗里比较 v1 与 v2 的 p99 和错误率?如果只能看到混合值,灰度就退化成「小范围出事」——比全量出事好一点,但你不知道为什么。本项目的 `/version` 返回构建版本,就是让这个维度可用。',
+                  '回滚的前提是兼容,而不是回滚动作本身。数据库变更必须向后兼容:先加列(不带 NOT NULL)、再用代码读写、最后才删旧列。消息格式同理:新版本发出去的消息,旧版本消费者必须能读,或至少能跳过。**能回滚的发布,是被 schema 和协议设计保证的,不是被发布工具保证的。**',
+                ],
+                depth:
+                  '再深一层会问「灰度期间会话粘性怎么办」。答:同一个用户的请求如果在新旧版本之间来回切,会遇到「新版本写的缓存旧版本读不懂」「旧版本写的 token 新版本验不过」。解法是让路由规则稳定(按用户 ID 哈希而不是随机),并保证缓存与 token 格式在过渡期内双向兼容。',
+                followup:
+                  '追问常到「样本量不够怎么判断」。答:看两件事——差异的绝对幅度,以及这个版本的请求量。1% 流量跑十分钟可能只有几百个请求,几百个样本算出来的 p99 没有意义。这时候该看的是错误率这类「每个请求都贡献一个 0 或 1」的指标,而不是分位数。',
+              },
+
+            ],
+          },
+        },
+        {
+          id: 'triage',
+          title: '三类故障:goroutine 泄漏、p99 变慢、统计不准',
+          kind: 'concept',
+          questionIds: [
+            'go-index-Q103',
+            'go-index-Q104',
+            'go-index-Q70',
+            'go-index-Q71',
+            'go-index-Q73',
+          ],
+          content: {
+            intro:
+              '前两节把观测手段建好了,这一节用它们真的排一次障。三类故障是线上最常见的,而且它们的表象会互相伪装:goroutine 泄漏表现为「内存涨」,数据库变慢表现为「p99 涨」,消费卡住表现为「报表少了」。如果按表象去查,你会走很多弯路;按入口去查,每一步都能排除掉一大片。这一节还会讲一个真实的 bug——PV 永远是 0,单测全绿但它就是不通——以及它为什么只能靠端到端跑一遍才暴露。',
+            outline: [
+              '排障的本质是缩小范围,不是猜',
+              '第一类:goroutine 泄漏——数量只涨不落,先按栈聚合别看总数',
+              '第二类:p99 变慢——用分来源的计数器做决策树',
+              '第三类:统计不准——lag 加四个计数器的四种组合',
+              '一个真 bug:为什么「单测全绿」和「链路通」是两件事',
+            ],
+            pitfalls: [
+              '一上来就 pprof 或在日志里撒网 —— 没有假设的采集只会得到一张看不懂的图。**先确定「哪一类故障」,再决定看哪个信号。**',
+              '看 goroutine 总数就下结论 —— 总数 2000 在流量高峰是正常的。要看的是「同一个栈的实例数是否随时间单调上涨」。',
+              '把「报表少了一截」当成「消费者有 bug」 —— 上游没打点、批次没提交、消费者没启动,三种原因的表象完全一样,只有 lag 加四个计数器能区分。',
+            ],
+            sections: [
+              {
+                kind: 'concept',
+                title: '排障的本质是缩小范围',
+                body: [
+                  '新手排障的典型动作是「把所有可能的原因都试一遍」:重启、扩容、清缓存、回滚。这些动作偶尔有效,但有效时你并不知道是哪一步起的作用,于是问题下次还会来。',
+                  '老手的动作是**二分**:先确定故障的类别(是资源问题、延迟问题,还是数据问题),再确定范围(是一个实例、一个路由,还是全局),最后才看细节。每一步都在砍掉一半的可能性,而且每一步都能写下「如果排除成功,应该看到什么」。',
+                  '这个「应该看到什么」是关键。它不是修辞:如果你认为「是 Redis 挂了」,那么清缓存之后 p99 应该立刻下降——没下降就说明假设错了,立刻换方向。**没有预测的排障等于赌博**,赌赢了也不涨经验。',
+                  '所以可观测性建设的真正目标不是「多采集一些数据」,而是**让每一次假设都能被一个已有的信号验证或推翻**。这也是本节三个入口的由来:每一个入口对应一类假设。',
+                ],
+              },
+              {
+                kind: 'diagram',
+                title: '从「用户说慢」到「第 137 行」',
+                diagram: {
+                  type: 'flow',
+                  direction: 'v',
+                  items: [
+                    {
+                      label: '① 分类:是慢、是错、还是数据不对',
+                      note: '延迟看 p99,错误看 5xx 比例,数据不对看计数器恒等式',
+                    },
+                    {
+                      label: '② 定位范围:全局 / 单路由 / 单实例',
+                      note: '`http_requests_total` 按 route 分组;按实例对比能立刻分出「部署问题」和「依赖问题」',
+                    },
+                    {
+                      label: '③ 沿依赖链下钻:缓存 → 数据库 → 下游',
+                      note: '`resolve_total{source}` 的四条出口告诉你慢在 cache 还是 db',
+                    },
+                    {
+                      label: '④ 锁定一次具体请求',
+                      note: '用 trace id 把那一跳的日志全捞出来,看它在哪一层停了多久',
+                    },
+                    {
+                      label: '⑤ 抓现场:pprof profile / goroutine / heap',
+                      note: '到这一步假设已经收敛到一两个函数,采样 30 秒就有结论',
+                    },
+                  ],
+                  caption:
+                    '五步里前四步都只用便宜信号(指标 + 日志),最后一步才用重工具。反过来的路径(先 pprof)在单机小服务上也偶尔能成,但它依赖运气:采样窗口没对准,你抓到的是一张「一切正常」的火焰图。',
+                },
+              },
+              {
+                kind: 'principle',
+                title: '三类故障,三个入口',
+                body: [
+                  '每一类故障都有一个「第一个该看的数字」。找对了入口,后面的路径几乎是确定的;找错了,你会在一堆正常的数据里反复确认「没问题」。',
+                ],
+                steps: [
+                  {
+                    title: '① 内存与线程:goroutine 数量,以及它在时间轴上的形状',
+                    detail:
+                      '看 `go_goroutines` 的曲线形状,不看瞬时值。锯齿形(涨到峰值再回落)是正常的请求并发;单调上涨且不回落到基线,是泄漏。确认之后再抓 `goroutine` profile 按栈聚合,找出「谁在等」。',
+                  },
+                  {
+                    title: '② 延迟:分位数 + 分来源计数器',
+                    detail:
+                      '先看 p99 涨了多少、从什么时候开始(对齐发布记录)。再看 `resolve_total{source}` 的比例有没有变:cache 命中率掉了说明缓存层有问题,db 占比涨了说明回源变多——两者的修法完全不同。',
+                  },
+                  {
+                    title: '③ 数据正确性:计数器恒等式 + lag',
+                    detail:
+                      '「报表少了」这类问题没有延迟也没有错误,只能靠恒等式查:`Published - Accepted = Dropped + Failed`,四值之和要对得上;`consumer_lag_messages` 告诉你积压还有多少。恒等式不平,就说明有一段没被计数。',
+                  },
+                ],
+                takeaway:
+                  '三个入口对应的采集成本依次升高:goroutine 数量是运行时自带的(零成本),分来源计数器要你埋点(一次成本),恒等式校验要设计(持续成本)。[[成本越低的信号越应该先看——这不是因为它更准,而是因为它更快。]]',
+              },
+              {
+                kind: 'concept',
+                title: '第一类:goroutine 泄漏——看形状,不看总数',
+                body: [
+                  'goroutine 便宜到让人忘记它也有成本:初始栈 2KB,加上调度元数据约 3~4KB。一万个泄漏的 goroutine 就是 40MB,而且它们持有的引用会把对象一起钉在堆上——**真正吃掉内存的往往不是栈,是被它们引用着的那些对象。**',
+                  '所以判据不是绝对值,是形状。`go_goroutines` 在一天里从 200 涨到 3000 然后一直平着,这是泄漏;涨到 3000 又落回 200,这是正常并发。这个区别在瞬时抓取里看不出来,必须看时间序列。',
+                  '确认泄漏之后,抓 `/debug/pprof/goroutine?debug=2`。注意两点:第一,`debug=1` 只给聚合后的计数,`debug=2` 给每个 goroutine 的完整栈——**排障要 `debug=2`**;第二,不要看总数,按栈聚合,找出「那个有几百个实例、且栈顶都停在同一个等待点」的。',
+                  '等待点本身就是答案:`chan receive` 说明有人在等一个永远不会来的消息;`select` 停在 `ctx.Done()` 说明 ctx 从来没被取消;`IO wait` 说明连接没关;`semacquire` 说明锁或 WaitGroup 没释放。',
+                  '本项目的几个高危位置正好对应四种典型泄漏:HTTP handler 里起的 goroutine 用了 `context.Background()`(请求结束了它还在跑)、`time.Ticker` 没有 `Stop()`、HTTP 响应体没有 `Close()`(连接无法复用,底层 goroutine 常驻)、以及无缓冲 channel 没人读。',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '第二类:p99 变慢——用分来源的计数器做决策树',
+                body: [
+                  '延迟问题的难点不是「怎么测」,是「测出来之后往哪看」。一个 `http_request_duration_seconds` 只告诉你「慢了」,不告诉你「慢在哪」。',
+                  '本项目的做法是在 `Resolve` 的四条出口各记一次数:`cache`(一级缓存命中)、`negative`(空值缓存命中)、`merged`(被 singleflight 合并)、`db`(真的回源)。这四个数字的**比例变化**就是一张决策表。',
+                  '`cache` 比例从 98% 掉到 60%:缓存层出问题了。可能是 Redis 变慢、可能是 key 被大量淘汰、也可能是有人在批量刷不存在的短码。先去查 Redis 的 RT 和 evicted 计数。',
+                  '`db` 比例上升而 `cache` 下降:典型是缓存穿透——大量请求打在不存在的短码上。看 `negative` 是不是也涨了:如果 negative 没涨,说明空值缓存没生效(或者被写成了很短的 TTL),这时候数据库会被扫穿。',
+                  '`merged` 比例上升:说明热点更集中了。这本身不是坏事(singleflight 挡住了击穿),但它意味着「有单个短码的 QPS 特别高」。如果 `merged` 高而延迟也高,说明合并之后的那个请求本身慢——去看它的 trace。',
+                  '还有一种最容易被忽略的情况:**四个比例都没变,但 p99 涨了**。这通常意味着问题不在跳转链路上,而在更下层——网络、DNS、或者 Go 运行时本身(GC 停顿、调度延迟)。这时候该看 `go_gc_duration_seconds` 和 `go_sched_latencies` 这类运行时指标,而不是继续在业务代码里找。',
+                ],
+              },
+              {
+                kind: 'code',
+                title: '一个真 bug:批次永远凑不满,所以永远不提交',
+                lang: 'go',
+                code: '// consumeMaxWait 是「凑不满一批时最多等多久」。\n//\n// 这个常量是端到端跑起来之后才补上的,所以值得记下它是怎么被发现的:\n// Consumer.Fetch 的实现是「一直取到 max 条为止」,而 FetchMessage 在没有新消息时\n// 会**阻塞**到 ctx 取消。worker 之前直接把进程的 signal ctx 传进去 ——\n// 于是低流量下(比如压测之外的任何真实场景),它会一直等第 500 条,\n// 攒到的消息永远不落库、偏移量永远不提交,报表永远是 0。\nconst consumeMaxWait = 300 * time.Millisecond\n\nfor ctx.Err() == nil {\n\t// 每轮给一个上限:凑不满就先把已有的这批处理掉。\n\t// 用 WithTimeout 而不是给 signal ctx 加 deadline —— 后者会让退出信号失效。\n\tfetchCtx, cancelFetch := context.WithTimeout(ctx, consumeMaxWait)\n\tbatch, commit, err := consumer.Fetch(fetchCtx, consumeBatch)\n\tcancelFetch()\n\tif errors.Is(err, stats.ErrNoMessage) {\n\t\tcontinue\n\t}\n\t// ……\n}',
+                version: 'Go 1.24 + kafka-go',
+                env: 'e2e 阶段 7 由「PV 40s 内没到 5」变为「PV 收敛到 6（3s 内）」',
+                verified: true,
+                caption:
+                  '两行代码的差别,一个恒等式的问题:`攒满一批才处理` 在批量语义上是对的,在延迟语义上是错的。而修正它的正确姿势是给**每轮**加 `WithTimeout`,不是给进程的 signal ctx 加 deadline——后者会让 SIGTERM 的退出路径失效。',
+              },
+              {
+                kind: 'why',
+                title: '为什么十一条单测没抓到这个 bug',
+                body: [
+                  '这个 bug 的性质值得单独说:代码逻辑没错、单测全绿、编译零警告,而端到端就是不通。',
+                ],
+                without:
+                  '`Consumer.Fetch` 的单测里,确实有一条 `TestFetchReturnsPartialOnContextCancel`,专门验证「ctx 取消时返回已取到的部分」——它就是这么写的:传一个 `context.WithTimeout(200ms)` 进去,断言 200ms 后拿回 3 条。它测的是 `Fetch` 的**行为**,而且测得很准。',
+                real:
+                  '问题在于调用方传的是 `signal ctx`——没有 deadline,只在收到 SIGTERM 时取消。所以线上语义是「等到凑满 500 条或者进程退出」,而单测里那个 `WithTimeout` 恰好把「等到天荒地老」变成了「等 200 毫秒」,于是把唯一的症状掩盖掉了。**测试用例的参数选择和真实调用方的参数选择不一致,是这个 bug 的唯一成因。** 这也是为什么本项目从这一阶段起把「真起进程跑一遍」写进验收流程:单元测试验证函数的行为,端到端验证调用的形状。',
+              },
+              {
+                kind: 'compare',
+                title: '单元测试能抓到什么,抓不到什么',
+                head: ['维度', '单元测试', '端到端(e2e)'],
+                rows: [
+                  ['函数行为', '能抓:输入输出、边界、错误分支', '间接抓:只有行为错到影响结果时才暴露'],
+                  ['调用形状', '抓不到:参数由测试代码自己构造', '能抓:参数由真实调用方构造'],
+                  ['超时与阻塞', '常常抓不到:测试会加超时来保护自己', '能抓:真实进程按真实配置跑'],
+                  ['并发与时序', '能抓一部分:要显式构造竞态', '弱:结果依赖调度,不稳定'],
+                  ['配置与装配', '抓不到:测试通常手工装配', '能抓:环境变量、顺序、端口冲突都会暴露'],
+                  ['跨进程契约', '抓不到:没有第二个进程', '能抓:HTTP / Kafka / 数据库的真实协议'],
+                ],
+                note:
+                  '所以两者的关系不是「替代」而是「互补」,判断标准是:如果失败原因里包含「调用方怎么用它」,那它只能被端到端抓到。本项目这一轮跑 e2e 抓到四个问题:一个真 bug(本节这个)、一个断言写错(见下一节)、一个 Git Bash 路径改写、一个 smoke 脚本同步遗漏——后三个单测都无从谈起。',
+                caption:
+                  '这也是为什么本项目在阶段 E 才把 e2e 做完整:前面阶段的验收标准都是「函数对不对」,到这一阶段第一次出现「进程之间连不连得上」这类问题。**验收手段的升级,应该跟着失败模式的变化走。**',
+              },
+              {
+                kind: 'concept',
+                title: '第三类:统计不准——lag 与四个计数器的四种组合',
+                body: [
+                  '「报表少了」是数据类故障的典型描述,而它的原因至少有四种,表象完全一样:上游没打点、队列丢了、消费没跑、落库失败。区分它们靠的是四组数字的组合。',
+                  '第一种:**`Published` 不涨**。点击发生了但事件没进队列,问题在 API 侧——打点被丢弃(Dropped 涨)或者根本没调用。查 `tap_dropped_total` 和队列长度。',
+                  '第二种:**`Published` 涨、`Accepted` 不涨、lag 在涨**。事件进了 Kafka 但没被消费。可能 worker 挂了、可能消费组 offset 卡住、也可能消费者在反复重启。`kafka-consumer-groups.sh --describe` 能直接看出「有没有活跃成员」。',
+                  '第三种:**`Accepted` 涨、但 PV 不涨**。事件被消费了但没落库。这是最难查的一种,因为计数器看起来全都正常。要去 worker 日志里找落库错误,或者核对 `consumer_events_total{result="failed"}`。',
+                  '第四种:**PV 涨了但比点击数少**。这是幂等或去重的问题:要么事件被去重窗口吃掉了(窗口太小,跨实例的重投没被识别),要么聚合的维度不对(日期时区错了)。本项目把统计日钉死成东八区,就是为了消掉「UTC 机器跨零点」这个变量。',
+                  '四种组合对应四个完全不同的修法,而它们在「PV 比点击数少」这个表象上没有任何区别。[[这就是为什么计数器要分开记:合并成一个 `dropped_total` 就再也分不出这四种情况了。]]',
+                ],
+              },
+              {
+                kind: 'concept',
+                title: '验收脚本自己也会骗人',
+                body: [
+                  '这一轮还遇到一个更隐蔽的问题:**测试断言本身错了**,而且错的方式和上一节那个 bug 一模一样——假设过时了。',
+                  '阶段 7 要断言「PV 等于点击数」。最初这个数字是手写的常量 `expect=5`,注释里写着来源:「首跳 1 + 次跳 1 + 打点计数 3 = 5」。它当时是对的。',
+                  '后来为了验证 cache-aside,在阶段 6 加了「删掉缓存键 → 首跳 MISS → 次跳 HIT」这组动作,多打了两次点。常量没有跟着改,于是断言变成:实际 PV=6,期望 5,报错信息写成「PV 在 40s 内没到 5,实际 6」——**一条自己承认矛盾的错误信息。**',
+                  '修法不是把 5 改成 6,而是让数字跟着动作走:阶段 6 每次真的请求短码就执行一次 `jump`,把次数写进一个文件;阶段 7 读这个文件当期望值。这样以后再加断言也不会算错。修完之后同一个断言输出变成「PV 收敛到 6(3s 内)」,而且**收敛时间从 40s 超时变成 3s**——因为期望值对了,循环第一次比对就命中。',
+                  '这件事的教训超出脚本本身:**断言里任何手写的常量,都是未来的一个 bug**。能推导的就推导,能计数的就计数,不能推导不能计数的,至少要写清「这个数字依赖哪几条动作」——而依赖关系一旦超过三条,人就会算错。',
+                ],
+              },
+              {
+                kind: 'question',
+                title: 'Q103 · 线上 Go 服务 CPU 突然 100%,你会怎么排查?',
+                questionId: 'go-index-Q103',
+                intent:
+                  '这题的分水岭是「先分类再采样」。CPU 100% 至少有四种成因(死循环、GC 空转、流量突增、锁竞争),而它们的处理方式完全不同——不分类就去 profile,你会得到一张看不出重点的火焰图。',
+                points: [
+                  '第一步是对照:CPU 涨的同时 QPS 涨了吗?涨了说明是流量问题,先看限流有没有生效;没涨说明单请求成本变了,那是代码或依赖的问题。这一步不需要任何工具,只要两块图并排放。',
+                  '第二步是看 GC。`go_gc_duration_seconds` 和 `go_memstats_alloc_bytes` 同时上升,说明是 GC 在空转(分配率过高)。这时候 CPU 火焰图里会看到大量 `runtime.gcBgMarkWorker`——它不是你写的代码,但它在烧你的核。解法是查分配热点,不是查死循环。',
+                  '第三步才是 profile。`pprof.Profile` 采 30 秒,看 `flat` 排序的前几名。注意看 `cum` 和 `flat` 的区别:flat 高是本函数在烧 CPU,cum 高是本函数调用了烧 CPU 的东西。前者改这个函数,后者继续往下钻。',
+                  '第四步是排除「不是 CPU 的 CPU 问题」。`sys` 时间占比高说明在做系统调用或页面错误;`iowait` 高说明在等磁盘;CPU 限额被 cgroup 卡住(throttling)会让程序看起来慢但 CPU 使用率不高。这三种情况在用户态 profile 里都看不到。',
+                  '最后是止血与定位分开:线上先限流/降级/回滚把火扑灭,再离线复现。**在着火的机器上做深度分析,是在用用户的时间换你的学习时间。**',
+                ],
+                depth:
+                  '再深一层会问「怎么区分死循环和正常的高负载」。答案在火焰图的形状:死循环会表现为一个极窄极高的塔(单个函数占 90% 以上),正常高负载则是宽的、有层次的分布。另外一个信号是 goroutine 数:死循环的 goroutine 数不会涨,而流量突增会涨。',
+                followup:
+                  '追问常到「为什么 CPU 100% 但 QPS 没涨」。除了 GC 空转,还有两个常见原因:后台任务(定时清理、全量扫描)跑起来了,或者是锁竞争导致自旋。后者在 profile 里会看到大量 `runtime.lock2` / `futex`——那是「等锁」被算进了 CPU 时间。',
+              },
+              {
+                kind: 'question',
+                title: 'Q104 · Go 服务内存持续上涨,怎么判断是泄漏还是正常占用?',
+                questionId: 'go-index-Q104',
+                intent:
+                  '这题的关键是分清三个数字:进程 RSS、Go 堆大小、活跃对象大小。三者上涨的含义完全不同,而多数人只看第一个就把结论下了。',
+                points: [
+                  '先看堆的**活跃对象**(`heap_alloc` 里 inuse 的部分,或者 `pprof heap` 的 `inuse_space`)。它在涨才是真泄漏;它平稳而 RSS 在涨,那是「Go 拿了内存还没还」(见 Q71),不是泄漏。',
+                  '再看对象数量而不只是字节数。数量涨、平均大小不变 = 每请求漏一个对象(典型是 map 只增不删);字节数涨而数量不变 = 某个对象在变大(典型是 slice 无限 append)。两者的修法不同:前者要找到那个 map,后者要找到那个 slice。',
+                  '抓两次 heap profile 做 diff 是最有效的手段:`go tool pprof -base before.prof after.prof`。它直接告诉你「这段时间里谁涨得最多」,比看单次快照准得多——单次快照里最大的那个对象,可能只是启动时就有的缓存。',
+                  '还有一种「假泄漏」:连接池或缓存没有上限。它们的内存曲线也是单调上涨,但语义上是「缓存命中率换内存」,不是 bug。判据是「如果流量停掉,它会不会停」——会停就是缓存,不会停才要查。',
+                  '最后一定要排除栈和 goroutine:栈不在堆上,`pprof heap` 看不到它。`go_goroutines` 单调上涨而堆平稳,说明是 goroutine 泄漏——它吃掉的是栈内存和它引用的对象,而这两块在堆 profile 里的表现会误导你。',
+                ],
+                depth:
+                  '再往上会问「容器里 RSS 涨到 limit 被 OOMKill 怎么办」。答:先分清是堆涨还是堆外涨。堆涨 → 查泄漏或设 `GOMEMLIMIT`;堆外涨 → 查 CGO、mmap、以及 Go 运行时保留的虚拟内存(它通常不计入 RSS,但某些监控会把它算进去)。`GODEBUG=madvdontneed=1` 这类老方案在 Go 1.16 之后已无必要。',
+                followup:
+                  '可能追问「怎么在生产上安全地抓 heap profile」。答:用管理端口的 `?seconds=` 采样(它默认就是快照,开销小),不要在业务端口开——而且 heap 快照会把内存里的字符串带出来,里面有用户 URL 和连接串,所以管理端口只能内网监听。',
+              },
+              {
+                kind: 'question',
+                title: 'Q70 · Go 里有哪些隐蔽的内存泄漏场景?',
+                questionId: 'go-index-Q70',
+                intent:
+                  '这题考的是「你踩过几个」。答「记得 close channel」是入门,能说出「slice 的子切片钉住了整个底层数组」才是经验。',
+                points: [
+                  'goroutine 泄漏是最大的一类,而它往往不是「忘了退出」,是「等在一个永远不会来的信号上」:无缓冲 channel 没人读、`select` 只等业务 channel 不等 `ctx.Done()`、WaitGroup 的 `Done` 少调了一次。这类泄漏的特点是 goroutine 数单调上涨,而堆看起来正常。',
+                  '切片子串是最隐蔽的一类:`s = big[1000:1010]` 不会复制,新切片仍然指向原数组,于是 10 字节的切片钉住了一个 10MB 的数组。解法是 `strings.Clone` 或显式 `copy`。同样的问题出现在 map 上:`delete` 不会缩容,长期增删的 map 会一直占着峰值容量。',
+                  '`time.Ticker` / `time.Timer` 不 `Stop()`:前者会让底层 runtime 一直持有它,后者在 Go 1.23 之前即使触发过也要 Stop 才回收。在长连接服务里,每个连接一个 ticker 而不 Stop,就是按连接数线性泄漏。',
+                  '全局 map 当缓存用而不设上限、不设淘汰:这是「假泄漏」,但它同样会把内存吃干净。本项目的 negative cache 因此写进了 Redis 而不是进程内 map——不是因为 map 慢,是因为进程内 map 没有 TTL 和容量上限。',
+                  '最后是 finalizer 和 `runtime.SetFinalizer` 的误用:它不保证及时执行,持有 finalizer 的对象至少要活过两轮 GC,而且会让对象晋升到老年代。用它做资源回收,等于给自己埋一颗延迟引爆的雷。',
+                ],
+                depth:
+                  '再深一层会问「怎么在代码评审阶段就防住」。答:三条规则——① 任何 `go func` 前面先问「它的退出条件是什么」;② 任何缓存都要有容量上限和淘汰策略;③ 任何从大对象切出来的小对象,要显式复制。这三条能挡掉绝大多数泄漏,而且它们都是评审时一眼能看出来的。',
+                followup:
+                  '追问常到「channel 什么时候会泄漏」。答:发送方阻塞在没有接收方的 channel 上、接收方阻塞在没有发送方的 channel 上,以及 `range` 一个永远不会被 close 的 channel。第三种最隐蔽,因为代码看起来完全正常。',
+              },
+              {
+                kind: 'question',
+                title: 'Q71 · Go 什么时候把内存还给操作系统?为什么 RSS 降不下来?',
+                questionId: 'go-index-Q71',
+                intent:
+                  '这题是内存问题的分水岭。答不出「Go 的目标是少向 OS 申请,不是及时归还」,就会把「RSS 高」误判成泄漏,然后开始改一个没坏的东西。',
+                points: [
+                  'Go 的堆是一大块从 OS 拿来的虚拟内存,内部切成 span 管理。GC 回收对象之后,空闲的 span 留在堆里等待复用——**这是刻意的**:向 OS 申请内存要 mmap,而 mmap 比复用 span 慢几个数量级。所以「RSS 不降」通常是设计,不是 bug。',
+                  '真正会还的时机有两个:一是空闲内存超过一定比例并持续一段时间,后台的 scavenger 会 `madvise(MADV_FREE/DONTNEED)` 归还;二是 `debug.FreeOSMemory()` 强制归还(它同时触发一次 GC,所以不能频繁调)。',
+                  'RSS 降不下来还有一个物理原因:`MADV_FREE` 只是标记「这些页可以回收」,OS 要等到真的需要内存时才回收。所以在内存充裕的机器上,RSS 会一直显示高位——**这是 Linux 的行为,不是 Go 的行为。**',
+                  '在容器里这个行为会变成真问题:容器按 RSS 算用量,limit 到了就 OOMKill,而 Go 觉得自己还有空闲 span 可以复用。解法是设 `GOMEMLIMIT`(软限制,让 GC 更早开始)+ 把 limit 设在稳态用量的 1.5 倍以上。',
+                  '`GOMEMLIMIT` 不解决泄漏,它只是让 GC 在接近上限时更激进。设得比真实需求低,程序会陷入「GC 一直跑但内存还是不够」的活锁——CPU 100% 而吞吐归零,这比 OOMKill 更难查。',
+                ],
+                depth:
+                  '再往上会问「Go 1.16 那次 madvise 改动改了什么」。答:默认从 `MADV_FREE` 改成 `MADV_DONTNEED`,让 RSS 立刻下降——因为容器按 RSS 算账,而 `MADV_FREE` 的延迟回收在容器里表现为「内存不还」。这个改动不是性能优化,是为了让 Go 在云原生环境里不被误杀。',
+                followup:
+                  '可能追问「RSS 比 heap_alloc 大很多是正常的吗」。答:正常,差值来自栈、运行时元数据、GC 保留的空闲 span、以及 `madvise` 之后还没被 OS 回收的页。这个比值通常 1.5~3 倍,超过 5 倍才值得查。',
+              },
+              {
+                kind: 'question',
+                title: 'Q73 · 如何观察一次 GC 的具体行为?',
+                questionId: 'go-index-Q73',
+                intent:
+                  '这题考的是「你会不会用工具看,而不是靠猜」。能说出 `GODEBUG=gctrace=1` 的输出怎么读,基本就过关了;能说清每次 GC 该花多少时间,是加分项。',
+                points: [
+                  '最快的手段是 `GODEBUG=gctrace=1`(Go 1.21 之后也可以用 `GODEBUG=gctrace=1,gcpacertrace=1` 看调速器决策)。它每次 GC 打一行,包含 GC 序号、阶段耗时、堆大小变化、以及 STW 时间。排查「GC 太频繁」时,这行日志比任何图表都直接。',
+                  '输出的关键字段要看懂:`gc N @Ts X%` 里的 `X%` 是 GC 占用的 CPU 比例,超过 25% 就说明 GC 已经在抢业务 CPU 了;`A->B->C MB` 分别是标记前、标记后、存活堆大小,`B` 持续接近 `C` 说明存活对象多,`A-B` 大说明分配率高。',
+                  '第二层是 `runtime/metrics`(标准库,零依赖)。它提供 `/gc/cycles/total`、`/gc/pauses:seconds`(直方图)、`/memory/classes/heap/*` 等结构化指标,可以直接导出成 Prometheus 指标,不用解析文本。本项目用的 `collectors.NewGoCollector()` 内部就是它。',
+                  '第三层是 `pprof` 的 alloc profile(`/debug/pprof/allocs`)。它按**分配点**聚合,而不是按存活对象——这正是「降低 GC 压力」需要的视角:你要找的是「谁分配得最多」,不是「谁占得最多」。两者常常是两个不同的函数。',
+                  '最后是 `GOGC` 与 `GOMEMLIMIT` 的调优判据:GC 频繁但每次都很短(亚毫秒),说明堆太小、调大 GOGC 就行;GC 不频繁但单次很长,说明存活对象太多,调参没用,必须减少存活集。**先分清是哪一种,再动手调,否则调完只觉得「好像快了一点」。**',
+                ],
+                depth:
+                  '再往上会问「怎么证明 STW 真的不影响业务」。答:看 `go_gc_duration_seconds` 的分位数,以及业务 p99 与 GC 时间的相关性。Go 的三色标记 + 混合写屏障已经把 STW 压到亚毫秒级,但它有另一个成本:写屏障让每次指针写入都多几条指令——这部分开销在火焰图里散落在各处,看不到一个集中的热点,只能靠前后对比测出来。',
+                followup:
+                  '可能追问「GC 频繁但内存不高是什么原因」。答:分配率高。典型是一次请求里反复 `+` 拼字符串、反复 `append` 不预分配、或者在热路径上用 `fmt.Sprintf`。这三件事在 profile 里都表现为某个函数的 `alloc_objects` 特别高。',
+              },
+              {
+                kind: 'explore',
+                title: '为什么这一阶段没上 OpenTelemetry',
+                from:
+                  'trace id、指标、pprof 三件套都自己实现了,而业界标准答案是接 OpenTelemetry。这个取舍值得说清,否则看代码的人会以为作者不知道 OTel。',
+                branches: [
+                  {
+                    direction: 'outward',
+                    related: '接入 OTel SDK + Collector,拿现成的链路追踪和指标导出',
+                    basis: '都是「让系统可观测」,而且都最终落到 trace / metrics / logs 三件套',
+                    shared: 'trace id 的格式、W3C 传播头、以及「按请求串联」的基本模型',
+                    diff:
+                      'OTel 提供的是采集 + 上报 + 采样 + 后端协议一整套;本项目提供的是「三个最小可用的原语 + 一个能讲清原理的实现」。前者免去造轮子,后者让你在面试里能说清每一层发生了什么。',
+                    value:
+                      '判据是「你要的是能用的系统,还是能讲清的系统」。真实项目应该接 OTel——尤其是跨语言、多服务时,自研的 trace id 传播根本走不通。但**先用最小实现把原理吃透,再接框架**是有价值的:接完之后遇到「链路断了」,你知道断在哪一层。[[框架省掉的是工作,不是理解。]]',
+                  },
+                  {
+                    direction: 'reverse',
+                    related: '既然只要 trace id,为什么不用 request id 一把梭,不引入 traceparent',
+                    basis: '两者都是「给一次请求一个唯一标识」',
+                    shared: '都靠 HTTP 头传播、都存在 ctx 里、都由 handler 自动注入日志',
+                    diff:
+                      'request id 是「一个请求一个 id」;traceparent 携带的是 trace id + span id + 采样标记,天然支持「一条链路多个 span」。前者只能回答「这一次发生了什么」,后者还能回答「每个环节花了多久」。',
+                    value:
+                      '本项目两个都支持:优先读 `traceparent`,没有就退化成 `X-Request-ID`。这不是骑墙,是**兼容现实**:很多网关只发后一个。但代码里必须留出升级路径——`ParseTraceparent` 已经按标准严格实现,接 OTel 时不用改。',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
   ],
 }

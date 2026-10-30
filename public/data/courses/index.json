@@ -1,7 +1,7 @@
 {
   "version": 1,
   "sourceIndexGeneratedAt": "2026-10-27T05:56:26.214Z",
-  "buildHash": "c1185e213066",
+  "buildHash": "e6dca9805631",
   "courses": [
     {
       "id": "java-lang-collections",
@@ -245,10 +245,10 @@
       ],
       "order": 10,
       "firstLessonId": "skeleton-and-health",
-      "stageCount": 4,
-      "lessonCount": 12,
-      "uniqueQuestionCount": 74,
-      "estimatedMinutes": 430
+      "stageCount": 5,
+      "lessonCount": 15,
+      "uniqueQuestionCount": 87,
+      "estimatedMinutes": 537
     },
     {
       "id": "ai-serving-prompt",
