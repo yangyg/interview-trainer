@@ -7,6 +7,7 @@ import javaDesignAlgorithm from './java/design-algorithm.mjs'
 import goLanguage from './go/language.mjs'
 import goConcurrencyRuntime from './go/concurrency-runtime.mjs'
 import goEngineeringSystem from './go/engineering-system.mjs'
+import goShortlink from './go/shortlink.mjs'
 import aiFoundation from './ai/foundation.mjs'
 import aiServingPrompt from './ai/serving-prompt.mjs'
 import aiRagAgent from './ai/rag-agent.mjs'
@@ -27,6 +28,7 @@ export const COURSES = [
   goLanguage,
   goConcurrencyRuntime,
   goEngineeringSystem,
+  goShortlink,
   aiFoundation,
   aiServingPrompt,
   aiRagAgent,

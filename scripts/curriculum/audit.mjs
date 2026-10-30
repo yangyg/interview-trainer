@@ -65,7 +65,9 @@ export function auditCourses(courses) {
           if (block.kind === 'code') {
             if (!block.version) add('code-version', where, '代码块没有注明版本', addr)
             if (!block.env) add('code-env', where, '代码块没有注明运行环境', addr)
-            if (block.verified !== true) {
+            // true / false 都是合法标注:true = 真跑过,false = 明确承认没跑。
+            // 只有完全没写才告警 —— 逼作者表态,而不是逼作者撒谎。
+            if (typeof block.verified !== 'boolean') {
               add('code-verified', where, '代码块没有 verified 标注', addr)
             }
           }

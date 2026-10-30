@@ -1,7 +1,7 @@
 {
   "version": 1,
   "sourceIndexGeneratedAt": "2026-10-27T05:56:26.214Z",
-  "buildHash": "495d0483bb02",
+  "buildHash": "c1185e213066",
   "courses": [
     {
       "id": "java-lang-collections",
@@ -226,6 +226,29 @@
       "lessonCount": 5,
       "uniqueQuestionCount": 42,
       "estimatedMinutes": 279
+    },
+    {
+      "id": "go-shortlink",
+      "language": "go",
+      "title": "短链服务:从 0 到可运维",
+      "subtitle": "用 Gin + GORM + Redis + Kafka 做一个能扛住面试追问的短链系统",
+      "level": "expert",
+      "prerequisites": [
+        "go-engineering-system"
+      ],
+      "outcomes": [
+        "搭起分层清晰、能优雅退出的 Gin 服务,而不是一个 main.go 写到底",
+        "实现号段发号器,并说清雪花与 Redis INCR 各自的失效条件",
+        "用 cache-aside 把读路径的 DB 压力压到可忽略,而不是靠调大连接池",
+        "看到 CPU 或内存异常时,能用 pprof 定位到具体函数而不是重启试试",
+        "面对「设计一个短链服务」的追问,按容量-分层-瓶颈-取舍四步作答"
+      ],
+      "order": 10,
+      "firstLessonId": "skeleton-and-health",
+      "stageCount": 4,
+      "lessonCount": 12,
+      "uniqueQuestionCount": 74,
+      "estimatedMinutes": 430
     },
     {
       "id": "ai-serving-prompt",

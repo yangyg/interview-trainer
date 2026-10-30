@@ -1,6 +1,6 @@
 # 术语覆盖报告
 
-> 生成时间:2026-10-27 14:18 · 由 `.term.mjs` 生成,数据变了可以重跑
+> 生成时间:2026-10-30 10:22 · 由 `.term.mjs` 生成,数据变了可以重跑
 
 对每道题,从「标题 + 答案」抽可检索符号(反引号内容与英文标识符),检查它是否出现在所属课时正文里。
 命中率低于 50% 的题再按三种情况拆分:
@@ -11,7 +11,7 @@
 | 只是换了说法 | 正文写成了中文,英文标识符没保留 | 补一个括号,如「原子性(Atomicity)」 |
 | 真缺口 | 整门课都没出现 | 要补内容 |
 
-**总览**:检查 1404 道题,**359 道**命中率低于 50%。符号层面 覆盖在别处 855 个 / 只是换说法 19 个 / 真缺口 1144 个;去重后真缺口术语 **1053 个**。
+**总览**:检查 1464 道题,**375 道**命中率低于 50%。符号层面 覆盖在别处 893 个 / 只是换说法 19 个 / 真缺口 1189 个;去重后真缺口术语 **1076 个**。
 
 这个指标是下限:正文用中文复述、没保留英文名时会算成「缺口」。所以下面的表不是判决书,是待核对清单。
 
@@ -28,7 +28,10 @@
 | `online` | **是** | 2 | 1 | java-mysql-redis |
 | `initializingbean#` | **是** | 2 | 1 | java-spring |
 | `user_id` | — | 4 | 2 | go-concurrency-runtime、java-design-algorithm |
+| `etcd/zk` | — | 3 | 3 | arch-design、go-engineering-system、go-shortlink |
 | `grpc` | — | 3 | 3 | arch-design、go-concurrency-runtime、java-design-algorithm |
+| `redis+lua` | — | 3 | 3 | go-engineering-system、go-shortlink、java-mysql-redis |
+| `setnx` | — | 3 | 2 | arch-design、go-shortlink |
 | `apm` | — | 3 | 2 | go-concurrency-runtime、java-mysql-redis |
 | `crud` | — | 3 | 2 | java-mysql-redis、java-spring |
 | `vlm` | — | 2 | 2 | ai-foundation、ai-rag-agent |
@@ -37,7 +40,6 @@
 | `sequential` | — | 2 | 2 | arch-design、go-concurrency-runtime |
 | `deadline` | — | 2 | 2 | arch-design、go-concurrency-runtime |
 | `kill` | — | 2 | 2 | arch-design、java-lang-collections |
-| `etcd/zk` | — | 2 | 2 | arch-design、go-engineering-system |
 | `n/2` | — | 2 | 2 | arch-design、java-lang-collections |
 | `orderid` | — | 2 | 2 | arch-design、java-spring |
 | `store` | — | 2 | 2 | arch-design、go-language |
@@ -45,22 +47,20 @@
 | `ssd` | — | 2 | 2 | arch-design、java-design-algorithm |
 | `list/zset` | — | 2 | 2 | arch-design、java-design-algorithm |
 | `async` | — | 2 | 2 | go-concurrency-runtime、java-mysql-redis |
+| `r.context` | — | 2 | 2 | go-concurrency-runtime、go-shortlink |
 | `sql.errnorows` | — | 2 | 2 | go-concurrency-runtime、go-language |
 | `offset` | — | 2 | 2 | go-concurrency-runtime、java-spring |
 | `prestop` | — | 2 | 2 | go-engineering-system、java-spring |
 | `sigterm` | — | 2 | 2 | go-engineering-system、java-spring |
 | `switching` | — | 2 | 2 | go-engineering-system、java-distributed-network |
 | `protocols` | — | 2 | 2 | go-engineering-system、java-distributed-network |
-| `redis+lua` | — | 2 | 2 | go-engineering-system、java-mysql-redis |
-| `topn` | — | 2 | 2 | go-engineering-system、java-mysql-redis |
-| `sharded` | — | 2 | 2 | go-engineering-system、go-language |
-| `slices.sort` | — | 2 | 2 | go-engineering-system、go-language |
-| `lsm` | — | 2 | 2 | go-engineering-system、java-design-algorithm |
-| `ifsqlnode` | — | 2 | 2 | java-design-algorithm、java-spring |
-| `foreachsqlnode` | — | 2 | 2 | java-design-algorithm、java-spring |
-| `redisson` | — | 2 | 2 | java-design-algorithm、java-distributed-network |
-| `shedlock` | — | 2 | 2 | java-design-algorithm、java-spring |
-| `tcc` | — | 2 | 2 | java-design-algorithm、java-mysql-redis |
+| `extract` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `peer` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `net.errclosed` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `syscall.epipe` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `cpu/db` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `avl` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `mongodb` | — | 2 | 2 | go-engineering-system、go-shortlink |
 
 ## 二、按课程
 
@@ -377,23 +377,58 @@
 
 </details>
 
-### 并发编程与 JVM (`java-concurrency-jvm`)
+### 短链服务:从 0 到可运维 (`go-shortlink`)
 
-缺口术语 10 个(出现 ≥2 次的 0 个),涉及 3 个课时。
+缺口术语 32 个(出现 ≥2 次的 0 个),涉及 5 个课时。
 
 <details><summary>课时明细(缺 2 个以上符号的题)</summary>
 
-**`juc-tools`** JUC 工具类与并发容器
+**`id-and-schema`** 号段发号与短码建表
 
-- `java-03-Q63` ArrayBlockingQueue 和 LinkedBlockingQ — 缺 `putlock/takelock` `fixed/single`
+- `go-05-Q1` 为什么 MySQL 用 B+ 树而不是 B 树/红黑树/hash？ — 缺 `avl` `mongodb`
+- `go-index-Q149` MySQL 索引失效的场景有哪些？ — 缺 `create_time` `phone` `analyze`
+
+**`redirect-and-cache`** 302 跳转与 cache-aside
+
+- `go-index-Q85` Go 的 netpoll 是怎么工作的？为什么少量线程就能撑住大量连接？ — 缺 `epoll_wait` `extract`
+- `go-index-Q88` 服务端还没处理完请求，客户端就关闭了连接，会发生什么？ — 缺 `broken` `peer` `net.errclosed` `syscall.epipe` `r.context` `cpu/db`
+
+**`async-tap`** 打点:把重活从 302 上摘下来
+
+- `go-05-Q21` CAP 与 BASE？etcd/ZooKeeper/Redis 是哪种？ — 缺 `etcd/zk` `raft/zab` `eureka/nacos` `lease` `watch`
+- `go-05-Q24` 限流算法？熔断/降级？ — 缺 `golang.org/x/time/rate` `redis+lua` `envoy/istio` `zero` `breakpoint/sentinel` `golang/hystrix` `semaphore`
+
+**`kafka-semantics`** Kafka:它为什么快,以及它到底保证了什么
+
+- `go-index-Q132` 消息堆积了怎么处理？ — 缺 `max.poll.records` `fetch.min.bytes`
+
+**`idempotent-aggregate`** 幂等聚合:让至少一次变成恰好一次的效果
+
+- `go-index-Q131` 如何解决消息重复消费和顺序性问题？ — 缺 `setnx` `messagequeueselector` `messagelistenerorderly`
+
+</details>
+
+### 并发编程与 JVM (`java-concurrency-jvm`)
+
+缺口术语 23 个(出现 ≥2 次的 0 个),涉及 3 个课时。
+
+<details><summary>课时明细(缺 2 个以上符号的题)</summary>
+
+**`jvm-memory`** 运行时数据区:五块内存与三块编外
+
+- `java-04-Q1` JVM、JRE、JDK 三者的区别是什么？JVM 的作用是什么？ — 缺 `jconsole` `kotlin`
+- `java-04-Q3` 常见的 JVM 实现有哪些？HotSpot、OpenJDK、GraalV — 缺 `ahead` `ibm` `zing` `azul`
+- `java-04-Q4` JDK 8 / 11 / 17 / 21 这些 LTS 版本在 JVM  — 缺 `lts` `jigsaw` `epsilon` `macos/windows`
+- `java-04-Q6` 程序计数器的作用是什么？为什么需要它是线程私有的？ — 缺 `program` `undefined`
+
+**`threadpool`** 线程池七参数与执行流程
+
+- `java-03-Q44` 线程池线程数设置多少合适？CPU 密集型和 IO 密集型怎么算？ — 缺 `n+1` `wt/st`
+- `java-03-Q50` 生产环境怎么对线程池做监控？不同业务如何隔离？ — 缺 `getactivecount` `getqueue` `getcompletedtaskcount` `beforeexecute/`
 
 **`completable-future`** CompletableFuture 编排
 
 - `java-03-Q71` CompletableFuture 和 Future 的区别？ — 缺 `supplyasync/thenapply/` `thencompose/thencombine/` `thenaccept/allof/anyof/` `thenxxxasync` `executionexception/`
-
-**`jvm-memory`** 运行时数据区
-
-- `java-04-Q4` JDK 8 / 11 / 17 / 21 这些 LTS 版本在 JVM  — 缺 `jigsaw` `epsilon` `macos/windows`
 
 </details>
 
