@@ -34,3 +34,10 @@ scripts/curriculum/.blockindex.json
 .qa.mjs
 .term.mjs
 .sp2.py
+
+# 本地 Agent 工具钩子配置（机器相关，同 .workbuddy/）
+.codex/
+.cursor/
+
+# 课程成稿过程中的一次性草稿
+*.stage[a-z].txt
