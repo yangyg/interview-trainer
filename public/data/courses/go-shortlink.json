@@ -17,10 +17,10 @@
   ],
   "order": 10,
   "firstLessonId": "skeleton-and-health",
-  "stageCount": 5,
-  "lessonCount": 15,
-  "uniqueQuestionCount": 87,
-  "estimatedMinutes": 537,
+  "stageCount": 6,
+  "lessonCount": 18,
+  "uniqueQuestionCount": 100,
+  "estimatedMinutes": 651,
   "stages": [
     {
       "id": "bootstrap",
@@ -4598,6 +4598,810 @@
           "go-index-Q103",
           "go-index-Q104",
           "go-index-Q71"
+        ],
+        "passRatio": 0.8
+      }
+    },
+    {
+      "id": "delivery",
+      "title": "F · 交付:交出去以后,「能跑」和「验过」都不再自明",
+      "goal": "让同一份产物在没有 shell、没有工具链的环境里跑对,并让「验过了」和「没验成」不可能被混淆",
+      "summary": "前五个阶段的产物一直待在「有 Go、有 shell、有系统证书」的机器上。这一阶段把它交出去,三件事同时变了。第一,运行环境变了:最终镜像 `FROM scratch`,里面除了二进制和一份 CA 证书什么都没有——没有 libc 就要静态编译,没有 zoneinfo 就要把时区表编进二进制,没有 curl 就要把健康探测做成二进制自己的一个子命令。第二,启动顺序变成代码:`profiles` 让同一份 compose 既是开发环境也是交付编排,迁移被拆成一次性容器而不塞进 api 的启动脚本,`advertised.listeners` 要写「客户端视角」的地址——写错的表现是日志说连上了、客户端报 connection refused。第三,也是最反直觉的一条:证据的形式变了。这一阶段最值得讲的 bug 是 worker 容器 healthy、日志干净、lag 报 0,却 3 分 51 秒一条消息没处理——所有自动化的健康信号都是绿的,业务是死的。围绕它建的这套门禁因此有一条硬规则:环境不具备时渲染成「跳过」,绝不混进「通过」。",
+      "lessons": [
+        {
+          "id": "image-and-scratch",
+          "title": "镜像:为什么最终是 15MB,而且里面没有 shell",
+          "kind": "concept",
+          "content": {
+            "intro": "前五个阶段跑的都是本地编译出来的二进制。这一节开始,同一个二进制要交给别人去跑——差别不在于「打包」,而在于**你不再能 ssh 进去看一眼**。镜像里少一个文件,症状会在运行期以完全不相干的形式出现:缺 CA 证书报的是 x509 错误,缺时区数据表现为统计写到昨天,缺 libc 报的是「文件不存在」。这一节把镜像从 367.8MB 压到 5.7MB,顺便把「少什么会怎样」逐条验一遍。",
+            "sections": [
+              {
+                "kind": "concept",
+                "title": "三个 stage,各自的失效条件",
+                "body": [
+                  "`deps` 只做一件事:`go mod download`。它单独的**唯一理由是缓存**——依赖清单变了才重新下载,源码改动不影响这一层。实测:只改 `cmd/worker/main.go` 时,这一层直接命中缓存。",
+                  "真正省时间的不是「多阶段」这件事,而是**把变化频率不同的东西分开分层**。源码每天改十次,依赖一周改一次,把两者放在同一层,等于让每天十次都付出下载依赖的代价。",
+                  "`build` 做编译。它继承 `deps` 的模块缓存,所以第二次构建不需要网络。`runtime-data` 在早期版本里存在(装 `ca-certificates` 和 `tzdata`),后来被删掉了——原因见后面两节。",
+                  "最终 stage 是 `FROM scratch`。`scratch` 不是「很小的镜像」,它是**零字节**:没有 `/bin`、没有 `/etc`、没有 libc。所以这一步的前提条件很硬:二进制必须是完全静态的。"
+                ]
+              },
+              {
+                "kind": "diagram",
+                "title": "一次构建里,什么被留下了、什么被丢掉了",
+                "diagram": {
+                  "type": "layers",
+                  "items": [
+                    {
+                      "label": "golang:1.23-alpine(74.8MB)",
+                      "note": "只在构建期需要:Go 工具链、编译缓存、module 缓存",
+                      "tone": "muted"
+                    },
+                    {
+                      "label": "deps:go mod download",
+                      "note": "单独成层,只随 go.mod / go.sum 变化;缓存命中时零网络",
+                      "tone": "muted"
+                    },
+                    {
+                      "label": "build:/out/api(15.1MB)",
+                      "note": "CGO_ENABLED=0 + -trimpath + -s -w;静态、可复现",
+                      "tone": "primary"
+                    },
+                    {
+                      "label": "scratch:15.3MB",
+                      "note": "只有 /api 与 /etc/ssl/certs/ca-certificates.crt 两个文件",
+                      "tone": "primary"
+                    }
+                  ],
+                  "caption": "最终镜像里没有任何「构建期才需要」的东西。单阶段构建把这些全部留在镜像层里,所以它 367.8MB —— 而二进制是同一份。"
+                }
+              },
+              {
+                "kind": "code",
+                "title": "Dockerfile 里真正决定体积与缓存的两段",
+                "lang": "dockerfile",
+                "code": "# 依赖层单独成 stage:只随 go.mod / go.sum 失效\nFROM golang:${GO_VERSION}-alpine AS deps\nWORKDIR /src\nARG GOPROXY=https://proxy.golang.org,direct\nENV GOPROXY=${GOPROXY}\nCOPY go.mod go.sum ./\nRUN --mount=type=cache,target=/go/pkg/mod go mod download\n\n# 源码在这之后才进来 —— 顺序反了,多阶段白做\nFROM deps AS build\nCOPY . .\nARG VERSION=dev\nRUN --mount=type=cache,target=/root/.cache/go-build \\\n    CGO_ENABLED=0 go build -trimpath \\\n    -ldflags \"-s -w -X github.com/example/shortlink/internal/server.version=${VERSION}\" \\\n    -o /out/api ./cmd/api\n\n# 最终镜像:两个文件\nFROM scratch AS api\nCOPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\nCOPY --from=build /out/api /api\nUSER 65532:65532\n",
+                "caption": "`--mount=type=cache` 是 BuildKit 的构建缓存,它不进镜像层,所以不会像单阶段构建那样把 `/root/.cache/go-build` 留在产物里。",
+                "notes": [
+                  "`-trimpath` 去掉构建机的绝对路径。不加的话二进制里会留 `/home/某个用户名/...`,既泄露构建环境,也让不同机器构建出的产物 hash 不一致——而「可复现构建」是从这一步开始的。",
+                  "`-s -w` 去符号表和 DWARF,体积小约 25%。代价是 panic 栈没有行号。本项目接受这个代价,因为排障靠 trace 和日志,不靠 core dump。",
+                  "`USER 65532:65532` 只能用数字:scratch 里没有 `/etc/passwd`,写用户名会让构建时报错。",
+                  "实测口径:镜像解压后 15.3 MB(`docker export | wc -c`),二进制本身 15,089,816 字节。"
+                ],
+                "version": "Docker 26(BuildKit)",
+                "env": "本机 Docker Desktop,GO_VERSION=1.23",
+                "verified": true
+              },
+              {
+                "kind": "compare",
+                "title": "同一份代码,两种构建方式",
+                "head": [
+                  "构建方式",
+                  "镜像体积",
+                  "里面有什么",
+                  "改一行代码后重建"
+                ],
+                "rows": [
+                  [
+                    "单阶段 `FROM golang:alpine`",
+                    "367.8 MB",
+                    "完整工具链 + 源码 + 编译缓存 + 二进制",
+                    "全部重来"
+                  ],
+                  [
+                    "多阶段 `FROM scratch`",
+                    "5.7 MB",
+                    "二进制 + 一个 CA 证书",
+                    "只重跑 build 层"
+                  ]
+                ],
+                "note": "六十五倍。差距不在二进制上——两种构建的二进制是同一份,都在 15MB 左右。差的是 Go 工具链(约 250MB)和 `/root/.cache/go-build`(几十万个中间文件)。**多阶段省下的不是你的代码,是构建过程本身**,所以这个收益和项目规模无关:一个只写三行的服务,单阶段镜像照样 300MB+。",
+                "caption": "体积口径要说清:5.7MB 是压缩后的层(`docker save`),15.3MB 是解开后占的磁盘(`docker export`)。对外说 6MB、对运维说留 20MB,两者都对,混着说就是错。"
+              },
+              {
+                "kind": "why",
+                "title": "为什么不是 alpine,也不是 distroless",
+                "body": [
+                  "`alpine:3.20` 3.5MB,`distroless/static` 约 2MB,`scratch` 是 0。三者的差别不在体积,而在**「默认提供什么」**:alpine 有 shell 和包管理器(以及 musl libc),distroless 有 passwd/group、有 CA 证书、有 tzdata,scratch 什么都没有。",
+                  "选 scratch 的实际收益是「镜像里有什么」这件事可以被一句话说清:**两个文件**。这个性质带来的是可验证性——`docker export` 出来的文件列表就是全部,不存在「某个基础镜像某天悄悄多了一个我不知情的二进制」。",
+                  "顺带说一个现实原因:本轮构建时 `gcr.io` 不可达,拉 `distroless` 直接超时(`dial tcp ...:443`),而 `docker.io` 正常。也就是说 distroless 这条路线在这台机器上根本走不通。这不是设计的理由,但它确实让「scratch 是不是也能做到」这个问题从假设变成了实测。"
+                ],
+                "without": "如果继续用 alpine:镜像大 3.5MB 不是问题,问题是**它给了你一个 shell,于是你会用它**。`docker exec -it api sh` 一旦成为习惯,排障就会从「看指标和日志」退化成「进去看看」——而容器随时可能被重建,你看到的东西下一秒就不在了。没有 shell 逼着把可观测做扎实,这是选它的隐性收益。",
+                "real": "代价也必须说清:没有 shell,`docker compose exec` 进不去。本轮的排查手段是三条——`docker compose logs`、管理端口的 `/metrics` 与 pprof、以及借一个临时容器共享网络命名空间(`docker run --rm --net container:shortlink-worker alpine wget -qO- localhost:9091/metrics`)。判断标准是这个服务需不需要人常常进去敲命令;一个只做跳转的服务不需要,它需要的是挂了就重启、起不来就看日志。"
+              },
+              {
+                "kind": "concept",
+                "title": "没有 shell 之后,健康检查只能长在二进制里",
+                "body": [
+                  "Dockerfile 的 `HEALTHCHECK` 有三种常见写法,前两种在 scratch 里都不成立:`CMD curl -f http://localhost/healthz`(没有 curl)、`CMD-SHELL \"wget -q -O- ...\"`(没有 sh)、`CMD [\"/api\", \"-healthcheck\"]`(只剩这一种)。",
+                  "所以 `internal/selfcheck` 存在:它要在 `main` 的最前面拦下 `-healthcheck`,把监听地址(`:8080`、`0.0.0.0:8080`、`[::]:9090` 三种形态)换成本机可访问的 URL,发一次 GET,2xx 退出 0。",
+                  "这个设计顺手解决了另一个更容易出错的问题:**探测地址与被探测服务的地址由同一份配置推导**。写死 `curl localhost:8080` 做不到这点——改了 `HTTP_ADDR` 之后,健康检查会静默地去探一个没人监听的端口,而容器永远显示 unhealthy,原因看起来像「服务没起来」。",
+                  "还有一个位置上的硬约束:这段处理必须在 `config.Load()` **之前**。配置缺项时进程会退出,而「退出了」这件事恰恰要靠健康检查看到。反过来做的话,你会同时收到两条信息——容器 unhealthy、日志里一条配置错误——看起来是两件事,其实是同一件。"
+                ]
+              },
+              {
+                "kind": "code",
+                "title": "把「0.0.0.0」和「:8080」换成一个能连的地址",
+                "lang": "go",
+                "code": "func LocalURL(addr, path string) string {\n\thost, port, err := net.SplitHostPort(addr)\n\tif err != nil {\n\t\treturn \"http://127.0.0.1\" + ensureSlash(path)\n\t}\n\tswitch host {\n\tcase \"\", \"0.0.0.0\", \"::\", \"[::]\":\n\t\thost = \"127.0.0.1\"\n\t}\n\treturn \"http://\" + net.JoinHostPort(host, port) + ensureSlash(path)\n}\n",
+                "caption": "不能直接把 addr 拼进 URL:监听在 `0.0.0.0` 时,把 `http://0.0.0.0:8080` 当目标地址发请求,在部分平台上会解析成一块真实但错误的网卡,探测结果就变成看运气。容器内探测一律打环回。",
+                "notes": [
+                  "`Port` 为空时不报错,退化成默认端口:探测地址算不出来不该让进程起不来。",
+                  "`Probe` 故意用 GET 不用 HEAD:gin 上很多路由只注册了 GET,HEAD 会得到 404,于是「服务明明是好的却报不健康」——这种 bug 只在换探测方法的那天出现。",
+                  "`-healthcheck` 只认这一个参数,不引入 `flag` 包:`flag.Parse` 遇到未知参数会打印用法并退出 2,而这个二进制正常启动时不接受任何参数,加 flag 只是多了一种「参数写错就起不来」的可能。",
+                  "10 个用例覆盖地址推导的 7 种形态与探测的 5 种状态码,覆盖率 96.7%。"
+                ],
+                "version": "Go 1.23",
+                "env": "go test ./internal/selfcheck,不需要网络",
+                "verified": true
+              },
+              {
+                "kind": "concept",
+                "title": "时区:两条路都试过,选了编进二进制",
+                "body": [
+                  "本项目的 MySQL DSN 是 `loc=Local`,`link_stats_daily.day` 按本地时区切。缺时区数据的后果不是报错,而是**所有统计落到 UTC 日期上**:每天 08:00 之前的点击算到前一天,而日志里没有任何一行提示你。",
+                  "两条路都走过。第一条是从运行镜像拷 `/usr/share/zoneinfo`:整个目录 3.5MB,而只需要一个时区;只拷 `Asia/Shanghai` + `UTC` 能压到 2KB,但 Dockerfile 里就多了一个「必须记得同步时区名」的隐性约束——换成 `Asia/Tokyo` 的人不会想到还有这行。",
+                  "第二条是 `import _ \"time/tzdata\"`:时区数据编进二进制,代价实测 **+405,504 字节(约 396 KiB)**。它让「镜像里除了二进制只有一个证书文件」这个性质成立——而**能被一句话说清的性质,才是能被验证的性质**。",
+                  "验证方式就是看日志时间戳的偏移。带 `+08:00` 说明 `TZ` 真的生效了;如果是 `Z`,说明 tzdata 没被找到,而容器照样起来了。"
+                ]
+              },
+              {
+                "kind": "question",
+                "title": "Q32 · 容器里 GOMAXPROCS 应该怎么设?Go 1.25 改了什么?",
+                "questionId": "go-index-Q32",
+                "intent": "这题在容器化的语境下才真正有意义。回答的及格线是「知道要看 cgroup limit 而不是宿主机核数」,加分项是知道 Go 1.25 把这个默认行为改掉了。",
+                "points": [
+                  "问题本身:`runtime.NumCPU()` 读的是**宿主机**的核数。容器被 `--cpus=2` 限制在 2 核,但 Go 仍然认为有 32 个 P,于是开 32 个调度线程去抢 2 核的 CPU 时间——GMP 的 runqueue 被拉长,GC 的辅助标记也跟着按 32 个 P 来分配,结果是延迟抖动和吞吐下降同时出现。",
+                  "Go 1.25 之前的标准做法是引 `automaxprocs`(Uber 那个库),它读 cgroup 的 `cpu.max`(cgroup v2)或 `cpu.cfs_quota_us`(v1),算出真实可用核数,再 `runtime.GOMAXPROCS(n)`。这个库要在 `main` 的最前面调用,因为很多库会在 `init` 里按 `NumCPU` 开协程池。",
+                  "Go 1.25 起,运行时会**默认**感知 cgroup 的 CPU 限制(`GOMAXPROCS` 的默认值改为按 cgroup quota 计算)。也就是说新版本上不引库也对,但要知道这件事是什么时候变的——**升级 Go 版本会改变并发行为**,这是升级里最容易被忽略的一类变化。",
+                  "还有一个反向的坑:设得太小。`GOMAXPROCS=1` 时,任何一个阻塞在 cgo 或 syscall 上的 goroutine 都会让整个进程的并行度变成 1;而项目中又有同步写日志、写 Kafka 这类操作,吞吐会断崖式下跌。经验区间是「cgroup limit 的核数」,不要为了「省调度」再往下压。",
+                  "验证方法不是看文档,是跑基准:`GOMAXPROCS=1` 与 `GOMAXPROCS=<limit>` 各跑一次 `go test -bench`,对比 `ns/op` 与 `B/op`。本项目在 `internal/metrics` 的基准里做过类似的对照——同一份代码,并发度不同,数字差一个数量级。"
+                ],
+                "depth": "再深一层会问「GOMAXPROCS 影响 GC 吗」。会:GC 的标记阶段会被拆成 `GOMAXPROCS/4` 个后台 worker,同时每个 P 在分配内存时要做辅助标记。P 的数量翻倍,标记的并行度也翻倍,但每个 P 分到的 CPU 时间减半——净效果在 CPU 受限时通常是**更差**,因为 GC 抢走了本可以跑业务的 CPU。",
+                "followup": "追问常到「这个容器实际该设多少」。答:先看 `docker stats` 的真实 CPU 使用率,再对齐 limit。如果使用率长期贴着 limit,问题不是 GOMAXPROCS,是容量不够——**调参数治不了容量问题**。"
+              },
+              {
+                "kind": "question",
+                "title": "Q25 · 进程、线程、协程有什么区别?为什么 Go 的协程更轻?",
+                "questionId": "go-index-Q25",
+                "intent": "在交付语境下,这题的正确落点不是背书,而是「为什么一个容器里跑一个进程就够了」——以及一个进程崩了之后会发生什么。",
+                "points": [
+                  "三层的基本差别:进程有独立地址空间,切换要换页表(TLB 失效);线程共享地址空间,切换在内核里,代价是系统调用;协程在用户态调度,切换只保存几个寄存器。数量级上,创建进程约几十微秒、线程约几微秒、goroutine 约几百纳秒。",
+                  "Go 的 goroutine 轻在三个地方:初始栈只有 2KB 且可增长(线程栈通常是 1–8MB 且固定)、调度在用户态(不需要陷入内核)、以及 M:N 调度——几万个 goroutine 映射到少数几个 OS 线程上。",
+                  "这直接解释了本项目的容器形态:**一个容器一个进程**。API 进程里几万个并发请求对应几万个 goroutine,而 OS 线程只有 GOMAXPROCS 个。如果按「一个请求一个线程」的模型,同样的并发需要几万个线程,光是栈内存就要几十 GB。",
+                  "反面也要说清:单进程意味着**没有进程级隔离**。一个 goroutine 里的空指针 panic 会让整个进程退出(除非 recover),没有「只挂一个 worker 进程」这种粒度。所以 Go 服务的容错策略不是「进程级重启」,而是「整个容器重启 + 上游重试」——这要求下游操作幂等,也就回到了阶段 D 讲的接口幂等。",
+                  "还有一个具体的坑:容器里的 PID 1。Go 程序作为 PID 1 运行时,内核对它有两个特殊处理——**默认忽略 SIGTERM 等信号**(如果没有显式注册 handler),以及**不会自动回收僵尸子进程**。前者会让 `docker stop` 等满 10 秒超时才 SIGKILL,后者在程序 fork 子进程时会攒僵尸。本项目用 `signal.NotifyContext` 显式接管了 SIGTERM,所以第一个问题不存在;第二个问题因为不 fork 子进程,也不存在——但要知道它们是「默认行为」而不是「不会发生」。"
+                ],
+                "depth": "再深一层会问「goroutine 泄漏怎么发现」。答:看 goroutine 数的**形状**而不是绝对值——正常服务在流量平稳时是一条水平线,泄漏是一条单调上升的斜线。`/debug/pprof/goroutine?debug=1` 能看到按调用栈聚合的数量,通常第一条就是泄漏源。阶段 E 的排障那一节有完整路径。",
+                "followup": "追问常到「GMP 里的 P 到底是什么」。答:P 是「调度上下文」,数量等于 GOMAXPROCS,它持有本地 runqueue 和 mcache(内存分配缓存)。M 是真正的 OS 线程,没有 P 的 M 只能执行 syscall 或空闲。所以「GOMAXPROCS=32」意味着 32 个 P,而不一定是 32 个线程——线程数可以更多(阻塞在 syscall 上时会新建)。"
+              },
+              {
+                "kind": "question",
+                "title": "Q21 · init 函数的执行顺序是怎样的?",
+                "questionId": "go-index-Q21",
+                "intent": "这题在镜像与启动顺序的语境下有两个具体落点:一是「哪些东西会在 main 之前跑」,二是「为什么镜像里不该有 shell 脚本做初始化」。",
+                "points": [
+                  "顺序是确定的:同一个包内按**文件名**顺序初始化包级变量、再执行 `init`;包之间按**依赖顺序**,被依赖的先初始化;`main` 最后。所以 `init` 里读环境变量是可行的,但读一个「由另一个包的 init 设置」的变量不行,除非那个包被显式 import。",
+                  "`init` 最危险的用法是**做有副作用的事**:连数据库、起 goroutine、注册 HTTP handler。它们的失败无法通过返回值传递(只能 panic),而 panic 发生在 `main` 之前——日志可能还没初始化,你看到的是一个没有上下文的栈。",
+                  "本项目的做法是:**所有资源都活在 `run()` 的栈上**。`main` 里只有三行(调 `run`、记日志、退出),`run` 里依次读配置、建连接、装路由、等信号。这样做的好处是启动顺序在代码里是**可读的一条线**,而不是散落在十几个 `init` 里。",
+                  "容器语境下还有一层:`init` 顺序决定了「镜像里能不能用 entrypoint 脚本做初始化」。可以,但那是另一种复杂度——脚本里做的每一步都要能被单独验证,而且它引入了一个 shell(scratch 里没有)。本项目把它去掉了:初始化 = 迁移,由一个一次性容器负责,而不是在启动脚本里。",
+                  "一个具体的陷阱:`init` 里的 goroutine 会在 `main` 返回后继续跑(如果没被 ctx 管住),于是「优雅退出」会退化成「进程退出了但日志还在写」。这类问题在测试里表现为偶发的 panic 或数据竞争,而 `-race` 也未必抓得到。"
+                ],
+                "depth": "再深一层会问「能不能不用 init」。工程上可以做到完全不用:把初始化逻辑显式放到 `run()` 里,依赖用参数传入。代价是 `main` 变长,收益是「启动时发生了什么」变成一条可读、可测、可断点的序列。本项目选了后者——这也是 `pkg/lifecycle` 存在的理由:关闭顺序和启动顺序一样,应该是一条可断言的数据而不是一堆裸 defer。",
+                "followup": "追问常到「`init` 里能做配置校验吗」。能做但不该做:校验失败只能 panic,而 panic 的输出格式取决于日志是否已初始化。本项目把校验放在 `config.Load()` 里,返回 `errors.Join` 聚合的全部错误——一次报全,而不是改一个重启一次。"
+              },
+              {
+                "kind": "question",
+                "title": "Q89 · Go 的 http.Client 有哪些必须设置的超时?连接池怎么配?",
+                "questionId": "go-index-Q89",
+                "intent": "健康检查本身就是一个 http.Client 调用。这题要答出「哪些超时是必须的」以及「默认值有多危险」,而不只是背四个字段名。",
+                "points": [
+                  "`http.Client` 的零值 `Timeout: 0` 意味着**无限等待**。这是 Go 里最危险的一个默认值:没有超时的请求会一直占着连接和 goroutine,直到对端关闭或进程被杀。",
+                  "四个层次的超时:`Client.Timeout` 是总时长(含连接、重定向、读 body);`Transport.DialContext` 的超时由 `net.Dialer.Timeout` 控制;`ResponseHeaderTimeout` 管「连接建立了但对端不回 header」;`IdleConnTimeout` 管连接池里的空闲连接多久回收。**只设 `Client.Timeout` 是不够的**——它管不住连接池里的空闲连接,也管不住 DNS 解析。",
+                  "连接池的两个关键参数:`MaxIdleConnsPerHost`(默认只有 2!)和 `MaxIdleConns`。默认值 2 意味着高并发下大部分请求用完就关,每次都重新握手。这是 Go 服务里最常见的性能问题之一,而它不报错,只表现为 p99 抖动。",
+                  "`Transport` 要不要共享:应该共享。每次 `&http.Client{}` 都创建一个新 Transport,等于每次新建一个连接池,连接复用完全失效。正确做法是全局一个 `http.Transport`,复制它的副本去改参数(它不能被并发修改)。",
+                  "本项目的自检只用一次 GET、3 秒超时、进程马上退出,所以没设池子——但**要能说出为什么不设**:单次短命调用没有复用收益,设池子反而多一份要维护的状态。判据是「这个客户端会不会被反复使用」,而不是「照抄最佳实践」。"
+                ],
+                "depth": "再深一层会问「body 不读会怎样」。连接不会被回收:Go 的 Transport 要把 body 读完才能安全复用连接,不读就得关掉。所以 `defer resp.Body.Close()` 之前应该 `io.Copy(io.Discard, resp.Body)`——本项目 `selfcheck.Probe` 就是这么写的。一个每秒几千次的探测如果不读 body,会攒下大量 TIME_WAIT。",
+                "followup": "追问常到「重试怎么加」。答:不要给 `http.Client` 加重试,它分不清「幂等请求」和「不幂等请求」。重试放在业务层,由调用方决定这个操作能不能重试,并配上退避(本项目 `pkg/backoff`)——否则一个超时的 POST 被重试三次,就是三次创建。"
+              },
+              {
+                "kind": "principle",
+                "title": "scratch 的四条前提,缺一条就是一个「看起来不相干」的故障",
+                "body": [
+                  "把二进制放进空镜像,本质上是在回答一个问题:**这个进程运行期到底依赖哪些外部文件?** 这个问题在开发机上永远问不出来,因为开发机把答案全给齐了:libc、CA 证书、zoneinfo、`/etc/passwd`、shell。",
+                  "依赖清单只有四项,而且都能用一句话判断:动态链接库(`ldd` 看有没有 `libc.so`)→ 必须 `CGO_ENABLED=0`;TLS 验证(`x509.SystemCertPool`)→ 必须带证书;本地时区(`time.LoadLocation(\"Asia/Shanghai\")`)→ 必须带 zoneinfo;用户名解析(`os/user`)→ 必须用数字 UID。",
+                  "每一项缺失的症状都离家很远:缺 libc 报的是「文件不存在」,缺证书报的是「证书签发者未知」,缺时区不报错、只是时间差 8 小时,缺 `/etc/passwd` 是构建期就失败。**它们的共同点是:错误信息里不会出现「scratch」这个词。**",
+                  "这也是为什么这一节先用 `docker compose --profile app up` 把全链路跑一遍再收工:镜像能不能构建,只证明 COPY 路径写对了;能不能跑,要等它真的连上 MySQL(证书)、真的写出统计(时区)、真的被探针探到(自检)之后才知道。"
+                ],
+                "takeaway": "判断能不能上 scratch,不要问「镜像里还差什么」,要问「这个进程在运行期读了哪些本机文件」。答不出来的部分,就是上线后第一个故障。",
+                "steps": [
+                  "`CGO_ENABLED=0` 静态编译,并用 `ldd` 确认输出是 `not a dynamic executable`",
+                  "拷一份 CA 根证书到 `/etc/ssl/certs/`,否则所有 HTTPS 调用在运行期才失败",
+                  "时区二选一:拷 zoneinfo 目录,或 `import _ \"time/tzdata\"` 把表编进二进制(本项目选后者,+396 KiB)",
+                  "健康探测写成二进制自己的子命令,并在 `config.Load()` 之前拦下来——没有 shell 时,这是唯一还活着的探针"
+                ]
+              }
+            ],
+            "outline": [
+              "多阶段的收益不在阶段数,而在把变化频率不同的东西分层",
+              "静态编译是 scratch 的前提:CGO_ENABLED=0 之后二进制不再依赖 libc",
+              "镜像里除了二进制只剩一个文件:CA 根证书",
+              "没有 shell 之后,健康检查必须长在二进制里",
+              "单阶段 367.8MB vs 多阶段 5.7MB —— 差的是构建过程本身"
+            ],
+            "pitfalls": [
+              "把 `COPY . .` 写在 `go mod download` 之前。多阶段构建就白做了:改一个字符就重新下载 300MB 依赖,而你以为自己在用缓存。它不会报错,只会每天多花两分钟。",
+              "`-X server.version=...` 少写 module 路径。它**不报错**,只是静默不生效,`/version` 永远是 `dev`。构建日志里一个字都不会提。",
+              "scratch 的三个隐形依赖,症状全在别处:`CGO_ENABLED=1` 编出来的二进制启动报 `no such file or directory`(文件明明在,少的是 libc);不拷 CA 证书报 `x509: certificate signed by unknown authority`;不处理时区则 `TZ` 设了也没用,`loc=Local` 退化成 UTC,每天 08:00 之前的点击算到前一天。"
+            ]
+          },
+          "questionIds": [
+            "go-index-Q32",
+            "go-index-Q25",
+            "go-index-Q21",
+            "go-index-Q89"
+          ],
+          "estimatedMinutes": 33
+        },
+        {
+          "id": "orchestration",
+          "title": "编排:一条命令起全栈,以及「起来了」和「能干活」的区别",
+          "kind": "concept",
+          "content": {
+            "intro": "这一节的核心是一个 bug:worker 容器起来了、健康检查是绿的、日志干净、指标端口能访问、lag 报 0 —— 但它 **3 分 51 秒**一条消息都没处理。所有能自动化的健康信号都是绿的,而业务上是死的。这个症状后来在 e2e 里又出现了一次,根因完全不同(零分配的消费者);两次都治完之后,本节讲的三件事才站得住:启动顺序怎么表达、地址该写谁的视角、以及「探针绿了」到底证明了什么。",
+            "sections": [
+              {
+                "kind": "concept",
+                "title": "两套用法,靠 profile 分开",
+                "body": [
+                  "开发时不把应用放进容器:改一行代码要重新构建镜像,热循环太慢。`go run ./cmd/api` + 容器化的依赖,是这类项目的常见组合。交付时反过来,全部进容器,因为那时要验的是「镜像里的东西能不能跑」。",
+                  "```\ndocker compose up -d                     # ① 开发:只起 MySQL + Redis\ndocker compose --profile stats up -d     # ① 开发:再加 Kafka\ndocker compose --profile app up -d       # ② 交付:全栈容器化\n```",
+                  "一个容易踩的点:`kafka` 同时声明了 `profiles: [\"stats\", \"app\"]`。compose 的 profile **不会顺着 `depends_on` 自动展开**——如果 worker 声明在 `app` 里、kafka 只在 `stats` 里,`--profile app up` 的结果是「api 起来了、kafka 没起、worker 一直重启」。两个 profile 都写一行,比在文档里解释「记得同时加 --profile stats」可靠。",
+                  "默认不拉起 Kafka 是有意的:省内存,也少一半「端口没起来导致应用起不来」的排查。这个决定和「配置缺了就是没开」是同一个思路——**让「没启用」这件事在编排文件里可见**,而不是藏在一个开关后面。"
+                ]
+              },
+              {
+                "kind": "diagram",
+                "title": "一次 `up` 里的实际顺序",
+                "diagram": {
+                  "type": "sequence",
+                  "actors": [
+                    "compose",
+                    "mysql",
+                    "migrate",
+                    "api",
+                    "worker"
+                  ],
+                  "messages": [
+                    {
+                      "from": "compose",
+                      "to": "mysql",
+                      "text": "起容器,等 healthcheck 通过(mysqladmin ping)"
+                    },
+                    {
+                      "from": "compose",
+                      "to": "migrate",
+                      "text": "mysql 变 healthy 之后才启动迁移容器"
+                    },
+                    {
+                      "from": "migrate",
+                      "to": "mysql",
+                      "text": "依次执行 0001 / 0002 / 0003 三个 up.sql"
+                    },
+                    {
+                      "from": "migrate",
+                      "to": "compose",
+                      "text": "退出码 0 —— 这才满足 service_completed_successfully"
+                    },
+                    {
+                      "from": "compose",
+                      "to": "api",
+                      "text": "起 api;它的 healthcheck 打 /healthz"
+                    },
+                    {
+                      "from": "compose",
+                      "to": "worker",
+                      "text": "起 worker;它的 healthcheck 打 :9091/metrics"
+                    }
+                  ],
+                  "caption": "注意第三条到第四条:不是「迁移容器启动了」,而是「它成功退出了」。这两个条件的差别,和本节的主题是同一类错误——把「进程起来了」当成「它能干活了」。"
+                }
+              },
+              {
+                "kind": "why",
+                "title": "为什么迁移不能放在 api 的启动流程里",
+                "body": [
+                  "「应用启动时自动迁移」在单实例时很舒服:一个进程,一条命令,不用管顺序。但它躲不掉三个问题,而且三个都会在「真的要部署」那天同时出现。",
+                  "第一,**多副本同时启动会并发执行同一个 DDL**。MySQL 的元数据锁把它们串起来,后到的会因「表已存在」失败,于是副本起不来——而你面对的是一半副本在重启循环。加个分布式锁能解决,但那是在给一个本不该存在的问题打补丁。",
+                  "第二,**迁移需要的权限和运行需要的权限不一样**。DDL 要 `ALTER`,运行时只要 `SELECT/INSERT/UPDATE`。合并成一个账号就是超权,而超权是那种「平时看不出问题、出事时才发现」的风险。",
+                  "第三,**回滚代码不等于回滚 schema**。启动时迁移把这两件事绑死了:你想回滚到上一个版本,但它的启动流程会把 schema 再迁一遍(或者因为版本落后而失败)。分开之后,回滚代码就是换镜像,和数据库无关。"
+                ],
+                "without": "如果坚持在 api 里迁移,至少要加两样东西:一个跨实例的迁移锁(否则并发 DDL),以及一个「版本表 + 幂等执行」(否则重跑会失败)。这两样加起来,复杂度已经超过「多一个一次性容器」。也就是说,**启动时迁移不是更简单,只是把复杂度藏起来了**。",
+                "real": "本项目的 `migrate` 服务是 `restart: \"no\"` + `image: mysql:8.0`,挂载 `./migrations` 只读,用 shell 循环执行每个 `*.up.sql`。代价是多一个服务、以及 api 的 `depends_on` 要写 `condition: service_completed_successfully`。收益是:迁移是一个可以单独跑、单独看日志、单独回滚的动作。"
+              },
+              {
+                "kind": "code",
+                "title": "把「等它成功」写进编排文件",
+                "lang": "yaml",
+                "code": "migrate:\n  image: mysql:8.0\n  profiles: [\"app\"]\n  depends_on:\n    mysql:\n      condition: service_healthy\n  volumes:\n    - ./migrations:/migrations:ro\n  entrypoint: [\"/bin/sh\", \"-c\"]\n  command:\n    - |\n      set -e\n      for f in /migrations/*.up.sql; do\n        echo \"---- applying $$f\"\n        mysql -h mysql -ushortlink -pshortlink shortlink < \"$$f\"\n      done\n  restart: \"no\"\n\napi:\n  depends_on:\n    migrate:\n      condition: service_completed_successfully   # 不是 service_started\n    redis:\n      condition: service_healthy\n",
+                "caption": "`$$` 是 compose 的转义:一个 `$` 会被当成变量插值,两个才是给容器里 shell 的。这个小坑第一次写必踩,而报错是「变量未定义」——看不出是转义问题。",
+                "notes": [
+                  "`restart: \"no\"` 是必须的。默认的 `unless-stopped` 会让迁移容器跑完退出后被反复重启,每个周期重跑一遍 DDL。",
+                  "`set -e` 让第一条 SQL 失败就停:否则会继续执行后面的迁移,把一个「部分完成」的状态留在库里。",
+                  "三种 depends_on 条件的语义差别很大:`service_started` < `service_healthy` < `service_completed_successfully`。选错哪一个都不报错,只是「有时候起不来」。",
+                  "首次 `--profile app up` 实测:3 个迁移依次执行,退出码 0,api 与 worker 随后才启动。"
+                ],
+                "version": "Compose v2 / MySQL 8.0",
+                "env": "docker compose --profile app up -d",
+                "verified": true
+              },
+              {
+                "kind": "concept",
+                "title": "`advertised.listeners`:一个地址服务不了所有人",
+                "body": [
+                  "Kafka 容器化最经典的坑。改造前的配置是只监听 9092、advertised 写 `127.0.0.1:9092`:宿主机上的客户端能连,容器里的 api/worker 连不上。",
+                  "原因不是网络不通,而是**broker 会把地址告诉客户端**:客户端连上 `kafka:9092` 之后,broker 在响应里说「这个分区的 leader 在 `127.0.0.1:9092`」,客户端接着去连**自己容器里**的 127.0.0.1:9092——那里什么都没有。",
+                  "报错是 `connection refused`,而日志里显示「已连接到 kafka:9092 成功」。两句话都对,只是它们说的是不同的事:连接建立成功,后续请求失败。",
+                  "结论:**advertised 地址必须是「客户端视角」能访问到的地址**,而宿主机和容器是两个不同的视角。改法是多加一个 listener:`PLAINTEXT://127.0.0.1:9092` 给宿主机、`INTERNAL://kafka:9094` 给容器。同一个 broker,两套地址。",
+                  "顺带说 healthcheck 也不能只探 TCP 端口:端口通了但 broker 还在选主时,连上去的客户端会拿到一堆 `NOT_LEADER_FOR_PARTITION`。这里用的是 `kafka-broker-api-versions.sh --bootstrap-server ...`,它会真的发一次元数据请求。"
+                ]
+              },
+              {
+                "kind": "concept",
+                "title": "漏配一个环境变量,报错却指向下游",
+                "body": [
+                  "第一次 `--profile app up` 之后,worker 一直重启,错误是 `ping redis: dial tcp 127.0.0.1:6379: connect: connection refused`。",
+                  "看起来像「Redis 没起」。实际上 Redis 早就 healthy 了,问题是 **worker 的环境变量里漏了 `REDIS_ADDR`**,于是用了默认值 `127.0.0.1:6379`——在容器里,那是它自己。",
+                  "这类错误的价值在于:它把「配置缺失」伪装成了「下游不可用」。两种情况的排查方向完全相反(一个改编排,一个查服务),而报错信息只告诉你后者。",
+                  "它不可能靠单测发现(单测里 `REDIS_ADDR` 指向 miniredis,永远是通的),也不可能靠「api 能跑」推断出来(api 的 `REDIS_ADDR` 配了)。**它只能在「全栈真的跑一遍」的时候暴露**——这是 e2e 存在的意义,不是覆盖率能替代的。",
+                  "一个可操作的改进:配置文件里对「没有合理默认值的依赖地址」不要给默认值,启动时直接报「缺 REDIS_ADDR」。本项目 `MYSQL_DSN` 就是这么做的(`MYSQL_DSN 不能为空`),而 `REDIS_ADDR` 给了默认值——这个不一致本身就是 bug 的土壤。"
+                ]
+              },
+              {
+                "kind": "concept",
+                "title": "冷启动 3 分 51 秒:一个不报错的 bug",
+                "body": [
+                  "容器化之后,api 正常、跳转正常、打点正常(`tap_published_total 4`)、topic 里有 4 条消息、worker 容器 healthy——但统计接口一直是 0。worker 的日志只有两行:启动、监听管理端口。没有错误,没有警告。",
+                  "排除法走到第五步才见底:消息发出去了(api 侧计数正确)、topic 存在、容器内 `nc -zv kafka 9094` 通、用 `kafka-console-consumer` 能读出完整的 4 条 JSON、**宿主机上跑同一个二进制连同一个 broker 就正常落库**。最后一步说明代码没问题,问题在运行形态。",
+                  "第六步:看消费组。`kafka-consumer-groups --describe` 返回**空**——group `shortlink-stats` 存在(说明有客户端尝试过 join),但没有任何成员行,也没有 offset。**协商从来没完成。**",
+                  "根因在阶段 E 的那个修复上。当时为了修「批次凑不满就永不提交」,给每轮 Fetch 加了 300ms 上限。而 kafka-go 的 Reader 在第一次 `FetchMessage` 时要完成消费组协商(FindCoordinator → JoinGroup → SyncGroup),协商期间一直阻塞——300ms 的窗口把它切成碎片:调用方看到「ctx 到期、本轮无消息」,于是 continue 开下一轮,协商被打断重来。**每一轮都在重新开始,永远完成不了。**",
+                  "决定性证据来自一次意外:为了对比,我在宿主机上跑了一个 worker 连同一个 broker。它 join 之后 **3 秒**,容器里的 worker 就把 4 条积压处理完并落库了——是「有人替它完成了协商」,不是它自己变快了。"
+                ]
+              },
+              {
+                "kind": "code",
+                "title": "首轮给长窗口,并且只取 1 条",
+                "lang": "go",
+                "code": "joined := false   // 「已经成功取到过消息」= 协商一定完成了\nfor ctx.Err() == nil {\n\twait, max := consumeMaxWait, consumeBatch\n\tif !joined {\n\t\t// 首轮的真正目的是完成协商,不是取满一批。\n\t\t// 按 500 条去取,Fetch 会在取到积压后就阻塞等第 17 条,\n\t\t// 一直等到窗口到期 —— 实测落库整整晚 15 秒。\n\t\twait, max = consumeJoinWait, 1\n\t}\n\tfetchCtx, cancelFetch := context.WithTimeout(ctx, wait)\n\tbatch, commit, err := consumer.Fetch(fetchCtx, max)\n\tcancelFetch()\n\tif errors.Is(err, stats.ErrNoMessage) {\n\t\tcontinue\n\t}\n\tjoined = true\n\t// ...\n}\n",
+                "caption": "两行改动,把冷启动从 3 分 51 秒压到 6 秒。但真正要记住的不是这个数字,而是「协商」和「取消息」是两个阶段——用同一个超时窗口去套两个阶段,短的会卡住长的。",
+                "notes": [
+                  "为什么用「取到过消息」而不是「跑了第几轮」:第一版按轮数切(前两轮用长窗口),在 e2e 里翻车了——那里的顺序是「worker 先起、topic 后建」,前两轮 15 秒全用来等 topic 出现,等主题真的有了,窗口已经退回 300ms。**轮数是时间的代理指标,而这里真正要等的是「协商完成」这个事件。**",
+                  "`consumeJoinWait = 5s` 的依据:大于 broker 默认的 `group.initial.rebalance.delay.ms`(3s)加几轮 RTT,又明显小于编排系统的 readiness 超时。早期写的 15s 是错的:worker 比 topic 早启动时,那 15 秒全在白等。",
+                  "`max = 1` 不是笔误。首轮只取一条,是为了让 `Fetch` 一拿到消息就返回,而不是凑满批次——凑批次会让「已经能消费了」这件事在日志里晚 15 秒才出现。",
+                  "不要给 signal ctx 加 deadline:那会让退出信号失效。每轮用 `context.WithTimeout` 派生,父 ctx 取消时会立刻传播。"
+                ],
+                "version": "kafka-go v0.4",
+                "env": "docker compose --profile app 与 verify-e2e.sh 两种运行形态都跑过",
+                "verified": true
+              },
+              {
+                "kind": "compare",
+                "title": "四种窗口策略,三个数量级",
+                "head": [
+                  "窗口策略",
+                  "冷启动到首次落库",
+                  "为什么"
+                ],
+                "rows": [
+                  [
+                    "全程 300ms",
+                    "3 分 51 秒",
+                    "协商被切碎,永远完成不了;最后靠另一个成员加入才打破"
+                  ],
+                  [
+                    "首轮 15s × 2 轮,按 500 条取",
+                    "15 秒",
+                    "协商几秒就完了,但 Fetch 要等满窗口才返回"
+                  ],
+                  [
+                    "首轮 15s × 2 轮,只取 1 条",
+                    "6 秒",
+                    "取到第一条就返回,协商一完成立刻落库"
+                  ],
+                  [
+                    "改成「取到过消息之前都用 5s 窗口」",
+                    "6 秒",
+                    "按事件切而不是按轮数切:worker 比 topic 早启动时不再白等"
+                  ]
+                ],
+                "note": "第二行到第三行的差别最值得记住:15 秒里只有极短一部分是协商,剩下都是 `Fetch` 在等第 17 条消息(`for len(events) < max`)。**「协商」和「取满一批」是两个阶段,用同一个 max 去套,短的会拖长长的。** 第四行则是被 e2e 打回来之后才改的:同一份代码在 compose 里 6 秒,在「worker 先启动、topic 后创建」的场景里仍然一条都不消费——不过那一次的原因已经不在窗口上了,见下一节的第二个根因。",
+                "caption": "同一台机器、同一个 broker、同一份业务代码,只有窗口策略不同。这类 bug 的排查难点不在推理,在于「没有任何信号提示你它在等」——日志干净、指标正常、进程健康。"
+              },
+              {
+                "kind": "why",
+                "title": "为什么 healthcheck 没发现",
+                "body": [
+                  "这是本节真正的结论。容器状态 `Up (healthy)`、`shortlink_consumer_lag_messages 0`、日志干净、`shortlink_tap_published_total 4` 一切正常——把这五个信号摆在一起,没有一个能告诉你「它不干活」。",
+                  "`lag=0` 这一条最值得警惕。它是「用合法值表示缺失」的又一例,和阶段 E 里 `RegisterConsumerLag` 返回 `(func, bool)` 是同一个问题的另一面:当时的设计是「读不到就不注册」,但它防不住「注册了、读得到、读出来是 0」这种情况。",
+                  "容器状态同理:`healthy` 回答的是「进程还活着吗」,而 `liveness` 探针的设计原则本来就是「重启能不能治好它」。一个「协商卡住」的问题重启治不好(重启之后还是 300ms 窗口),所以它不该由 liveness 表达——但也没有别的探针能表达它。"
+                ],
+                "without": "如果没有那条「打了 N 次跳转,PV 必须变成 N」的端到端断言,这个 bug 会活到什么时候?活到有人发现报表不对的那天——可能是第二天早上,而那时你面对的是「昨天一整天的统计都是 0」和一堆**已经被轮转掉的日志**。",
+                "real": "所以对「消费者是否在工作」,唯一可靠的自动化判据是**端到端断言**。这也解释了为什么 `verify-e2e.sh` 里那条「PV 收敛」的断言不能省:它是整套验证里唯一一条「业务意义上」的断言,其余都是协议和接口层面的。**三十多条断言里,验「接口对」的有三十二条,验「事情真的发生了」的只有一条。**"
+              },
+              {
+                "kind": "concept",
+                "title": "第二个根因:零分配的消费者,永远不会自己好",
+                "body": [
+                  "把窗口从 300ms 改成 5 秒之后,compose 里 6 秒就落库了。但同一份代码在 `verify-e2e.sh` 里仍然是红的:`PV 在 40s 内没到 6,实际 0`,worker 日志只有两行(启动 + 管理端口)。**同一个症状,不同的根因。**",
+                  "差别在启动顺序。compose 里先建 topic 再起 worker;e2e 里 worker 先起(第 5 阶段),topic 到第 7 阶段才由 `ensure_topic` 建出来。Reader 在 topic 还不存在的时候就 join 了消费组,拿到的分配是**零个分区**。之后 topic 建出来了、消息也进来了,而这个 Reader 会永远保持零分配。",
+                  "为了把它和「协商没完成」区分开,我写了个 60 行的诊断程序,直接调 `stats.NewConsumer`,打印每一轮 Fetch 的结果。结论很干净:**12 轮 × 5 秒 = 60 秒,每一轮都在 5.001 秒时正常返回「无消息」,零错误、零警告**;而同一时刻 `kafka-get-offsets.sh` 显示 topic 里有 1 条消息(offset=1)。也就是说 `FetchMessage` 每次都成功地告诉你「没有」——它没有被分配任何分区,所以「没有」是它的真话。",
+                  "修法是 `ReaderConfig` 里的一个字段:`WatchPartitionChanges: true`。kafka-go 的默认值是 `false`,后果正是「零分配永不恢复」。打开之后 Reader 每 `PartitionWatchInterval`(默认 5 秒)查一次分区数,变了就让这一代消费组结束、重新 join。同一个实验里,消息在 topic 建成后 **5.9 秒**被取到。",
+                  "这个默认值能坑人的原因值得单独说:它**只在一种顺序下才有影响**——Reader 在 topic 存在之前就 join 了消费组。而本地手动起服务的人永远遇不到:你总是先建库、先建 topic、再起进程。会遇到的只有「建 topic 的 Job」和「Deployment」谁先起来这个编排上的不确定项。",
+                  "排障上记住一句话:如果一个消费者**没有任何错误、lag 恒为 0、但业务计数不动**,先去看消费组的分配(`kafka-consumer-groups.sh --describe` 的 `ASSIGNMENT` / `PARTITIONS` 列是不是空的),而不是继续翻日志。日志里不会写「我没被分配分区」,因为在那条代码路径上它不认为出了问题。",
+                  "但**改完配置不等于修好**。加了 `WatchPartitionChanges` 之后,同一条 e2e 脚本仍然有三分之一的概率卡住(6 轮里 2 轮),而且卡住的时候消费组里连成员行都没有。kafka-go 没有提供「让一个已 join 的 Reader 重新协商」的方法,所以最后加了一个有界兜底:还没取到过任何消息时,按 15s → 30s → 60s → 120s 退避重建 Reader(`Close` 旧的 + `NewReader` 新的),取到第一条就永久停止。",
+                  "兜底的三条边界比兜底本身更重要:①只在「一条都没取到」时触发,稳态不受影响;②退避到 120 秒封顶,否则一个「topic 里确实没消息」的正常部署会每 15 秒 rebalance 一次;③重建必须 `Close` 旧 Reader,否则它手里的分区分配不会释放,新 Reader 等的是一份永远拿不到的东西。**「已知根因」和「修好了」是两件事。**",
+                  "效果能给出数字:只有 `WatchPartitionChanges` 时,6 轮 e2e 里 2 轮 PV 卡在 0;加上有界重建之后连跑 5 轮全绿,其中一轮的日志是 `21:58:23.636 worker started` → `21:58:38.666 WARN 消费组迟迟没有分配到消息,重建 Reader` → `21:58:38.865 一批已落库并提交`。**15 秒后触发第一次重建,199 毫秒后取到第一条消息**——重建这个动作几乎不花钱,成本全在那 15 秒的退避窗口上。"
+                ]
+              },
+              {
+                "kind": "question",
+                "title": "Q157 · K8s 的探针有哪几种?Go 服务该怎么配?",
+                "questionId": "go-index-Q157",
+                "intent": "这题的正解不是背三种探针的定义,而是能把本项目已经有的 `/healthz` 与 `/readyz` 映射到三种探针上,并说清哪些配置会互相打架。",
+                "points": [
+                  "三种探针的分工:`liveness` 失败会**重启容器**,`readiness` 失败会把 Pod **从 Service 端点摘掉**,`startup` 只在启动期生效、成功后交给另外两个。**它们回答的是三个不同的问题**:要不要重启、要不要放流量、启动完了没有。",
+                  "最常见的事故是「把下游检查放进 liveness」。MySQL 抖动 3 秒,所有 Pod 的 liveness 同时失败,于是**全集群同时重启**——重启治不好 MySQL,但重启期间所有请求都失败。这就是把一次抖动放大成一次故障。",
+                  "本项目的分工可以直接映射:`/healthz` 只返回进程状态,给 liveness;`/readyz` 默认浅探测(不碰下游),给 readiness;深探测(`?deep=1`)只在人排障时敲,不给任何探针用。",
+                  "`startupProbe` 解决的是「启动慢」:`initialDelaySeconds` 猜不准时,要么设太大(每次发布多等几十秒),要么设太小(启动中被 liveness 杀掉)。startup 探针让「启动期」和「运行期」用两套时限。本节那个冷启动 bug,如果放进 K8s,300ms 窗口导致的 3 分 51 秒会被 startup 探针抓住(如果它探的是业务而不是端口)。",
+                  "还有两个必配项:`terminationGracePeriodSeconds` 要大于服务的 `SHUTDOWN_GRACE`(否则优雅退出被 SIGKILL 打断),以及 `preStop` 里 sleep 几秒(否则 Pod 被摘流量的瞬间,还有请求在途)。这两条和代码里的优雅退出**必须成对出现**,少一个都等于没做。"
+                ],
+                "depth": "再深一层会问「探针该探多深」。判据是:**探针的失败必须能通过它触发的动作解决**。liveness 失败的动作是重启,所以它只能探「重启能治好的问题」(死锁、goroutine 泄漏到无法服务);readiness 失败的动作是摘流量,所以它可以探得深一点(依赖不可用时确实不该接流量)。反过来,「数据库连不上」放在 liveness 里就是设计错误。",
+                "followup": "追问常到「多副本时探针会不会同时失败」。会,而且这正是最危险的部分:同一份配置、同一个下游、同一个时刻,所以它们会**同时**变红。缓解办法是给探针加抖动(不同副本的 `initialDelaySeconds` 略微不同),但更根本的办法是让探针只反映「本副本自己的状态」。"
+              },
+              {
+                "kind": "question",
+                "title": "Q143 · 集成测试和环境依赖怎么处理?",
+                "questionId": "go-index-Q143",
+                "intent": "这一节的三层验证(单测 / 真库 / 真协议栈)就是这个问题的答案。回答时要能说清「每一层证明什么、不证明什么」,而不是「我们都用 testcontainers」。",
+                "points": [
+                  "先分层,再谈工具。本项目的四层是:纯逻辑(fake + 纯函数抽取)、真实库接口(`miniredis` / `sqlmock`)、真协议栈(docker compose + 真进程)、只 review。**每一层能证明的东西不同,混着说就是骗自己。**",
+                  "`sqlmock` 只证明「发出去了这条 SQL」,不证明 MySQL 接受它。典型例子:`AS new` 的行别名要 MySQL 8.0.19+ 才支持,而 `sqlmock` 完全不管版本。所以「`sqlmock` 通过」不能写成「SQL 能跑」。",
+                  "`miniredis` 是 RESP 兼容的内存实现,它证明的是接口语义(`PFADD` 幂等、`EXPIRE`、Lua 脚本的原子性),不证明真实 Redis 的版本差异和内存行为。本项目用它验 UV 的 HyperLogLog 去重,精度断言留了近似误差。",
+                  "真协议栈那一层要能「从零开始」:本项目 `verify-e2e.sh` 做的是检查环境 → 起容器 → 迁移 → 编译 → 起进程 → 31 条断言 → 清理。关键是**它会在环境不具备时以 3 退出**,而不是假装通过。",
+                  "Testcontainers 是一个合理的选择,但它的成本经常被低估:每个测试包起一次容器,CI 从 30 秒变成 5 分钟;而收益只在「真的需要跨进程行为」时才成立。本项目的选择是「单测不碰容器,e2e 一个脚本跑全部」——因为它只有一个仓库、一个服务,不需要为每个包隔离环境。"
+                ],
+                "depth": "再深一层会问「e2e 不稳定怎么办」。三条实践:① 所有等待都用「轮询到条件成立」而不是固定 sleep(本项目的 PV 断言就是轮询);② 断言里不写手写常量,能推导就推导(本轮因为手写 `expect=5` 而误报过一次);③ 失败时打印能定位的日志尾巴,而不是只报一个失败。",
+                "followup": "追问常到「本地跑不了 e2e 的环境怎么办」。答:让脚本显式跳过并给出退出码 3,同时在 CI 上跑。**「本地没 Docker」不是取消 e2e 的理由,「没有 CI」才是。**"
+              },
+              {
+                "kind": "question",
+                "title": "Q99 · go.mod 是怎么做版本管理的?MVS 是什么?",
+                "questionId": "go-index-Q99",
+                "intent": "在镜像的语境下,这题落在一个很具体的地方:`go.mod` / `go.sum` 决定了「依赖层缓存能不能命中」,也决定了「构建可不可复现」。",
+                "points": [
+                  "MVS(Minimal Version Selection):每个模块选「所有依赖要求里最高的那个最低版本」。它不是「选最新版」,而是「选能满足所有约束的最小版本」——这个设计让依赖图稳定:升级一个库不会顺带把所有东西都升一遍。",
+                  "`go.sum` 是校验和数据库,不是锁文件。它保证「同一个模块版本,内容永远一样」,但不保证「每次构建选到的版本组合一样」——后者由 `go.mod` 里的 require 和 MVS 共同决定。两者都提交,缺一个都会出问题。",
+                  "构建可复现的三个条件:锁定版本(`go.mod`)、锁定内容(`go.sum`)、锁定编译器(镜像里的 `golang:1.23-alpine` 或 `go 1.23` 指令)。少一个,两台机器就可能构建出不同的二进制——而 `-trimpath` 是第四个:去掉构建机路径,让**产物字节**也一致。",
+                  "`go mod tidy` 应该作为一个门禁。本项目 `ci.sh` 里有一条:跑一遍 tidy,比对 `go.mod` / `go.sum` 有没有变化。有变化就说明「有人加了依赖没 tidy」或者「tidy 了没提交」——这两种都会让别人构建出和你不一样的东西,而本地永远复现不出来。",
+                  "镜像里的依赖层就是靠这两个文件做缓存的:`COPY go.mod go.sum ./` 然后 `go mod download`。`go.mod` 变一次,这一层失效一次;源码变一百次,它命中一百次。"
+                ],
+                "depth": "再深一层会问「`replace` 指令该不该用」。可以用于临时替换(本地调试、fork 修复),但不该提交到主干:它会让「这个模块从哪来」变得不可预测,而且 `go.sum` 对 replace 的校验行为不同。真需要长期替换,应该 fork 并发布一个版本。",
+                "followup": "追问常到「私有模块怎么拉」。答:`GOPRIVATE` + `GONOSUMDB` 配上 SSH 或 token,让这几个模块绕过 proxy 和校验和数据库。而**在 Docker 构建里**,这通常意味着要传 `--ssh` 或 build secret,而不是把私钥 COPY 进镜像——那会永久留在层里。"
+              },
+              {
+                "kind": "question",
+                "title": "Q127 · 服务注册与发现的原理是什么?",
+                "questionId": "go-index-Q127",
+                "intent": "这题和本节的关系是「地址」:注册中心存的是「谁在哪个地址」,而本节那个坑正是「地址是给谁看的」——两者是同一个问题的两个尺度。",
+                "points": [
+                  "两种模型:客户端发现(调用方从注册中心拉列表,自己选一个,如 Eureka / Consul)和服务端发现(调用方只连一个 VIP 或网关,由基础设施转发,如 K8s Service)。前者的调用方要带负载均衡逻辑,后者不用。",
+                  "注册的本质是「带 TTL 的键值 + 心跳」。服务启动时写入,定期续约,停止时删除(或等 TTL 过期)。**关键在失败检测**:进程被 kill -9 时不会删除自己,所以发现方必须能容忍「列表里有已死的实例」——配合主动健康检查或客户端重试。",
+                  "K8s 里没有独立的注册中心:Service 的 Endpoints 就是注册表,由 kubelet 的 readiness 探针驱动。所以**readiness 探针失败 = 从注册表摘掉**,这和本节讲的「探针语义」是同一件事的两面。",
+                  "和本节坑的对应关系:`advertised.listeners` 就是 Kafka 内部的「服务注册」——broker 告诉客户端「我在这个地址」。它踩的坑(注册的地址是服务端视角而不是客户端视角)在服务注册里同样存在:多网卡机器注册了内网 IP,跨网段调用方拿到后连不上。**任何「把地址告诉别人」的机制都有这个问题。**",
+                  "本项目没有注册中心,因为它是单机房、地址由配置给定的部署。这是一个显式的取舍:引入注册中心换来的是「扩缩容不用改配置」,代价是多一个必须高可用的组件。规模没到之前,配置就够了。"
+                ],
+                "depth": "再深一层会问「注册中心挂了会怎样」。取决于客户端是否缓存:拉模式(Eureka)的客户端会缓存列表,注册中心短时间挂掉不影响调用,只是新实例不被感知;推模式( watch)则依赖长连接的可靠性。**所以「注册中心挂了」不等于「服务全挂」,前提是客户端实现了缓存 + 容错。**",
+                "followup": "追问常到「怎么避免把流量打到正在下线的实例」。答:三步——先从注册表摘除、再等一个「摘除传播时间」、最后才停进程。K8s 里的对应物是 `preStop` 钩子里的 sleep;本项目的对应物是「先摘流量,再停接新连接,最后等在途请求」(见 `docs/01-architecture.md` 的退出顺序)。"
+              },
+              {
+                "kind": "principle",
+                "title": "「起来了」和「能干活」之间,隔着一整类没人测的状态",
+                "body": [
+                  "这一节那个 bug 的形状值得单独记住:进程在跑、端口能连、健康检查是绿的、日志干净、指标端口能访问、lag 报 0 —— 六项证据同时指向「正常」,而业务是死的。**当所有指示灯都绿时,人不会怀疑指示灯。**",
+                  "原因是每个信号回答的问题都只到「进程」这一层:`HEALTHCHECK` 探的是 `/healthz`(进程活着),`lag=0` 探的是「有没有积压」(没 join 就不知道,于是报 0)。没有一个信号在回答「它最近有没有干成活」。",
+                  "所以编排文件里要显式写出三类东西,而不是靠默认值:①**顺序**(`depends_on` 用 `service_healthy` / `service_completed_successfully`,不用 `service_started`);②**视角**(每个地址都写「谁在连」:宿主机 `127.0.0.1:9092`、容器 `kafka:9094`);③**业务级证据**(e2e 里的 `pv` 收敛、`tap_consumed_total` 递增,而不是「容器 healthy」)。",
+                  "还有一个更普适的判据:**超时窗口要按「阶段的语义」给,不能一刀切**。300ms 对「取一条已有消息」是够的,对「完成一次消费组协商」是不够的;同一个数字在两件事上含义不同,而代码里它们共用了一个变量。"
+                ],
+                "takeaway": "判断一个服务是否就绪,不要看它「有没有起来」,要看它「有没有干成活」。前者有一堆现成的指标,后者只能自己定义——而坑永远在没定义的那一侧。",
+                "steps": [
+                  "把启动顺序写进编排文件:`service_completed_successfully` 等迁移、`service_healthy` 等依赖",
+                  "每个地址都问一句「谁在连」:宿主机的 `127.0.0.1` 与容器里的服务名是两个答案",
+                  "给业务加一条可断言的证据(PV 收敛、消费计数递增),并让它进 e2e",
+                  "超时按阶段分别给:协商要长、取批要短,不要让一个常量同时服务两件事"
+                ]
+              }
+            ],
+            "outline": [
+              "一个 compose 文件两套用法:开发只起依赖,交付起全栈",
+              "迁移是独立的一次性容器,不是 api 启动时顺手跑",
+              "advertised.listeners 必须是「客户端视角」的地址",
+              "同一个症状两条根因:协商被 300ms 切碎、以及零分配永不恢复",
+              "healthcheck 探的是进程,不是业务"
+            ],
+            "pitfalls": [
+              "把迁移写在 api 的启动流程里。单实例时很舒服,多副本同时启动就是并发 DDL,后到的因「表已存在」起不来。同一类错还有 `depends_on: service_started` ——它只保证容器启动了,和「表建好了」是两件事。",
+              "编排里的每个地址都要写「**谁在连**」的视角。`advertised.listeners` 写成 `127.0.0.1`:宿主机连得上、容器连不上,而报错出现在「已连接到 kafka:9092 成功」之后的一句 connection refused。漏配一个 `REDIS_ADDR` 相反:它退回默认值 `127.0.0.1:6379`,在容器里指向它自己,看起来像「Redis 没起」,实际是「配置缺了」。",
+              "用 `lag=0` 判断消费者在工作。没 join 消费组时,lag 会报 0 而不是报错——这是「用合法值表示缺失」的又一例。"
+            ]
+          },
+          "questionIds": [
+            "go-index-Q157",
+            "go-index-Q143",
+            "go-index-Q99",
+            "go-index-Q127"
+          ],
+          "estimatedMinutes": 42
+        },
+        {
+          "id": "gates",
+          "title": "门禁:让「验过了」和「没验成」不可能被混淆",
+          "kind": "concept",
+          "content": {
+            "intro": "前两节解决「交出去的东西对不对」,这一节解决「**你怎么知道它对**」。一套门禁最容易犯的错不是漏了检查项,而是**把「没验」和「验过了」渲染成同一个绿勾**——那样它给人的是信心而不是信息。这个项目的门禁第一次跑就抓到 6 个存量文件不合 gofmt、一条文档数字漂移、和一个自己写错的断言。本节最后是答辩:12 个问题的浓缩版,每个都有这个仓库里真实跑出来的数字。",
+            "sections": [
+              {
+                "kind": "concept",
+                "title": "为什么判断逻辑不能写在 YAML 里",
+                "body": [
+                  "一个反直觉的事实:**CI 的主要使用者不是 CI**。它跑在推送之后,而你写代码在推送之前。如果检查只存在于 YAML 里,那么「这次改动行不行」的第一个反馈来自几分钟后的邮件——而那时候你已经切到别的事情上了。",
+                  "所以本项目的分工是:所有判断在 `scripts/ci.sh` 里,YAML 里只有「在哪台机器上、用什么前置条件跑它」。`ci.yml` 的三个 job 分别是 `bash scripts/ci.sh`(fast,双平台)、`bash scripts/ci.sh --full --only <各门禁>`(覆盖率/race/镜像)、`bash scripts/ci.sh --full --only e2e`(端到端)。**没有一行断言逻辑。**",
+                  "这个决定带来一个可验证的性质:**本地能跑什么,CI 就能跑什么**——不是「差不多」,是同一份文件、同一个函数。YAML 里的语法错误、actions 版本、runner 环境的差异仍然存在(它们是另一类风险),但「检查逻辑本身对不对」这件事不需要两处维护。",
+                  "代价也要说清:脚本必须能被两种 shell 跑(Git Bash 与 Linux bash)、两种文件系统(大小写敏感性、路径分隔符)、两种进程模型(信号、退出码)。本轮踩到的一个具体差异:Windows 上 `go test -count=1 ./...` 并行链接测试二进制时会争用 build cache,偶发 `Access is denied`;Linux 上不会。"
+                ]
+              },
+              {
+                "kind": "principle",
+                "title": "三种返回值:通过、失败、环境不具备",
+                "body": [
+                  "几乎所有门禁脚本都只用两种状态:0 和 1。这是它们最大的设计缺陷——因为「环境不具备」被塞进了其中一边,而绝大多数实现把它算成 0。",
+                  "本项目的约定是:**0 通过 / 1 失败 / 2 环境不具备**。第三类渲染成 `○ 跳过`,并在汇总里单独列出来,连同「缺什么」一起打印。",
+                  "```\n通过  ✔ 8  ○ 2 跳过\n\n跳过项(没验,不等于通过):\n  ○ 竞态 go test -race —— 缺 C 编译器(gcc/clang)\n  ○ 镜像构建 api + worker —— 没有可用的 docker daemon\n```",
+                  "这和 `verify-e2e.sh` 的退出码 3 是同一个思路,而那句话值得重复:**一个会假装通过的验收脚本,比没有验收脚本更危险,因为它给了你信心**。",
+                  "第三个返回值还有一个隐性收益:它让「这个检查值不值得做」变成了一个可以讨论的问题。当 `-race` 因为缺 gcc 而常年显示 `○`,你会开始想「CI 上有 gcc,那里跑就够了」——而不是「反正它显示绿了」。"
+                ],
+                "takeaway": "把「没验」混进「通过」,是验收体系里最贵的一次偷懒。它省下的是一次解释,付出的是一次事故里没人相信任何指标。",
+                "steps": [
+                  "门禁函数返回 0 / 1 / 2 三种状态,而不是 bool",
+                  "渲染时把 2 单独标成 ○,并在汇总里列出「缺什么」",
+                  "整套脚本在有跳过时仍然退出 0,但输出里必须能看到跳过项——不能只在成功时静默",
+                  "失败时打印能定位的输出尾巴(最后 30 行),不让去翻别的终端"
+                ]
+              },
+              {
+                "kind": "code",
+                "title": "`gate`:三种返回值的统一出口",
+                "lang": "bash",
+                "code": "gate() { # 描述 fn\n  local desc=$1 fn=$2 t0 t1 out rc\n  t0=$(date +%s)\n  out=$(\"$fn\" 2>&1); rc=$?\n  t1=$(date +%s)\n\n  case $rc in\n    0) PASS=$((PASS+1))\n       printf \"  ✔ %-32s %ss\\n\" \"$desc\" \"$((t1-t0))\" ;;\n    2) SKIPPED=$((SKIPPED+1)); SKIP_LIST+=(\"$desc —— $out\")\n       printf \"  ○ %-32s (%s)\\n\" \"$desc\" \"$out\" ;;\n    *) FAIL=$((FAIL+1)); FAILED+=(\"$desc\")\n       printf \"  ✘ %-32s %ss\\n\" \"$desc\" \"$((t1-t0))\"\n       printf \"%s\\n\" \"$out\" | tail -30 | sed \"s/^/      /\" ;;\n  esac\n  return 0   # 永远返回 0:让后续门禁继续跑,最后的汇总决定退出码\n}\n",
+                "caption": "门禁用函数传进来而不是命令字符串:`gate \"覆盖率\" g_coverage`。这样引号和管道都是 shell 语义,不需要再发明一套转义规则——而「转义规则」是这类脚本出 bug 的重灾区。",
+                "notes": [
+                  "`return 0` 是刻意的:一个门禁失败不应该阻断后面的检查。汇总时一次报全,而不是改一个再跑一遍。",
+                  "`out=$(\"$fn\" 2>&1)` 把输出捕获下来,只在失败时打印尾部。成功时最多打两行(覆盖率数字、用例统计),否则日志会被淹没。",
+                  "`--only <name>` 只跑一个门禁,用来**验证门禁本身会不会失败**。`bash scripts/ci.sh --only doc` 在 README 数字漂移时会输出「写着 153 个用例,实测 183 个」——这条命令存在的意义就是这个。",
+                  "11 条门禁;本机 full 模式实测 9 通过 / 1 跳过(缺 gcc,`-race` 无法构建)。"
+                ],
+                "version": "Bash 5 / Git Bash",
+                "env": "Windows 11 + Docker Desktop,ci.sh --full 可复跑",
+                "verified": true
+              },
+              {
+                "kind": "concept",
+                "title": "门禁第一次跑,抓到了什么",
+                "body": [
+                  "**六个存量文件不合 gofmt。** `internal/httpx/errcode.go`、`metrics/bench_test.go`、`metrics/metrics_test.go`、`repo/idem_test.go`、`shortcode/base62_test.go`、`stats/aggregate_test.go`、`pkg/distlock/distlock.go`——这些文件从阶段 A 起就没被 gofmt 过,而 `go vet` 和 `go test` 全都通过。也就是说:**在门禁立起来之前,「格式一致」这件事从未被验证过**,只是「没人抱怨过」。",
+                  "**一条文档数字的漂移。** 阶段 E 结束时把「153 个用例」写进 README,之后加了 `selfcheck` / `config` / `backoff` 三个包的用例,数字悄悄变成了 183。这条门禁的实现很简单:抓 README 里所有 `N 个用例` 和 `N 个包`,逐个和实测比对。",
+                  "**一个自己写错的断言。** 端到端脚本里「PV 应到 5」的 `expect=5` 是手写常量,而我在阶段 6 加了两次跳转(清缓存后验 MISS→HIT),常量没跟着改——于是报错是「PV 没到 5,实际 6」,**一条自相矛盾的错误信息**。修法不是把 5 改成 6,而是加一个 `jump()` 计数器:每真的请求一次短链就把计数写进文件,阶段 7 读它当期望值。",
+                  "三次都指向同一类问题:**手写的、需要人同步的东西,一定会漂移**。数字会漂移、常量会漂移、格式会漂移。门禁的价值不是「发现了三个 bug」,而是把这三类东西从「靠人记住」变成「机器每次检查」。"
+                ]
+              },
+              {
+                "kind": "concept",
+                "title": "一条测不出问题的用例,比没有用例更糟",
+                "body": [
+                  "`pkg/backoff` 里有个抖动(jitter):每次退避的等待时间加上 `[0, base)` 的随机量,避免一批任务在同一刻重试。第一版用例是这么写的:跑 200 次,看总耗时是否散在多个 100µs 的桶里。",
+                  "它通过了。然后我把抖动整个删掉,它**照样通过**——因为它测到的是 `time.Since` 的测量噪声,而不是抖动。200 次调用本身的耗时就足够散,散在多个桶里是必然的。",
+                  "改法是把 `jitter` 抽成纯函数,直接测它的取值分布:2000 次采样必须落在 `[0, base)`,产生至少 1000 个不同取值,且最大值接近 `base`。删掉抖动之后,这三条全部失败。",
+                  "同一次改动里还有另一条:`base << i` 在 `attempts` 较大时会溢出成负数,而 `time.After(负数)` 立即返回——退避在最该冷静的时候退化成忙循环,把刚抖动的下游再打一遍。它不报错、不 panic,线上表现为「重试风暴」。原实现把计算埋在循环里,这条路只能靠「真的跑 40 次」去碰,而那样的用例没人愿意写。拆出 `nextDelay` 之后,边界才变得可测。",
+                  "两件事合起来是一句:**可测性不是测出来的,是拆出来的**。而一条测不出问题的用例之所以更糟,是因为它会在 code review 里被当成「这里已经覆盖了」。"
+                ]
+              },
+              {
+                "kind": "compare",
+                "title": "覆盖率 0% 的包,哪些该补",
+                "head": [
+                  "包",
+                  "为什么 0%",
+                  "该补吗"
+                ],
+                "rows": [
+                  [
+                    "`cmd/api`、`cmd/worker`",
+                    "`main` 只有装配,逻辑都在 `run()` 里",
+                    "不补,`run()` 由 e2e 覆盖"
+                  ],
+                  [
+                    "`internal/handler`",
+                    "HTTP 层:解析请求、调 service、写响应",
+                    "不补单测,由 e2e 覆盖"
+                  ],
+                  [
+                    "`internal/model`",
+                    "数据结构,没有逻辑",
+                    "不补"
+                  ],
+                  [
+                    "`internal/storage`",
+                    "建连接池并 ping,需要真连接",
+                    "不补"
+                  ],
+                  [
+                    "`internal/config`",
+                    "环境变量解析 + 启动校验",
+                    "**补**(0% → 88.2%)"
+                  ],
+                  [
+                    "`pkg/backoff`",
+                    "纯逻辑,含溢出与除零边界",
+                    "**补**(0% → 100%)"
+                  ]
+                ],
+                "note": "判据不是「这个包重不重要」,而是「**它的分支能不能在没有真依赖的情况下走到**」。`handler` 的每个分支都要一个真实 HTTP 请求,用 httptest 补一遍等于把 e2e 的一部分重写成单测;而 `config` 和 `backoff` 的边界全是纯逻辑,不补纯粹是懒。",
+                "caption": "总体覆盖率的门槛设在 60%(当前 63.8%)。留几个点的余量是刻意的:门槛贴着当前值会让「加了一个没测的分支」飘红,而人第一反应是改门槛,不是补测试。"
+              },
+              {
+                "kind": "concept",
+                "title": "答辩:12 个问题的浓缩",
+                "body": [
+                  "系统设计答辩和代码 review 的区别是:review 问「这里为什么这么写」,答辩问「**换个量级还成立吗**」。同样的代码,回答前者靠记忆,回答后者靠数字。",
+                  "**容量**:单机能扛多少 QPS?瓶颈不在 CPU(跳转实测 200µs),在连接数和 Redis 往返。算法是 `目标 QPS × 单请求依赖往返 = 需要的下游并发`,对齐连接池、Redis 连接数、`ulimit -n`,取最小值。**别忘了写假设——容量数字没有假设,就是谣言。**",
+                  "**空间**:短码 7 位 62 进制 = 3.5 万亿,每天 1000 万条能用 958 年。先算再答,直接说「够用」是蒙的。真正该担心的是发号器(号段模式 + 多实例原子自增),不是码空间。",
+                  "**一致性**:缓存和 DB 的不一致窗口多大?答不出具体时长,就等于没想过。本项目还没实现 `Update`,但设计上必须提前想好:延迟双删 + 订阅 binlog 是两条常见路。",
+                  "**故障**:Kafka 挂了跳转还能用吗?能,而且这是设计目标——打点走有界队列,队满丢弃并计数,绝不阻塞 302。代价是报表少一段数据,这是显式的取舍。",
+                  "**最脆弱的环节**:不是代码,是「起来了」和「能干活」之间的缝。容器 healthy、指标正常、日志干净,而业务死了近 4 分钟。**一个系统里最危险的状态,是所有指示灯都是绿的。**",
+                  "完整的 12 个问题在 `docs/05-delivery.md` 第 5 节,每题都给了「答什么 / 别答什么」。共同的纪律是:**每个结论都要能落到一个实测数字或一个具体机制上**,否则听起来像背过。"
+                ]
+              },
+              {
+                "kind": "question",
+                "title": "Q146 · 一个 Go 项目的 CI/CD 流水线应该包含什么?",
+                "questionId": "go-index-Q146",
+                "intent": "这题最容易答成一份清单。真正的分水岭是「能不能说出每一道门禁挡住的是什么」,以及「为什么有些检查不该放在提交前」。",
+                "points": [
+                  "按成本分档,而不是按重要性。本项目三档:fast(十几秒,每次推送,双平台)、full(两分钟,覆盖率 / race / 镜像)、e2e(五分钟,真依赖全链路)。**提交前的检查必须足够便宜**,否则人会绕过它——而被绕过的门禁等于没有。",
+                  "每道门禁要能回答「它挡的是什么」。`gofmt` 挡的是风格漂移(第一次跑抓到 6 个存量文件);`go mod tidy` 比对挡的是「加了依赖没 tidy」;覆盖率门槛挡的是「整块新代码没测」;README 数字挡的是文档漂移。说不出「挡什么」的检查,通常是别人抄来的。",
+                  "`-race` 必须有,但要接受它可能需要 C 编译器。没有 gcc 时显式跳过并标 `○`,而不是静默省掉——CI 上有 gcc,那里跑就行。",
+                  "构建产物也要验:镜像能不能构建出来。这一条比很多人想的便宜(本项目 15 秒),而它能挡住「Dockerfile 引用了不存在的路径」这类只在部署时暴露的问题。",
+                  "CD 的部分要单独说:流水线到「镜像构建成功」为止,不等于「能发布」。发布还缺三样:镜像推送到仓库、版本号的唯一性保证、以及回滚路径(上一个版本的镜像还在不在)。本项目只做到 CI,这一点在文档里明说了——**不能因为「文件存在」就说「配了 CD」**。"
+                ],
+                "depth": "再深一层会问「怎么让流水线不飘」。三条:① 不用 `latest` 之类的浮动版本(`golang:1.23-alpine` 固定到 minor);② 测试里不写依赖时序的断言(所有等待都是「轮询到条件成立」);③ 失败时留下现场(容器日志、跑完的临时目录),否则重跑一次就复现不了。",
+                "followup": "追问常到「CI 该不该跑 e2e」。该,但要和单测分开成两个 job:混在一起会让「e2e 挂了」和「单测挂了」在页面上是一个红方块,而两者的处理方式完全不同(前者查环境,后者查代码)。"
+              },
+              {
+                "kind": "question",
+                "title": "Q144 · 测试覆盖率有意义吗?多少合适?",
+                "questionId": "go-index-Q144",
+                "intent": "这题的陷阱是两端:说「覆盖率没用」显得敷衍,说「越高越好」说明没做过工程。正解是「覆盖率是必要条件,不是充分条件,而且它衡量的是执行不是验证」。",
+                "points": [
+                  "覆盖率衡量的是「这行代码被执行过」,不是「这个行为被验证过」。一行 `if err != nil { return err }` 被走到,不代表有人检查过它返回的 err 对不对。所以**高覆盖率 + 弱断言 = 看起来很安全**。",
+                  "那它还有什么用?它能抓「整块新代码没测」——一个 800 行的新包覆盖率 0%,这一定有问题;而一个 88% 的包还有 12% 没覆盖,通常不是问题。**它是筛子,不是尺子。**",
+                  "门槛怎么定:低于当前值几个点,而不是贴着当前值。本项目当前 63.8%,门槛 60%。贴着当前值会让「加了一个没测的分支」飘红,而人第一反应是改门槛——那门槛就从「防线」变成了「待办清单」。",
+                  "0% 的包要分类看。`cmd/*`、`handler`、`model`、`storage` 的 0% 是合理的(由 e2e 或根本不需要覆盖);`config`、`backoff` 的 0% 是懒——它们的边界全是纯逻辑,不补没有借口。**说清楚「谁覆盖了它」,而不是「覆盖率低所以算了」。**",
+                  "一个更锋利的指标是「关键路径的分支覆盖」:本项目 `internal/service` 的 resolve 有四条出口(cache / negative / merged / db),四条都必须有用例,而且断言的是「四者之和 == 总请求数」——这个恒等式比任何百分比都更能抓住「加了出口忘了报数」。"
+                ],
+                "depth": "再深一层会问「怎么防止为了覆盖率写垃圾测试」。两个办法:① 要求测试名能说清「测的是什么行为」,`TestFoo2` 这种名字本身就是信号;② code review 时看断言而不是看覆盖率——一个有 5 个断言的测试和一个只有 `if err != nil { t.Fatal }` 的测试,覆盖率数字完全一样。",
+                "followup": "追问常到「集成测试算不算覆盖率」。算,但通常不计入 `go test -cover` 的数字(它不在同一个进程里跑)。所以 e2e 覆盖的 `handler` 在覆盖率报告里仍然是 0%——**这正是「覆盖率不等于验证」的最直接例子**。"
+              },
+              {
+                "kind": "question",
+                "title": "Q145 · Go 项目应该配哪些静态检查?",
+                "questionId": "go-index-Q145",
+                "intent": "答案不是「把 golangci-lint 的所有 linter 都打开」。分水岭在于「能说出每个检查挡住什么类的错误」,以及「哪些检查应该从警告升级成失败」。",
+                "points": [
+                  "`gofmt` 是底线,而且应该作为**失败**而不是警告。它的价值不在美观:格式不一致会让 diff 里混进无关改动,review 时看不出真正的变化。本项目这条门禁第一次跑就抓到 6 个存量文件从没被 gofmt 过。",
+                  "`go vet` 是官方的最小集,免费且零误报。它抓的是「几乎一定是 bug」的东西:`Printf` 参数不匹配、锁被复制、无用赋值、结构体标签写错。**任何项目都该开,没有理由不开。**",
+                  "`go build ./...` 也要跑,而且要跑**全部包**——`go run ./cmd/api` 只编译依赖到的包,一个没被引用的包坏了它发现不了。",
+                  "`staticcheck` 抓的是「vet 抓不到但确实有问题」的一类:无效的类型断言、永远不会走到的分支、可以简化但语义不变的写法。它的误报率比 vet 高,所以建议先作为警告跑一段时间,稳定后再升级成失败。本项目没引入它(依赖一个外部二进制),这一点在文档里写明,而不是假装「已经做了最全的检查」。",
+                  "`golangci-lint` 的价值是聚合 + 增量检查(只报改动行),但它也带来两个成本:一个几百 MB 的二进制,以及一份「谁都不敢改」的配置。**引入它之前先问:现在有哪些具体的错误是我们没挡住的?** 答不上来就先用 gofmt + vet + build。"
+                ],
+                "depth": "再深一层会问「lint 该阻塞合并吗」。判据是误报率:零误报的(go vet、gofmt、build)必须阻塞;有误报的(staticcheck 的部分规则)先警告,攒够经验再阻塞。一个经常被 `//nolint` 绕过的检查,实际上是在训练团队忽略检查。",
+                "followup": "追问常到「怎么让存量代码过门禁」。两步:先把检查跑一遍看存量有多少问题(本项目 6 个文件),一次性格式化提交;然后把检查加进 CI。反过来做(先加门禁再修)会让主干红一段时间,而红着的主干很快会被无视。"
+              },
+              {
+                "kind": "question",
+                "title": "Q147 · 团队协作中 Git 工作流该怎么选?",
+                "questionId": "go-index-Q147",
+                "intent": "这题和个人偏好无关,和工作流与「提交能不能单独构建」的关系有关。本项目有一个很硬的自定规则,值得作为例子讲。",
+                "points": [
+                  "三种主流:主干开发(trunk-based,小步提交 + 特性开关)、GitHub Flow(短分支 + PR)、Git Flow(develop/release/hotfix 多长分支)。选择的依据不是团队大小,而是**发布节奏**和**是否需要同时维护多个版本**。",
+                  "trunk-based 的前提是「分支存活时间以小时计」,它靠特性开关把「合并」和「上线」解耦。没有开关能力时硬上 trunk-based,结果是主干长期不可发布。",
+                  "Git Flow 的代价是分支合并的复杂度随分支数指数上升,它的适用场景是「同时维护 v1 和 v2」的库或客户端软件,不是持续部署的服务端。",
+                  "本项目的规则比工作流更具体:**一个阶段(或一个能独立讲清的能力块)一次提交**,信息末尾写 `阶段: <字母>/<名字>`;排提交顺序按**依赖拓扑**而不是时间;判断标准很硬——每个提交 `git worktree` 单独检出后 `go build ./...` 必须通过。",
+                  "这条规则解决的是一个具体问题:回滚。如果历史里有 5 个提交是「先写了 A,又把 A 拆成 B,再修 B」,那你要回滚到「只有 B」的状态时,git 帮不了你。**可回滚的前提是每个提交本身是一个完整状态**,而这需要纪律,不是工具。"
+                ],
+                "depth": "再深一层会问「A–D 四个阶段是补录的,这样还算数吗」。算,但要承认补录能还原「加了什么」,还原不了「当时为什么这么加」——所以本项目从阶段 E 起改成增量提交,并在 README 里把这段历史写清楚。诚实记录比完美历史更有价值。",
+                "followup": "追问常到「commit message 该写多细」。判据是「半年后的你能不能只看 message 就知道该不该动这段代码」。本项目的做法是:标题一行说做什么,正文说**为什么这样做而不是别样**,并在末尾标注阶段与验证结果。"
+              },
+              {
+                "kind": "question",
+                "title": "Q78 · 一台服务器最大能支撑多少个 TCP 连接?瓶颈在哪?",
+                "questionId": "go-index-Q78",
+                "intent": "这题是容量答辩的入门题。答对一个数字没用,要能说出「在哪个条件下这个数字会变」——而本项目正好有一个真实的瓶颈观测点。",
+                "points": [
+                  "理论上限由四元组决定:源 IP × 源端口 × 目标 IP × 目标端口。作为**服务端**,同一个监听端口可以被几万个客户端同时连(四元组不同即可),所以上限不是 65535,而是受资源限制。",
+                  "真正的四个瓶颈:① 文件描述符(`ulimit -n`,默认常见 1024,这是最常见的第一个墙);② 内存(每个连接的内核缓冲区 + 应用侧缓冲);③ 端口范围(作为**客户端**时才受限,`net.ipv4.ip_local_port_range` 默认约 2.8 万);④ CPU(中断、协议栈处理)。",
+                  "Go 服务还有一个应用层瓶颈:每个连接一个 goroutine,初始栈 2KB 但会增长。10 万连接不是问题(约 200MB 起),但每个连接上的 buffer(比如 `bufio.Reader` 默认 4KB)才是内存大头。",
+                  "本项目的观测点很具体:**跳转路径的瓶颈不在 CPU**。单次跳转实测约 200µs,纯计算能到 5000 QPS/核,但真实上限由「连接池 + Redis 往返」决定。所以容量规划不是算 CPU,而是算「目标 QPS × 每次请求的下游往返次数」,再对齐 `MaxOpenConns`、Redis 连接数、`ulimit -n`。",
+                  "`shortlink_http_requests_total` 与 `go_goroutines` 这两条曲线是判断依据:请求数涨而 goroutine 数不涨,说明连接在复用;goroutine 数涨得比请求快,说明有阻塞(或泄漏)。**指标的意义在于它们之间的关系,不在于单个值。**"
+                ],
+                "depth": "再深一层会问「TIME_WAIT 多了怎么办」。作为服务端,TIME_WAIT 出现在**主动关闭**的一方。Go 的 `http.Server` 由服务端主动关闭空闲连接(超过 `IdleTimeout`),所以 TIME_WAIT 会堆在服务端。缓解办法:让客户端先关(`Connection: close` 由客户端发起)、调大 `IdleTimeout` 减少关闭次数、以及 `tcp_tw_reuse`(只在客户端有效)。",
+                "followup": "追问常到「怎么压测出真实上限」。答:逐步加并发,同时看四个指标(QPS、p99、goroutine 数、下游连接数),找到**第一个开始非线性变化的那个**。本项目 `docs/04-observe.md` 里的分桶从 100µs 起,就是为了在这个量级上还能看出分位数变化——用 `DefBuckets`(起点 5ms)压测 200µs 的接口,p99 会恒等于 5ms,等于没有观测。"
+              },
+              {
+                "kind": "explore",
+                "title": "从 compose 到 K8s:这套门禁会被拆成几半",
+                "from": "这一节的门禁全部假设「一台机器、一个仓库、一条命令」。进 K8s 之后,一部分检查变成集群里的对象,另一部分仍然留在 CI —— 分界线不在技术上,而在「谁拥有那个环境」。",
+                "branches": [
+                  {
+                    "direction": "outward",
+                    "related": "K8s 的 Job / CronJob 与「迁移容器」的对应",
+                    "basis": "compose 的 `restart: \"no\"` + `service_completed_successfully` 在 K8s 里对应 Job + initContainer(或 Helm 的 pre-install hook)。语义一样:一个只跑一次、必须成功、失败要阻断后续的对象。",
+                    "shared": "都以「退出码」为唯一信号,都要求幂等(重跑不能出错),都需要一个「版本表」记录已经执行到哪一版。",
+                    "diff": "compose 的 `depends_on` 是**同一条命令内的顺序**,失败了整条 `up` 就停在那里,人可以立刻看到;K8s 的 Job 是**集群里的对象**,失败之后只会重试到 `backoffLimit`,而 Deployment 那边照样在滚动更新——除非你把「迁移成功」写成 initContainer 的前置条件,否则「代码上了、库没迁」是常态。",
+                    "value": "判据是「失败之后谁停下来」。compose 的答案是「整条命令停下」,K8s 的答案是「什么都没停,只是 Job 在重试」——所以要显式把迁移接进 Pod 的启动路径(initContainer),或者让 CD 流水线等 Job 成功再继续。[[同一句「迁移必须先成功」,在两种编排里是两份不同的配置。]]"
+                  },
+                  {
+                    "direction": "lateral",
+                    "related": "健康检查从 Dockerfile 的 HEALTHCHECK 变成三种探针",
+                    "basis": "Dockerfile 里的一条 HEALTHCHECK 在 K8s 里被拆成 liveness / readiness / startup,而且**容器自带的 HEALTHCHECK 在 K8s 里会被忽略**——这是个常见误解,以为写了就生效。",
+                    "shared": "探测的语义不变:进程活着、可以接流量、启动完了。变的只是「失败之后谁做什么」——重启、摘流量、还是不动作。",
+                    "diff": "Docker 的 HEALTHCHECK 只有一个动作:把容器标成 unhealthy,**没有任何东西会因此发生**(除非外面还有一层自动重启);K8s 的三种探针各自绑定了一个动作,失败会真的重启或摘流量。所以「探得深不深」在 Docker 里几乎无所谓,在 K8s 里是事故与设计的区别。",
+                    "value": "这解释了为什么本项目把探针设计成三层(`/healthz` 给 liveness、`/readyz` 给 readiness、`?deep=1` 只给人敲):同一份代码在两种编排下都能用,而且不用为了「容器里那条 HEALTHCHECK」牺牲探针语义。"
+                  }
+                ]
+              }
+            ],
+            "outline": [
+              "判断逻辑放脚本里,CI 只负责「在哪台机器上跑」",
+              "fast / full 分两档,因为提交前的检查必须足够便宜",
+              "跳过不等于通过:三种返回值,而不是一个布尔",
+              "门禁第一次跑就抓到 6 个存量文件不合 gofmt",
+              "一条测不出问题的用例,比没有用例更糟"
+            ],
+            "pitfalls": [
+              "把所有断言写进 CI 的 YAML。结果本地跑不了,于是没人跑;而一个长期飘红的流水线等于没有流水线。同一类问题还有「文档里的数字靠手同步」——它一定会漂移,漂移之后没人知道哪一句还可信。",
+              "环境不具备时返回 0。这是最坏的一种「通过」:它给出的信心是假的,而你要到出事那天才知道。",
+              "两种自欺:覆盖率门槛贴着当前值(当前 63.8% 就设 63%),加一个没测的分支就飘红,于是人第一反应是改门槛;用「跑一遍看总耗时散不散」去测随机性,测到的是测量噪声,把随机逻辑整个删掉它照样通过。"
+            ]
+          },
+          "questionIds": [
+            "go-index-Q146",
+            "go-index-Q144",
+            "go-index-Q145",
+            "go-index-Q147",
+            "go-index-Q78"
+          ],
+          "estimatedMinutes": 39
+        }
+      ],
+      "checkpoint": {
+        "questionIds": [
+          "go-index-Q32",
+          "go-index-Q25",
+          "go-index-Q89",
+          "go-index-Q157",
+          "go-index-Q143",
+          "go-index-Q99",
+          "go-index-Q146",
+          "go-index-Q144"
         ],
         "passRatio": 0.8
       }
