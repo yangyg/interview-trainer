@@ -19,7 +19,7 @@ const route = useRoute()
         :to="item.to"
         :class="
           cn(
-            'flex flex-col items-center gap-0.5 py-2 text-[10px] transition-colors',
+            'flex flex-col items-center gap-0.5 py-2 text-[11px] transition-colors',
             isNavActive(route, item)
               ? 'font-medium text-primary'
               : 'text-muted-foreground active:bg-accent/60',

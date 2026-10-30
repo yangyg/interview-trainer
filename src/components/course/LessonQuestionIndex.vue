@@ -82,7 +82,7 @@ function goTopic(it: Item) {
       <ListChecksIcon class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1">
         <span class="text-xs font-medium text-foreground">这课覆盖的 {{ items.length }} 道真题</span>
-        <span class="ml-2 text-[11px] text-muted-foreground">
+        <span class="ml-2 text-xs text-muted-foreground">
           <span v-if="counts.mastered">会 {{ counts.mastered }}</span>
           <span v-if="counts.fuzzy"> · 模糊 {{ counts.fuzzy }}</span>
           <span v-if="counts.wrong"> · 不会 {{ counts.wrong }}</span>
@@ -103,14 +103,14 @@ function goTopic(it: Item) {
         class="group flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted/60"
         @click="goTopic(it)"
       >
-        <span class="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+        <span class="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
           {{ it.no }}
         </span>
         <span class="min-w-0 flex-1 text-[13px] leading-5 text-foreground/85">
           {{ it.title }}
           <span
             v-if="it.focus"
-            class="ml-1.5 shrink-0 rounded border border-primary/30 bg-primary/[0.07] px-1 py-px align-middle text-[10px] text-primary"
+            class="ml-1.5 shrink-0 rounded border border-primary/30 bg-primary/[0.07] px-1 py-px align-middle text-[11px] text-primary"
           >
             正文精讲
           </span>
@@ -124,7 +124,7 @@ function goTopic(it: Item) {
           class="size-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground"
         />
       </button>
-      <p class="pt-1 text-[11px] leading-5 text-muted-foreground">
+      <p class="pt-1 text-xs leading-5 text-muted-foreground">
         点任一题回题库看完整答案。带「正文精讲」的题在本课里有逐句拆解,其余是吸收进讲解的;
         圆点是自评状态,灰色表示还没评过。
       </p>

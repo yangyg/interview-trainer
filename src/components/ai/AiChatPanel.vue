@@ -154,6 +154,7 @@ function render(content: string) {
       <div class="flex items-center gap-2 border-t p-3">
         <Input
           v-model="input"
+          aria-label="向 AI 提问"
           :placeholder="
             drillActive
               ? '输入你的回答…(Enter 发送)'

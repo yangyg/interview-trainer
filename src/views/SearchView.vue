@@ -76,7 +76,7 @@ function openQuestion(q: Question) {
     <div class="space-y-3">
       <div class="flex flex-wrap items-center gap-2">
         <div class="min-w-0 flex-1 basis-56">
-          <Input v-model="query" placeholder="搜索关键词,如:HashMap、GC、B+ 树…" class="h-9" autofocus />
+          <Input v-model="query" placeholder="搜索关键词,如:HashMap、GC、B+ 树…" class="h-9" aria-label="搜索题目" autofocus />
         </div>
         <Tabs v-model="lang">
           <TabsList>
@@ -90,7 +90,7 @@ function openQuestion(q: Question) {
 
       <div class="flex flex-wrap items-center gap-2">
         <Select v-model="topicId">
-          <SelectTrigger size="sm" class="w-44">
+          <SelectTrigger size="sm" class="w-44" aria-label="专题">
             <SelectValue placeholder="专题" />
           </SelectTrigger>
           <SelectContent>
@@ -99,7 +99,7 @@ function openQuestion(q: Question) {
           </SelectContent>
         </Select>
         <Select v-model="frequency">
-          <SelectTrigger size="sm" class="w-28">
+          <SelectTrigger size="sm" class="w-28" aria-label="频率">
             <SelectValue placeholder="频率" />
           </SelectTrigger>
           <SelectContent>
@@ -109,7 +109,7 @@ function openQuestion(q: Question) {
           </SelectContent>
         </Select>
         <Select v-model="statusFilter">
-          <SelectTrigger size="sm" class="w-28">
+          <SelectTrigger size="sm" class="w-28" aria-label="掌握状态">
             <SelectValue placeholder="状态" />
           </SelectTrigger>
           <SelectContent>

@@ -195,7 +195,7 @@ onBeforeUnmount(stopTimer)
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">专题</p>
             <Select v-model="topicId">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="专题">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -207,7 +207,7 @@ onBeforeUnmount(stopTimer)
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">频率</p>
             <Select v-model="frequency">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="频率">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -220,7 +220,7 @@ onBeforeUnmount(stopTimer)
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">题量</p>
             <Select v-model="count">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="题量">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -233,7 +233,7 @@ onBeforeUnmount(stopTimer)
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">每题限时</p>
             <Select v-model="timerSec">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="每题限时">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -330,6 +330,7 @@ onBeforeUnmount(stopTimer)
               <span :class="timeUp ? 'font-medium text-red-500' : ''">
                 {{ timeUp ? '时间到' : fmtTime(timeLeft) }}
               </span>
+              <span class="sr-only" role="status">{{ timeUp ? '本题时间到' : '' }}</span>
             </div>
           </div>
           <div v-if="Number(timerSec) > 0" class="h-1 overflow-hidden rounded-full bg-muted">
@@ -347,14 +348,14 @@ onBeforeUnmount(stopTimer)
             <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
               <span class="text-xs text-muted-foreground">对照要点自评(计入学习记录)</span>
               <div class="flex gap-2">
-                <Button size="sm" variant="outline" class="border-emerald-500/40 text-emerald-600 dark:text-emerald-400" @click="grade('mastered')">
+                <Button size="sm" variant="outline" class="status-mastered" @click="grade('mastered')">
                   <CheckCircle2Icon />
                   会
                 </Button>
-                <Button size="sm" variant="outline" class="border-amber-500/40 text-amber-600 dark:text-amber-400" @click="grade('fuzzy')">
+                <Button size="sm" variant="outline" class="status-fuzzy" @click="grade('fuzzy')">
                   模糊
                 </Button>
-                <Button size="sm" variant="outline" class="border-red-500/40 text-red-600 dark:text-red-400" @click="grade('wrong')">
+                <Button size="sm" variant="outline" class="status-wrong" @click="grade('wrong')">
                   <XCircleIcon />
                   不会
                 </Button>

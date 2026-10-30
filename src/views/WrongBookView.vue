@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRightIcon, NotebookIcon, RefreshCwIcon, Trash2Icon } from '@lucide/vue'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import EmptyState from '@/components/EmptyState.vue'
@@ -26,6 +36,13 @@ function openQuestion(q: Question) {
 
 function restudy() {
   router.push({ name: 'flashcards', query: { pool: 'wrong' } })
+}
+
+const pendingRemove = ref<string | null>(null)
+
+function confirmRemove() {
+  if (pendingRemove.value) progress.removeRecord(pendingRemove.value)
+  pendingRemove.value = null
 }
 </script>
 
@@ -74,7 +91,7 @@ function restudy() {
                 <template v-if="progress.recordOf(q.id)"> · 下次复习 {{ dueText(progress.recordOf(q.id)!.due) }}</template>
               </p>
             </div>
-            <Button variant="ghost" size="icon-sm" title="移出错题本" @click="progress.removeRecord(q.id)">
+            <Button variant="ghost" size="icon-sm" title="移出错题本" @click="pendingRemove = q.id">
               <Trash2Icon />
             </Button>
             <Button variant="ghost" size="icon-sm" title="查看详解" @click="openQuestion(q)">
@@ -84,5 +101,22 @@ function restudy() {
         </CardContent>
       </Card>
     </template>
+
+    <AlertDialog :open="!!pendingRemove" @update:open="(v) => !v && (pendingRemove = null)">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>把这道题移出错题本?</AlertDialogTitle>
+          <AlertDialogDescription>
+            移出后这道题不再出现在错题本,但已有的自评记录仍会按间隔重复推送。可以重新自评「不会」再加回来。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction class="bg-destructive text-white hover:bg-destructive/90" @click="confirmRemove">
+            移出
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

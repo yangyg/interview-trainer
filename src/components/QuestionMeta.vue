@@ -14,9 +14,9 @@ const props = defineProps<{
 const progress = useProgressStore()
 
 const statusMeta: Record<CardStatus, { label: string; cls: string }> = {
-  mastered: { label: '已掌握', cls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  fuzzy: { label: '模糊', cls: 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  wrong: { label: '不会', cls: 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400' },
+  mastered: { label: '已掌握', cls: 'status-mastered' },
+  fuzzy: { label: '模糊', cls: 'status-fuzzy' },
+  wrong: { label: '不会', cls: 'status-wrong' },
 }
 
 const status = computed(() => {
@@ -30,7 +30,7 @@ const status = computed(() => {
     <Badge
       v-if="question.frequency"
       variant="outline"
-      class="border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400"
+      class="border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-400"
       :title="`考频热度 ${question.frequency}`"
     >
       <FlameIcon />

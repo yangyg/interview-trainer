@@ -113,13 +113,13 @@ function goLesson(lessonId: string) {
                 <h1 class="text-balance text-xl font-semibold tracking-tight sm:text-2xl">
                   {{ summary.title }}
                 </h1>
-                <Badge variant="outline" class="text-[10px] text-foreground/70">
+                <Badge variant="outline" class="text-xs text-foreground/70">
                   {{ LEVEL_LABEL[summary.level] }}
                 </Badge>
                 <Badge
                   v-if="done"
                   variant="outline"
-                  class="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400"
+                  class="border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400"
                 >
                   <CircleCheckIcon />
                   已完成
@@ -128,7 +128,7 @@ function goLesson(lessonId: string) {
               <p class="mt-1.5 max-w-prose text-pretty text-sm leading-relaxed text-muted-foreground">
                 {{ summary.subtitle }}
               </p>
-              <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+              <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
                 <span class="inline-flex items-center gap-1">
                   <LayersIcon class="size-3" />{{ summary.stageCount }} 阶段
                 </span>
@@ -148,7 +148,7 @@ function goLesson(lessonId: string) {
               </Button>
               <div class="flex items-center gap-2">
                 <Progress :model-value="progress.pct" class="h-1.5 flex-1 sm:w-28" />
-                <span class="text-[11px] tabular-nums text-muted-foreground">
+                <span class="text-xs tabular-nums text-muted-foreground">
                   {{ progress.done }}/{{ progress.total }}
                 </span>
               </div>
@@ -187,7 +187,7 @@ function goLesson(lessonId: string) {
                 @click="router.push({ name: 'course-detail', params: { courseId: p.id } })"
               >
                 <span
-                  class="flex size-6 shrink-0 items-center justify-center rounded text-[10px] font-bold text-white"
+                  class="flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold text-white"
                   :class="LANG_META[p.language].badge"
                 >
                   {{ LANG_META[p.language].short }}
@@ -199,7 +199,7 @@ function goLesson(lessonId: string) {
             <p v-else class="text-xs leading-relaxed text-muted-foreground">
               无需前置,直接从这里开始。
             </p>
-            <p class="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+            <p class="pt-1 text-xs leading-relaxed text-muted-foreground">
               前置不是硬门槛:课时可在任意时刻单独打开,只是顺序推进时会更顺。
             </p>
           </CardContent>
@@ -209,7 +209,7 @@ function goLesson(lessonId: string) {
       <!-- 大纲 -->
       <div class="mt-5 mb-2.5 flex items-center justify-between">
         <h2 class="text-sm font-semibold">课程大纲</h2>
-        <span class="text-[11px] text-muted-foreground">{{ summary.stageCount }} 个阶段 · 逐段解锁</span>
+        <span class="text-xs text-muted-foreground">{{ summary.stageCount }} 个阶段 · 逐段解锁</span>
       </div>
 
       <div v-if="loadError" class="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm">

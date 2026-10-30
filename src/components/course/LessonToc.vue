@@ -40,14 +40,14 @@ onBeforeUnmount(() => window.removeEventListener('scroll', update))
 
 <template>
   <nav v-if="items.length" class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
-    <p class="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+    <p class="mb-2 text-xs font-medium text-muted-foreground">
       本课目录
     </p>
     <ul class="space-y-0.5">
       <li v-for="(it, i) in items" :key="it.id">
         <button
           type="button"
-          class="block w-full border-l-2 py-1 pl-2.5 text-left text-[11px] leading-4 transition-colors"
+          class="block w-full border-l-2 py-1 pl-2.5 text-left text-xs leading-5 transition-colors"
           :class="
             i === active
               ? 'border-primary font-medium text-foreground'

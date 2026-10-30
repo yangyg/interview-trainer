@@ -143,7 +143,7 @@ function langCard(language: Language) {
       >
         <div class="max-w-2xl">
           <p
-            class="mb-2 font-mono text-[11px] uppercase tracking-[0.24em] text-muted-foreground"
+            class="mb-2 text-xs tracking-wide text-muted-foreground"
           >
             Interview Trainer ·
             {{
@@ -178,9 +178,7 @@ function langCard(language: Language) {
 
     <!-- 指标条 -->
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Card
-        class="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-      >
+      <Card>
         <CardContent class="p-4">
           <div class="flex items-center justify-between">
             <p class="text-xs text-muted-foreground">题库总量</p>
@@ -192,9 +190,7 @@ function langCard(language: Language) {
           <p class="text-xs text-muted-foreground">{{ countLine }}</p>
         </CardContent>
       </Card>
-      <Card
-        class="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-      >
+      <Card>
         <CardContent class="p-4">
           <div class="flex items-center justify-between">
             <p class="text-xs text-muted-foreground">已掌握</p>
@@ -209,11 +205,12 @@ function langCard(language: Language) {
           />
         </CardContent>
       </Card>
-      <Card
-        class="cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-500/40 hover:shadow-md"
-        @click="router.push({ name: 'flashcards', query: { pool: 'due' } })"
-      >
-        <CardContent class="p-4">
+      <Card class="overflow-hidden p-0 transition-colors hover:border-orange-500/40">
+        <button
+          type="button"
+          class="flex h-full w-full flex-1 flex-col rounded-xl p-4 text-left transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          @click="router.push({ name: 'flashcards', query: { pool: 'due' } })"
+        >
           <div class="flex items-center justify-between">
             <p class="text-xs text-muted-foreground">今日待复习</p>
             <AlarmClockIcon class="size-4 text-orange-500" />
@@ -222,11 +219,9 @@ function langCard(language: Language) {
             {{ progress.dueIds.length }}
           </p>
           <p class="text-xs text-muted-foreground">点击开始复习到期卡片</p>
-        </CardContent>
+        </button>
       </Card>
-      <Card
-        class="transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-      >
+      <Card>
         <CardContent class="p-4">
           <div class="flex items-center justify-between">
             <p class="text-xs text-muted-foreground">连续学习</p>
@@ -252,7 +247,7 @@ function langCard(language: Language) {
           <RouteIcon class="size-5" />
         </span>
         <div class="min-w-0 flex-1">
-          <p class="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <p class="text-xs text-muted-foreground">
             {{ resumeLesson ? "继续上次的课时" : "从学习路径开始" }}
           </p>
           <p class="mt-0.5 truncate text-sm font-medium">
@@ -261,7 +256,7 @@ function langCard(language: Language) {
           </p>
           <div class="mt-2 flex items-center gap-2">
             <Progress :model-value="resumeProgress.pct" class="h-1.5 max-w-56" />
-            <span class="text-[11px] tabular-nums text-muted-foreground">
+            <span class="text-xs tabular-nums text-muted-foreground">
               {{ resumeProgress.done }}/{{ resumeProgress.total }} 课时
             </span>
           </div>
@@ -287,7 +282,7 @@ function langCard(language: Language) {
       <Card
         v-for="lang in LANGUAGES"
         :key="lang"
-        class="overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+        class="overflow-hidden "
       >
         <CardHeader class="pb-3">
           <div class="flex items-center gap-2.5">
@@ -313,13 +308,13 @@ function langCard(language: Language) {
             v-for="t in langCard(lang).topics"
             :key="t.id"
             type="button"
-            class="group rounded-md border px-2.5 py-1.5 text-left transition-all hover:border-foreground/20 hover:bg-accent"
+            class="group rounded-md border px-2.5 py-1.5 text-left transition-all  hover:bg-accent"
             @click="goTopic(t.id)"
           >
             <span class="flex items-center gap-1.5 text-xs font-medium">
               {{ t.name }}
               <span
-                class="text-[10px] tabular-nums"
+                class="text-xs tabular-nums"
                 :class="
                   topicLearned(t.id) === t.count
                     ? 'text-emerald-500'
@@ -338,15 +333,15 @@ function langCard(language: Language) {
     <div class="grid gap-3 lg:grid-cols-5">
       <!-- 左侧不参与行高计算:行高由右侧资料卡决定,列表在剩余高度内滚动,
            避免 30 条内容把整行撑长、也不留下卡片内空白 -->
-      <Card class="lg:col-span-3 lg:[contain:size]">
+      <Card class="min-w-0 lg:col-span-3 lg:[contain:size]">
         <CardHeader class="pb-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <CardTitle class="flex items-center gap-2 text-base">
               <FlameIcon class="size-4 text-orange-500" />
               高频题速查
             </CardTitle>
-            <Tabs v-model="topTab">
-              <TabsList class="h-7">
+            <Tabs v-model="topTab" class="min-w-0 max-w-full">
+              <TabsList class="h-auto max-w-full flex-wrap justify-start">
                 <TabsTrigger
                   v-for="l in topLangs"
                   :key="l"
@@ -371,11 +366,11 @@ function langCard(language: Language) {
               @click="goTop(item)"
             >
               <span
-                class="flex size-5.5 shrink-0 items-center justify-center rounded text-[10px] font-bold"
+                class="flex size-5.5 shrink-0 items-center justify-center rounded text-xs font-bold"
                 :class="
                   cn(
                     item.rank <= 3
-                      ? 'bg-orange-500/15 text-orange-600 dark:text-orange-400'
+                      ? 'bg-orange-500/10 text-orange-700 dark:text-orange-400'
                       : 'bg-muted text-muted-foreground',
                   )
                 "
@@ -400,7 +395,7 @@ function langCard(language: Language) {
         </CardContent>
       </Card>
 
-      <Card class="lg:col-span-2">
+      <Card class="min-w-0 lg:col-span-2">
         <CardHeader class="pb-2">
           <CardTitle class="flex items-center gap-2 text-base">
             <FileTextIcon class="size-4 text-muted-foreground" />
@@ -417,7 +412,7 @@ function langCard(language: Language) {
             @click="openDoc(d.id)"
           >
             <span
-              class="flex size-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white"
+              class="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-bold text-white"
               :class="LANG_META[d.language].badge"
             >
               {{ LANG_META[d.language].short }}

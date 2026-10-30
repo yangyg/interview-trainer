@@ -73,7 +73,7 @@ function keepAll(): number {
     class="command-dialog"
     :filter-function="keepAll"
   >
-    <CommandInput v-model="query" placeholder="搜索题目 / 关键词,如:HashMap、GMP、索引" />
+    <CommandInput v-model="query" aria-label="搜索题目或关键词" placeholder="搜索题目 / 关键词,如:HashMap、GMP、索引" />
     <CommandList class="max-h-[60vh]">
       <CommandGroup v-if="!query" heading="快捷导航">
         <CommandItem v-for="item in MAIN_NAV" :key="item.key" :value="item.label" @select="go(item.to)">

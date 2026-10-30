@@ -93,10 +93,8 @@ function stop() {
   flipped.value = false
 }
 
-function grade(result: GradeResult) {
-  const q = session.value?.[index.value]
-  if (!q) return
-  progress.grade(q.id, result)
+/** 只做「记账 + 翻页」:进度已由 StatusActions 内部写入,这里不能重复写 */
+function advance(result: GradeResult) {
   results.value[result] += 1
   index.value += 1
   flipped.value = false
@@ -109,19 +107,36 @@ const sessionProgress = computed(() =>
   session.value ? Math.round((Math.min(index.value, session.value.length) / session.value.length) * 100) : 0,
 )
 
+/** 输入框、可编辑区与对话框内部不抢键;空格留给聚焦的按钮/链接自己触发 */
+function shouldIgnoreKey(e: KeyboardEvent): boolean {
+  if (e.metaKey || e.ctrlKey || e.altKey) return true
+  const el = e.target as HTMLElement | null
+  if (!(el instanceof HTMLElement)) return false
+  if (el.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="dialog"], [role="alertdialog"]')) return true
+  return e.code === 'Space' && !!el.closest('button, a, [role="button"], [role="tab"], [role="switch"], [role="checkbox"]')
+}
+
 // 键盘操作:空格翻卡,1/2/3 评分
 function onKeydown(e: KeyboardEvent) {
   if (!session.value || finished.value) return
+  if (shouldIgnoreKey(e)) return
   if (e.code === 'Space') {
     e.preventDefault()
     if (!flipped.value) flipped.value = true
     return
   }
-  if (flipped.value) {
-    if (e.key === '1') grade('mastered')
-    else if (e.key === '2') grade('fuzzy')
-    else if (e.key === '3') grade('wrong')
-  }
+  if (!flipped.value) return
+  const q = session.value[index.value]
+  if (!q) return
+  if (e.key === '1') gradeByKey(q.id, 'mastered')
+  else if (e.key === '2') gradeByKey(q.id, 'fuzzy')
+  else if (e.key === '3') gradeByKey(q.id, 'wrong')
+}
+
+/** 键盘路径没有 StatusActions 代写,这里补一次(且只补一次) */
+function gradeByKey(questionId: string, result: GradeResult) {
+  progress.grade(questionId, result)
+  advance(result)
 }
 
 onMounted(() => {
@@ -175,7 +190,7 @@ onUnmounted(() => {
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">专题</p>
             <Select v-model="topicId">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="专题">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -187,7 +202,7 @@ onUnmounted(() => {
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">频率</p>
             <Select v-model="frequency">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="频率">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -200,7 +215,7 @@ onUnmounted(() => {
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">卡片池</p>
             <Select v-model="pool">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="卡片池">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -215,7 +230,7 @@ onUnmounted(() => {
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">数量</p>
             <Select v-model="count">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="数量">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -229,7 +244,7 @@ onUnmounted(() => {
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">顺序</p>
             <Select v-model="order">
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="顺序">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -310,7 +325,7 @@ onUnmounted(() => {
               <AnswerBody :question="current" />
               <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
                 <span class="text-xs text-muted-foreground">自评(快捷键 1 / 2 / 3)</span>
-                <StatusActions :question-id="current.id" compact @graded="grade" />
+                <StatusActions :question-id="current.id" compact @graded="advance" />
               </div>
             </div>
             <div v-else key="front" class="flex flex-col items-center gap-3 py-10">

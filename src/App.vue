@@ -25,10 +25,15 @@ courseStore.init()
 
 const searchOpen = ref(false)
 const mobileNavOpen = ref(false)
+const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
 </script>
 
 <template>
   <div class="min-h-svh bg-background">
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-ring"
+    >跳到正文</a>
     <!-- 桌面侧边栏 -->
     <aside class="fixed inset-y-0 left-0 z-30 hidden w-60 border-r bg-sidebar lg:block">
       <AppSidebar />
@@ -39,7 +44,7 @@ const mobileNavOpen = ref(false)
         <!-- 移动端抽屉导航 -->
         <Sheet v-model:open="mobileNavOpen">
           <SheetTrigger as-child>
-            <Button variant="ghost" size="icon" class="lg:hidden">
+            <Button variant="ghost" size="icon" class="lg:hidden" aria-label="打开导航">
               <MenuIcon />
             </Button>
           </SheetTrigger>
@@ -58,7 +63,7 @@ const mobileNavOpen = ref(false)
         >
           <SearchIcon class="size-4" />
           <span>搜索题目…</span>
-          <kbd class="ml-auto hidden rounded border bg-background px-1.5 font-mono text-[10px] sm:inline-block">Ctrl K</kbd>
+          <kbd class="ml-auto hidden rounded border bg-background px-1.5 font-mono text-[11px] sm:inline-block">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
         </button>
 
         <Button variant="ghost" size="icon" :title="isDark ? '切换亮色' : '切换暗色'" @click="toggle">
@@ -67,7 +72,7 @@ const mobileNavOpen = ref(false)
         </Button>
       </header>
 
-      <main class="mx-auto w-full max-w-6xl px-4 pb-20 py-6 sm:px-6 md:pb-6">
+      <main id="main-content" tabindex="-1" class="mx-auto w-full max-w-6xl px-4 pb-20 py-6 sm:px-6 md:pb-6">
         <div
           v-if="storageIssue"
           role="alert"

@@ -18,12 +18,12 @@ const showSolution = ref(false)
   <section class="rounded-xl border border-border/80 bg-card p-4">
     <div class="flex flex-wrap items-center gap-2">
       <PencilRulerIcon class="size-3.5 shrink-0 text-primary" />
-      <span class="text-[11px] font-medium uppercase tracking-wider text-primary">手写代码</span>
-      <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase leading-none text-muted-foreground">
+      <span class="text-xs font-medium text-primary">手写代码</span>
+      <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] leading-none text-muted-foreground">
         {{ block.lang }}
       </span>
     </div>
-    <h3 class="mt-1.5 text-[15px] font-semibold leading-6"><RichText :text="block.title" /></h3>
+    <h2 class="mt-1.5 text-[15px] font-semibold leading-6"><RichText :text="block.title" /></h2>
 
     <!-- 题干:面试官会怎么问 -->
     <p class="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px] leading-6 text-foreground/85">
@@ -32,7 +32,7 @@ const showSolution = ref(false)
 
     <!-- 方法签名:先定接口,再写实现 -->
     <div v-if="block.signature" class="mt-2.5">
-      <p class="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <p class="mb-1 text-xs font-medium text-muted-foreground">
         方法签名
       </p>
       <pre
@@ -42,14 +42,14 @@ const showSolution = ref(false)
 
     <!-- 思路:按顺序讲给面试官听 -->
     <div class="mt-3">
-      <p class="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <p class="mb-1.5 text-xs font-medium text-muted-foreground">
         思路(边写边说)
       </p>
       <ol class="space-y-0">
         <li v-for="(s, i) in block.plan" :key="i" class="flex gap-2.5">
           <div class="flex flex-col items-center">
             <span
-              class="mt-0.5 flex size-4.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold tabular-nums text-primary"
+              class="mt-0.5 flex size-4.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold tabular-nums text-primary"
             >
               {{ i + 1 }}
             </span>
@@ -80,7 +80,7 @@ const showSolution = ref(false)
         >
           <CodeIcon class="size-3 shrink-0 text-muted-foreground" />
           骨架(留了 TODO,先自己填)
-          <span class="ml-auto text-[10px] font-normal text-muted-foreground">
+          <span class="ml-auto text-[11px] font-normal text-muted-foreground">
             {{ showSkeleton ? '收起' : '展开' }}
           </span>
         </button>
@@ -99,7 +99,7 @@ const showSolution = ref(false)
         >
           <CodeIcon class="size-3 shrink-0" />
           参考实现
-          <span class="ml-auto text-[10px] font-normal text-muted-foreground">
+          <span class="ml-auto text-[11px] font-normal text-muted-foreground">
             {{ showSolution ? '收起' : '展开' }}
           </span>
         </button>
@@ -115,7 +115,7 @@ const showSolution = ref(false)
       v-if="block.complexity"
       class="mt-2.5 flex flex-wrap items-baseline gap-x-1.5 rounded-md bg-muted/40 px-2.5 py-1.5 text-[12px] leading-5"
     >
-      <span class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span class="text-xs font-medium text-muted-foreground">
         复杂度
       </span>
       <RichText :text="block.complexity" />

@@ -232,7 +232,7 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
             </TabsList>
           </Tabs>
           <Select :model-value="topicId" @update:model-value="topicId = String($event)">
-            <SelectTrigger class="min-w-0 flex-1">
+            <SelectTrigger class="min-w-0 flex-1" aria-label="专题">
               <SelectValue placeholder="选择专题" />
             </SelectTrigger>
             <SelectContent>
@@ -300,10 +300,10 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
         <template v-else-if="currentTopic">
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <div class="min-w-0 flex-1 basis-44">
-              <Input v-model="textFilter" placeholder="按标题过滤…" class="h-8" />
+              <Input v-model="textFilter" placeholder="按标题过滤…" class="h-8" aria-label="按标题过滤" />
             </div>
             <Select v-model="chapterFilter">
-              <SelectTrigger size="sm" class="w-36">
+              <SelectTrigger size="sm" class="w-36" aria-label="章节">
                 <SelectValue placeholder="章节" />
               </SelectTrigger>
               <SelectContent>
@@ -314,7 +314,7 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
               </SelectContent>
             </Select>
             <Select v-model="frequencyFilter">
-              <SelectTrigger size="sm" class="w-28">
+              <SelectTrigger size="sm" class="w-28" aria-label="频率">
                 <SelectValue placeholder="频率" />
               </SelectTrigger>
               <SelectContent>
@@ -324,7 +324,7 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
               </SelectContent>
             </Select>
             <Select v-model="statusFilter">
-              <SelectTrigger size="sm" class="w-28">
+              <SelectTrigger size="sm" class="w-28" aria-label="掌握状态">
                 <SelectValue placeholder="状态" />
               </SelectTrigger>
               <SelectContent>

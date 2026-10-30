@@ -74,13 +74,13 @@ function replay() {
       </CardHeader>
       <CardContent class="space-y-3">
         <div class="flex flex-wrap gap-2 text-sm">
-          <Badge variant="outline" class="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          <Badge variant="outline" class="status-mastered">
             会 {{ session.counts.value.mastered }}
           </Badge>
-          <Badge variant="outline" class="border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+          <Badge variant="outline" class="status-fuzzy">
             模糊 {{ session.counts.value.fuzzy }}
           </Badge>
-          <Badge variant="outline" class="border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400">
+          <Badge variant="outline" class="status-wrong">
             不会 {{ session.counts.value.wrong }}
           </Badge>
         </div>
@@ -109,7 +109,7 @@ function replay() {
         <CardHeader class="gap-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <QuestionMeta :question="current" />
-            <Badge variant="outline" class="font-mono text-[10px] text-muted-foreground">
+            <Badge variant="outline" class="font-mono text-xs text-muted-foreground">
               {{ current.no }}
             </Badge>
           </div>
@@ -147,7 +147,7 @@ function replay() {
           <ArrowLeftIcon />
           上一题
         </Button>
-        <span class="text-[11px] text-muted-foreground">
+        <span class="text-xs text-muted-foreground">
           本组已自评 {{ session.reviewedCount.value }} 题
         </span>
         <Button

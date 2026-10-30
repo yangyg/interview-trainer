@@ -34,7 +34,7 @@ const forwarded = useForwardPropsEmits(props, emits)
           <button
             type="button"
             aria-label="关闭搜索"
-            class="absolute top-1 right-1.5 z-10 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            class="absolute top-1 right-1.5 z-10 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/80"
           >
             <XIcon class="size-4" />
           </button>

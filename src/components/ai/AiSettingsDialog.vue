@@ -93,7 +93,7 @@ async function saveAndTest() {
             :model-value="form.providerId"
             @update:model-value="applyPreset(String($event))"
           >
-            <SelectTrigger class="w-full">
+            <SelectTrigger class="w-full" aria-label="供应商预设">
               <SelectValue placeholder="选择供应商" />
             </SelectTrigger>
             <SelectContent>
@@ -121,7 +121,7 @@ async function saveAndTest() {
               :model-value="form.type"
               @update:model-value="pickType(String($event))"
             >
-              <SelectTrigger class="w-full">
+              <SelectTrigger class="w-full" aria-label="协议类型">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -132,8 +132,8 @@ async function saveAndTest() {
             </Select>
           </div>
           <div class="space-y-1.5">
-            <Label>模型名</Label>
-            <Input v-model="form.model" placeholder="如 deepseek-chat" list="ai-model-hints" />
+            <Label for="ai-model">模型名</Label>
+            <Input id="ai-model" v-model="form.model" placeholder="如 deepseek-chat" list="ai-model-hints" />
             <datalist id="ai-model-hints">
               <option v-for="p in AI_PRESETS" :key="p.id" :value="p.model" />
             </datalist>
@@ -141,8 +141,9 @@ async function saveAndTest() {
         </div>
 
         <div class="space-y-1.5">
-          <Label>API Key</Label>
+          <Label for="ai-api-key">API Key</Label>
           <Input
+            id="ai-api-key"
             v-model="form.apiKey"
             type="password"
             :placeholder="currentPreset()?.needsKey === false ? '本地服务无需 Key' : 'sk-…'"
@@ -155,12 +156,12 @@ async function saveAndTest() {
 
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1.5">
-            <Label>Base URL</Label>
-            <Input v-model="form.baseUrl" placeholder="https://api.deepseek.com/v1" />
+            <Label for="ai-base-url">Base URL</Label>
+            <Input id="ai-base-url" v-model="form.baseUrl" placeholder="https://api.deepseek.com/v1" />
           </div>
           <div class="space-y-1.5">
-            <Label>温度(0~1)</Label>
-            <Input v-model.number="form.temperature" type="number" min="0" max="1" step="0.1" />
+            <Label for="ai-temperature">温度(0~1)</Label>
+            <Input id="ai-temperature" v-model.number="form.temperature" type="number" min="0" max="1" step="0.1" />
           </div>
         </div>
 

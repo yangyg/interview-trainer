@@ -31,12 +31,12 @@ function open() {
 <template>
   <button
     type="button"
-    class="group flex h-full flex-col rounded-xl border bg-card p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md"
+    class="group flex h-full flex-col rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/25"
     @click="open"
   >
     <div class="flex items-start gap-2.5">
       <span
-        class="flex size-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-white"
+        class="flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
         :class="LANG_META[course.language].badge"
       >
         {{ LANG_META[course.language].short }}
@@ -44,7 +44,7 @@ function open() {
       <div class="min-w-0 flex-1">
         <div class="flex items-start justify-between gap-2">
           <p class="text-sm font-semibold leading-snug">{{ course.title }}</p>
-          <Badge variant="outline" class="shrink-0 px-1.5 py-0 text-[10px] text-foreground/70">
+          <Badge variant="outline" class="shrink-0 px-1.5 py-0 text-xs text-foreground/70">
             {{ LEVEL_LABEL[course.level] }}
           </Badge>
         </div>
@@ -54,7 +54,7 @@ function open() {
       </div>
     </div>
 
-    <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+    <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
       <span class="inline-flex items-center gap-1">
         <LayersIcon class="size-3" />{{ course.stageCount }} 阶段
       </span>
@@ -69,7 +69,7 @@ function open() {
 
     <div class="mt-3 flex items-center gap-2">
       <Progress :model-value="pct.pct" class="h-1.5" />
-      <span class="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+      <span class="shrink-0 text-xs tabular-nums text-muted-foreground">
         {{ pct.done }}/{{ pct.total }}
       </span>
     </div>

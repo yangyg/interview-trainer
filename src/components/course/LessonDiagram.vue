@@ -139,14 +139,14 @@ onUnmounted(stopSeq)
         >
           <span
             v-if="diagram.direction !== 'v'"
-            class="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[10px] font-semibold tabular-nums text-primary sm:mb-0.5"
+            class="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[11px] font-semibold tabular-nums text-primary sm:mb-0.5"
           >
             {{ i + 1 }}
           </span>
           <span class="min-w-0 text-xs font-medium leading-snug">
             <RichText :text="item.label" />
           </span>
-          <span v-if="item.note" class="min-w-0 text-[11px] leading-snug text-muted-foreground">
+          <span v-if="item.note" class="min-w-0 text-xs leading-snug text-muted-foreground">
             <RichText :text="item.note" />
           </span>
         </div>
@@ -180,7 +180,7 @@ onUnmounted(stopSeq)
         </span>
         <span
           v-if="item.note"
-          class="min-w-0 flex-[1.4] text-right text-[11px] leading-snug text-muted-foreground"
+          class="min-w-0 flex-[1.4] text-right text-xs leading-snug text-muted-foreground"
         >
           <RichText :text="item.note" />
         </span>
@@ -259,7 +259,7 @@ onUnmounted(stopSeq)
       </table>
       </div>
       <!-- 手机上表格会横向滚动,不给提示的话右半边容易被当成「没有内容」 -->
-      <p class="mt-1.5 text-[10px] text-muted-foreground sm:hidden">← 左右滑动看完整表格 →</p>
+      <p class="mt-1.5 text-xs text-muted-foreground sm:hidden">← 左右滑动看完整表格 →</p>
     </div>
 
     <!-- memory:内存区域 + 槽位 + 引用指向 -->
@@ -275,7 +275,7 @@ onUnmounted(stopSeq)
       >
         <div class="border-b border-border/50 px-2 py-1">
           <p class="text-[11px] font-semibold leading-tight"><RichText :text="region.name" /></p>
-          <p v-if="region.note" class="mt-0.5 text-[10px] leading-tight text-muted-foreground">
+          <p v-if="region.note" class="mt-0.5 text-xs leading-tight text-muted-foreground">
             <RichText :text="region.note" />
           </p>
         </div>
@@ -298,20 +298,20 @@ onUnmounted(stopSeq)
               </span>
               <span
                 v-if="slot.value"
-                class="min-w-0 shrink text-right font-mono text-[10px] leading-tight text-muted-foreground [overflow-wrap:anywhere]"
+                class="min-w-0 shrink text-right font-mono text-[11px] leading-tight text-muted-foreground [overflow-wrap:anywhere]"
               >
                 <RichText :text="slot.value" />
               </span>
             </div>
             <p
               v-if="slot.ref"
-              class="mt-1 flex items-center gap-0.5 text-[10px] leading-tight text-primary"
+              class="mt-1 flex items-center gap-0.5 text-[11px] leading-tight text-primary"
             >
               <CornerDownRightIcon class="size-2.5 shrink-0" />
               指向 <RichText :text="slot.ref" />
             </p>
           </div>
-          <p v-if="!region.slots.length" class="px-1 py-1 text-[10px] text-muted-foreground">—</p>
+          <p v-if="!region.slots.length" class="px-1 py-1 text-[11px] text-muted-foreground">—</p>
         </div>
       </div>
     </div>
@@ -322,21 +322,21 @@ onUnmounted(stopSeq)
         <span
           v-for="(a, i) in diagram.actors"
           :key="i"
-          class="rounded bg-muted px-2 py-1 font-mono text-[10px] font-medium leading-none text-muted-foreground"
+          class="rounded bg-muted px-2 py-1 font-mono text-[11px] font-medium leading-none text-muted-foreground"
         >
           {{ a }}
         </span>
         <span class="ml-auto flex items-center gap-1">
           <span
             v-if="seqShown !== Number.POSITIVE_INFINITY"
-            class="font-mono text-[10px] tabular-nums text-muted-foreground"
+            class="font-mono text-[11px] tabular-nums text-muted-foreground"
           >
             {{ Math.min(seqShown, seqTotal) }}/{{ seqTotal }}
           </span>
           <button
             v-if="seqPlaying"
             type="button"
-            class="inline-flex items-center gap-1 rounded-md border border-border/70 bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            class="inline-flex items-center gap-1 rounded-md border border-border/70 bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             @click="stopSeq"
           >
             <PauseIcon class="size-2.5" />暂停
@@ -344,7 +344,7 @@ onUnmounted(stopSeq)
           <button
             v-else-if="seqShown === Number.POSITIVE_INFINITY"
             type="button"
-            class="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/[0.12]"
+            class="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/[0.07] px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/[0.12]"
             @click="playSeq"
           >
             <PlayIcon class="size-2.5" />逐条播放
@@ -352,7 +352,7 @@ onUnmounted(stopSeq)
           <button
             v-else
             type="button"
-            class="inline-flex items-center gap-1 rounded-md border border-border/70 bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            class="inline-flex items-center gap-1 rounded-md border border-border/70 bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
             @click="playSeq"
           >
             <RefreshCcwIcon class="size-2.5" />重放
@@ -360,7 +360,7 @@ onUnmounted(stopSeq)
           <button
             v-if="seqShown !== Number.POSITIVE_INFINITY && !seqPlaying"
             type="button"
-            class="rounded-md px-1 py-0.5 text-[10px] text-muted-foreground/70 transition-colors hover:text-foreground"
+            class="rounded-md px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             @click="resetSeq"
           >
             全部展开
@@ -374,12 +374,12 @@ onUnmounted(stopSeq)
           class="text-[11px] leading-snug"
         >
           <div class="flex flex-wrap items-baseline gap-x-1.5">
-            <span class="font-mono text-[10px] text-muted-foreground">{{ i + 1 }}.</span>
-            <span class="font-mono text-[10px] font-medium">{{ m.from }}</span>
-            <span class="font-mono text-[10px] text-muted-foreground/70">
+            <span class="font-mono text-[11px] text-muted-foreground">{{ i + 1 }}.</span>
+            <span class="font-mono text-[11px] font-medium">{{ m.from }}</span>
+            <span class="font-mono text-[11px] text-muted-foreground/70">
               {{ m.reply ? '┈┈▶' : '──▶' }}
             </span>
-            <span class="font-mono text-[10px] font-medium">{{ m.to }}</span>
+            <span class="font-mono text-[11px] font-medium">{{ m.to }}</span>
           </div>
           <p class="mt-0.5 pl-4 text-foreground/80"><RichText :text="m.text" /></p>
         </li>
@@ -417,13 +417,13 @@ onUnmounted(stopSeq)
         <div class="h-3.5 min-w-0 flex-1 overflow-hidden rounded-sm bg-muted/60">
           <div class="h-full rounded-sm bg-primary/45" :style="{ width: barWidth(it.value) }" />
         </div>
-        <span class="w-[4.5rem] shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+        <span class="w-[4.5rem] shrink-0 text-right font-mono text-[11px] text-muted-foreground">
           <RichText :text="it.display" />
         </span>
       </div>
       <div
         v-if="diagram.items.some((i) => i.note)"
-        class="flex flex-wrap gap-x-3 gap-y-1 pt-1 text-[10px] leading-snug text-muted-foreground"
+        class="flex flex-wrap gap-x-3 gap-y-1 pt-1 text-xs leading-snug text-muted-foreground"
       >
         <span
           v-for="(it, i) in diagram.items.filter((x) => x.note)"
@@ -450,20 +450,20 @@ onUnmounted(stopSeq)
             <RichText :text="s.label" />
             <span
               v-if="backIdx.has(i + 1)"
-              class="rounded bg-foreground/10 px-1 font-mono text-[9px] leading-tight text-muted-foreground"
+              class="rounded bg-foreground/10 px-1 font-mono text-[11px] leading-tight text-foreground/70"
             >
               {{ i + 1 }}
             </span>
           </p>
-          <p v-if="s.note" class="mt-0.5 text-[10px] leading-tight text-muted-foreground">
+          <p v-if="s.note" class="mt-0.5 text-xs leading-tight text-muted-foreground">
             <RichText :text="s.note" />
           </p>
         </div>
         <div
           v-if="i < stateItems.length - 1"
-          class="flex min-w-8 flex-col items-center text-muted-foreground/70"
+          class="flex min-w-8 flex-col items-center text-muted-foreground"
         >
-          <span class="max-w-36 px-0.5 text-center text-[10px] leading-tight">
+          <span class="max-w-36 px-0.5 text-center text-xs leading-tight">
             <RichText v-if="diagram.transitions?.[i]" :text="diagram.transitions[i]" />
           </span>
           <ChevronRightIcon class="size-3" />
@@ -471,14 +471,14 @@ onUnmounted(stopSeq)
       </template>
       <p
         v-if="diagram.back"
-        class="mt-1 flex w-full items-center gap-1 text-[10px] leading-snug text-muted-foreground"
+        class="mt-1 flex w-full items-center gap-1 text-[11px] leading-snug text-muted-foreground"
       >
         <UndoIcon class="size-2.5 shrink-0" />
         回退 {{ diagram.back.from }} → {{ diagram.back.to }}:<RichText :text="diagram.back.label" />
       </p>
     </div>
 
-    <figcaption v-if="caption" class="mt-2 text-center text-[11px] leading-snug text-muted-foreground">
+    <figcaption v-if="caption" class="mt-2 text-center text-xs leading-snug text-muted-foreground">
       <RichText :text="caption" />
     </figcaption>
   </figure>

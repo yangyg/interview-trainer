@@ -32,7 +32,7 @@ function isActive(to: { name: string; params?: { id?: string } }): boolean {
       </div>
       <div class="leading-tight">
         <p class="text-sm font-semibold">面试刷题工作台</p>
-        <p class="text-[11px] text-muted-foreground">Java · Golang · AI · 架构 题库</p>
+        <p class="text-xs text-muted-foreground">Java · Golang · AI · 架构 题库</p>
       </div>
     </div>
 
@@ -52,7 +52,7 @@ function isActive(to: { name: string; params?: { id?: string } }): boolean {
     </nav>
 
     <div class="mt-5">
-      <p class="mb-1 px-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <p class="mb-1 px-2.5 text-xs font-medium text-muted-foreground">
         面经与资料
       </p>
       <nav class="flex flex-col gap-0.5">
@@ -71,7 +71,7 @@ function isActive(to: { name: string; params?: { id?: string } }): boolean {
       </nav>
     </div>
 
-    <div class="mt-auto px-2.5 pt-4 text-[11px] leading-relaxed text-muted-foreground">
+    <div class="mt-auto px-2.5 pt-4 text-xs leading-relaxed text-muted-foreground">
       题库共 {{ dataStore.total }} 题,来自本地文档解析
     </div>
   </div>

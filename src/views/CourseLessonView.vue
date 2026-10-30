@@ -156,22 +156,22 @@ function go(id: string) {
         <div class="mb-2 flex flex-wrap items-center gap-1.5">
           <Badge
             variant="outline"
-            class="text-[10px]"
+            class="text-xs"
             :class="
               lesson.kind === 'concept'
-                ? 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400'
                 : 'border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400'
             "
           >
             {{ lesson.kind === 'concept' ? '概念课' : '刷题课' }}
           </Badge>
-          <Badge variant="outline" class="gap-1 text-[10px] text-muted-foreground">
+          <Badge variant="outline" class="gap-1 text-xs text-muted-foreground">
             <ClockIcon class="size-3" />{{ lesson.estimatedMinutes }} 分钟
           </Badge>
           <Badge
             v-if="completed"
             variant="outline"
-            class="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400"
+            class="border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400"
           >
             <CircleCheckIcon />
             已完成
@@ -179,7 +179,7 @@ function go(id: string) {
           <Badge
             v-else-if="!unlocked"
             variant="outline"
-            class="gap-1 border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-400"
+            class="gap-1 border-amber-500/30 bg-amber-500/10 text-xs text-amber-600 dark:text-amber-400"
           >
             <LockIcon class="size-3" />
             前一课未完成
@@ -190,21 +190,19 @@ function go(id: string) {
         </h1>
       </div>
 
-      <!-- 讲义 -->
-      <Card>
-        <CardContent class="pt-5">
-          <LessonContent :content="lesson.content" />
-          <!-- 讲义 → 题库的对应关系:正文只精讲其中一两道,其余靠这张清单自查 -->
-          <LessonQuestionIndex :ids="lesson.questionIds" :focus="focusQuestionIds" />
-        </CardContent>
-      </Card>
+      <!-- 讲义:不再套一层卡片,避免「卡片里套卡片」,区块自己的面板就是层次 -->
+      <div class="pt-1">
+        <LessonContent :content="lesson.content" />
+        <!-- 讲义 → 题库的对应关系:正文只精讲其中一两道,其余靠这张清单自查 -->
+        <LessonQuestionIndex :ids="lesson.questionIds" :focus="focusQuestionIds" />
+      </div>
 
       <!-- 关联题 -->
       <Card class="mt-3">
         <CardHeader class="pb-2">
           <CardTitle class="flex items-center justify-between gap-2 text-base">
             <span>练一练</span>
-            <span class="text-[11px] font-normal text-muted-foreground">
+            <span class="text-xs font-normal text-muted-foreground">
               {{ lesson.questionIds.length }} 道关联真题
             </span>
           </CardTitle>
@@ -231,7 +229,7 @@ function go(id: string) {
             </template>
           </LessonRunner>
 
-          <p v-if="!completed" class="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+          <p v-if="!completed" class="mt-3 text-xs leading-relaxed text-muted-foreground">
             把上面 {{ lesson.questionIds.length }} 道题都自评一遍(「会 / 模糊 / 不会」均可)即算完成本课;
             「模糊 / 不会」会自动进入间隔重复队列。
           </p>

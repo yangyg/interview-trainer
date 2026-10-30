@@ -91,7 +91,7 @@ function versionLabel(lang: string, version: string) {
     <!-- 知识骨架:讲义很长,先给一张地图 -->
     <div v-if="content.outline.length" class="rounded-xl border bg-muted/30 p-4">
       <p
-        class="mb-2.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground"
+        class="mb-2.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
       >
         <ListChecksIcon class="size-3.5" />
         本课地图
@@ -99,7 +99,7 @@ function versionLabel(lang: string, version: string) {
       <ul class="space-y-2">
         <li v-for="(item, i) in content.outline" :key="i" class="flex gap-2.5 text-sm leading-6">
           <span
-            class="mt-0.5 flex size-4.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold tabular-nums text-primary"
+            class="mt-0.5 flex size-4.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold tabular-nums text-primary"
           >
             {{ i + 1 }}
           </span>
@@ -113,10 +113,10 @@ function versionLabel(lang: string, version: string) {
       <div :id="`blk-${bi}`" class="scroll-mt-24">
       <!-- 概念 -->
       <section v-if="block.kind === 'concept'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.concept" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p v-for="(p, i) in block.body" :key="i" class="text-[15px] leading-7 text-foreground/85">
           <RichText :text="p" />
         </p>
@@ -149,22 +149,22 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 为什么 -->
       <section v-else-if="block.kind === 'why'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.why" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p v-for="(p, i) in block.body" :key="i" class="text-[15px] leading-7 text-foreground/85">
           <RichText :text="p" />
         </p>
         <!-- 现场:报错、执行计划、错误输出。读者得先看见,才谈得上猜 -->
         <div v-if="block.code" class="overflow-hidden rounded-lg border bg-muted/40">
           <div class="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-            <span class="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span class="font-mono text-xs text-muted-foreground">
               {{ block.code.language }}
             </span>
             <span
               v-if="block.code.caption"
-              class="min-w-0 truncate text-[11px] text-muted-foreground"
+              class="min-w-0 truncate text-xs text-muted-foreground"
             >
               <RichText :text="block.code.caption" />
             </span>
@@ -175,7 +175,7 @@ function versionLabel(lang: string, version: string) {
         </div>
         <!-- 错解:先让读者的猜测被否掉,后面的答案才有人要听 -->
         <div v-if="block.wrong?.length" class="rounded-lg border border-dashed px-3.5 py-2.5">
-          <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <p class="text-xs font-medium text-muted-foreground">
             先排除几种容易被想到的原因
           </p>
           <ul class="mt-1.5 space-y-1.5">
@@ -194,7 +194,7 @@ function versionLabel(lang: string, version: string) {
           v-if="block.real"
           class="rounded-lg border-l-[3px] border-primary/60 bg-primary/[0.05] py-2.5 pl-3.5 pr-3"
         >
-          <p class="text-[11px] font-medium uppercase tracking-wider text-primary">真正的原因</p>
+          <p class="text-xs font-medium text-primary">真正的原因</p>
           <p class="mt-1 text-[15px] leading-7 text-foreground/90">
             <RichText :text="block.real" />
           </p>
@@ -206,7 +206,7 @@ function versionLabel(lang: string, version: string) {
           <RichText :text="block.reveal" />
         </p>
         <div v-if="block.without" class="rounded-lg border border-dashed px-3.5 py-2.5">
-          <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <p class="text-xs font-medium text-muted-foreground">
             反过来说
           </p>
           <p class="mt-1 text-sm leading-6 text-foreground/85">
@@ -217,10 +217,10 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 原理:机制拆解 -->
       <section v-else-if="block.kind === 'principle'" class="space-y-3">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.principle" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p v-for="(p, i) in block.body" :key="`b${i}`" class="text-[15px] leading-7 text-foreground/85">
           <RichText :text="p" />
         </p>
@@ -228,7 +228,7 @@ function versionLabel(lang: string, version: string) {
           <li v-for="(s, i) in block.steps" :key="i" class="flex gap-3">
             <div class="flex flex-col items-center">
               <span
-                class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold tabular-nums text-primary"
+                class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold tabular-nums text-primary"
               >
                 {{ i + 1 }}
               </span>
@@ -262,10 +262,10 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 类比 -->
       <section v-else-if="block.kind === 'analogy'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.analogy" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p
           v-for="(p, i) in block.body"
           :key="`ab${i}`"
@@ -291,7 +291,7 @@ function versionLabel(lang: string, version: string) {
           </div>
           <p
             v-if="block.limit"
-            class="mt-3 border-t border-border/60 pt-2.5 text-[11px] leading-5 text-muted-foreground"
+            class="mt-3 border-t border-border/60 pt-2.5 text-xs leading-5 text-muted-foreground"
           >
             类比的边界:<RichText :text="block.limit" />
           </p>
@@ -300,10 +300,10 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 图示 -->
       <section v-else-if="block.kind === 'diagram'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.diagram" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p
           v-for="(p, i) in block.body"
           :key="`b${i}`"
@@ -324,10 +324,10 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 对比 -->
       <section v-else-if="block.kind === 'compare'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.compare" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p
           v-for="(p, i) in block.body"
           :key="`b${i}`"
@@ -377,10 +377,10 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 代码 -->
       <section v-else-if="block.kind === 'code'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.code" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p
           v-for="(p, i) in block.body"
           :key="`cb${i}`"
@@ -390,23 +390,23 @@ function versionLabel(lang: string, version: string) {
         </p>
         <div class="overflow-hidden rounded-lg border bg-muted/40">
           <div class="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-            <span class="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span class="font-mono text-xs text-muted-foreground">
               {{ block.lang }}
             </span>
             <!-- 版本/环境由数据渲染,不是作者记得写的一句话:漏了就一眼看得出来 -->
             <span
               v-if="block.version"
-              class="shrink-0 rounded border border-border/70 bg-background px-1 py-px font-mono text-[10px] text-muted-foreground"
+              class="shrink-0 rounded border border-border/70 bg-background px-1 py-px font-mono text-xs text-muted-foreground"
             >
               {{ versionLabel(block.lang, block.version) }}
             </span>
             <span
               v-if="block.verified === false"
-              class="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400"
+              class="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px text-xs font-medium text-amber-600 dark:text-amber-400"
             >
               未验证
             </span>
-            <span v-if="block.caption" class="min-w-0 truncate text-[11px] text-muted-foreground">
+            <span v-if="block.caption" class="min-w-0 truncate text-xs text-muted-foreground">
               <RichText :text="block.caption" />
             </span>
           </div>
@@ -414,7 +414,7 @@ function versionLabel(lang: string, version: string) {
             class="overflow-x-auto p-3 font-mono text-xs leading-6 text-foreground/90"
           ><code>{{ block.code }}</code></pre>
         </div>
-        <p v-if="block.env" class="text-[11px] leading-5 text-muted-foreground">
+        <p v-if="block.env" class="text-xs leading-5 text-muted-foreground">
           运行环境:<RichText :text="block.env" />
         </p>
         <ul v-if="block.notes?.length" class="space-y-1.5">
@@ -423,7 +423,7 @@ function versionLabel(lang: string, version: string) {
             :key="i"
             class="flex flex-wrap items-baseline gap-x-2 text-xs leading-5"
           >
-            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{{ n.line }}</code>
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ n.line }}</code>
             <span class="min-w-0 text-muted-foreground"><RichText :text="n.text" /></span>
           </li>
         </ul>
@@ -434,10 +434,10 @@ function versionLabel(lang: string, version: string) {
 
       <!-- 发散探索 -->
       <section v-else-if="block.kind === 'explore'" class="space-y-2.5">
-        <h3 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
+        <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.explore" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
-        </h3>
+        </h2>
         <p
           class="rounded-lg border-l-[3px] border-primary/40 bg-primary/[0.04] py-2 pl-3.5 pr-3 text-[13px] leading-6 text-foreground/80"
         >
@@ -450,7 +450,7 @@ function versionLabel(lang: string, version: string) {
         >
           <div class="flex flex-wrap items-center gap-2">
             <span
-              class="shrink-0 rounded border border-primary/30 bg-primary/[0.07] px-1.5 py-px text-[10px] font-medium text-primary"
+              class="shrink-0 rounded border border-primary/30 bg-primary/[0.07] px-1.5 py-px text-xs font-medium text-primary"
             >
               {{ EXPLORE_LABEL[b.direction] ?? b.direction }}
             </span>
@@ -464,7 +464,7 @@ function versionLabel(lang: string, version: string) {
               :key="row.key"
               class="flex gap-2.5 text-[13px] leading-6"
             >
-              <dt class="w-16 shrink-0 text-[11px] leading-6 text-muted-foreground">
+              <dt class="w-16 shrink-0 text-xs leading-6 text-muted-foreground">
                 {{ row.label }}
               </dt>
               <dd class="min-w-0 text-foreground/85">
@@ -485,10 +485,10 @@ function versionLabel(lang: string, version: string) {
       >
         <div class="flex items-center gap-2">
           <MessageSquareQuoteIcon class="size-3.5 shrink-0 text-primary" />
-          <span class="text-[11px] font-medium uppercase tracking-wider text-primary">
+          <span class="text-xs font-medium text-primary">
             真题拆解
           </span>
-          <span class="text-[11px] text-muted-foreground">
+          <span class="text-xs text-muted-foreground">
             {{ questionOf(block.questionId)?.no ?? block.questionId }}
           </span>
         </div>
@@ -498,7 +498,7 @@ function versionLabel(lang: string, version: string) {
 
         <div class="mt-3 space-y-3">
           <div>
-            <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p class="text-xs font-medium text-muted-foreground">
               这一问在筛什么
             </p>
             <p class="mt-1 text-sm leading-6 text-foreground/85">
@@ -506,24 +506,24 @@ function versionLabel(lang: string, version: string) {
             </p>
           </div>
           <div>
-            <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p class="text-xs font-medium text-muted-foreground">
               按这个顺序说
             </p>
             <ol class="mt-1 space-y-1.5">
               <li v-for="(p, i) in block.points" :key="i" class="flex gap-2 text-sm leading-6">
-                <span class="shrink-0 font-mono text-[11px] text-primary/80">{{ i + 1 }}.</span>
+                <span class="shrink-0 font-mono text-xs text-primary/80">{{ i + 1 }}.</span>
                 <span class="min-w-0 text-foreground/85"><RichText :text="p" /></span>
               </li>
             </ol>
           </div>
           <div v-if="block.depth" class="rounded-lg bg-background/60 px-3 py-2">
-            <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p class="text-xs font-medium text-muted-foreground">
               拉开分档的细节
             </p>
             <p class="mt-1 text-sm leading-6 text-foreground/85"><RichText :text="block.depth" /></p>
           </div>
           <div v-if="block.followup">
-            <p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p class="text-xs font-medium text-muted-foreground">
               如果继续追问
             </p>
             <p class="mt-1 text-sm leading-6 text-foreground/85">
@@ -541,7 +541,7 @@ function versionLabel(lang: string, version: string) {
       class="rounded-xl border border-amber-500/30 bg-amber-500/[0.07] p-4"
     >
       <p
-        class="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-amber-700 dark:text-amber-400"
+        class="mb-2 flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400"
       >
         <AlertTriangleIcon class="size-3.5" />
         容易踩的坑

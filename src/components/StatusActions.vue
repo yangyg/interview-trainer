@@ -18,9 +18,9 @@ const progress = useProgressStore()
 const current = computed(() => progress.recordOf(props.questionId)?.status)
 
 const options: { result: GradeResult; label: string; icon: typeof CircleCheckIcon; activeCls: string }[] = [
-  { result: 'mastered', label: '会', icon: CircleCheckIcon, activeCls: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  { result: 'fuzzy', label: '模糊', icon: CircleMinusIcon, activeCls: 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  { result: 'wrong', label: '不会', icon: CircleXIcon, activeCls: 'border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400' },
+  { result: 'mastered', label: '会', icon: CircleCheckIcon, activeCls: 'status-mastered' },
+  { result: 'fuzzy', label: '模糊', icon: CircleMinusIcon, activeCls: 'status-fuzzy' },
+  { result: 'wrong', label: '不会', icon: CircleXIcon, activeCls: 'status-wrong' },
 ]
 
 function grade(result: GradeResult) {

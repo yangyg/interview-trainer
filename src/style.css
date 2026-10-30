@@ -16,13 +16,14 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  /* 浅色下压在浅灰/浅色底上的次要文字也要 ≥4.5:1,所以比默认 shadcn 灰更深 */
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.955 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.5 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -35,7 +36,7 @@
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: oklch(0.5 0 0);
 }
 
 .dark {
@@ -56,7 +57,7 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.62 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -69,7 +70,7 @@
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.62 0 0);
 }
 
 @theme inline {
@@ -182,8 +183,18 @@
   background-size: 40px 40px;
   mask-image: radial-gradient(75% 100% at 30% 0%, black, transparent 80%);
 }
+:root {
+  --brand-gradient-1: #b45309;
+  --brand-gradient-2: #c2410c;
+  --brand-gradient-3: #0e7490;
+}
+.dark {
+  --brand-gradient-1: #f59e0b;
+  --brand-gradient-2: #f97316;
+  --brand-gradient-3: #06b6d4;
+}
 .brand-gradient-text {
-  background: linear-gradient(100deg, #f59e0b 10%, #f97316 45%, #06b6d4 90%);
+  background: linear-gradient(100deg, var(--brand-gradient-1) 10%, var(--brand-gradient-2) 45%, var(--brand-gradient-3) 90%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -432,6 +443,35 @@
   @apply border-l-primary/40 bg-muted/40 py-1;
 }
 
+
+/* ── 掌握状态三色（徽章 / 按钮 / 统计图共用）──────────────────────────── */
+:root {
+  --status-mastered: oklch(0.508 0.118 165.612);
+  --status-fuzzy: oklch(0.555 0.163 48.998);
+  --status-wrong: oklch(0.505 0.213 27.518);
+}
+.dark {
+  --status-mastered: oklch(0.765 0.177 163.223);
+  --status-fuzzy: oklch(0.828 0.189 84.429);
+  --status-wrong: oklch(0.704 0.191 22.216);
+}
+
+.status-mastered,
+.status-fuzzy,
+.status-wrong {
+  border-color: color-mix(in oklab, var(--status) 40%, transparent);
+  background-color: color-mix(in oklab, var(--status) 10%, transparent);
+  color: var(--status);
+}
+.status-mastered {
+  --status: var(--status-mastered);
+}
+.status-fuzzy {
+  --status: var(--status-fuzzy);
+}
+.status-wrong {
+  --status: var(--status-wrong);
+}
 
 /* ── 讲义行内语义标记（RichText 的 [[关键结论]] 与 !!易错!!）───────────────
    只做两件事：给「该记住的」一个底色，给「容易答错的」一个警示色。

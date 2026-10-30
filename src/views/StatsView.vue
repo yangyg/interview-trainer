@@ -36,6 +36,11 @@ const masteryPct = computed(() => (dataStore.total ? Math.round((mastered.value 
 
 // ---------- 专题堆积柱状图 ----------
 
+/** 状态色只维护在 style.css 的 --status-* 里,图表跟随主题读取 */
+function statusColor(name: 'mastered' | 'fuzzy' | 'wrong'): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(`--status-${name}`).trim()
+}
+
 const barOption = computed(() => {
   const topics = dataStore.topics
   const axisColor = isDark.value ? '#a1a1aa' : '#71717a'
@@ -52,8 +57,8 @@ const barOption = computed(() => {
   })
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { textStyle: { color: axisColor, fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
-    grid: { left: 8, right: 8, top: 32, bottom: 0, containLabel: true },
+    legend: { top: 0, left: 'center', textStyle: { color: axisColor, fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
+    grid: { left: 8, right: 8, top: 44, bottom: 0, containLabel: true },
     xAxis: {
       type: 'category',
       data: topics.map((t) => t.name),
@@ -67,9 +72,9 @@ const barOption = computed(() => {
       splitLine: { lineStyle: { color: splitColor } },
     },
     series: [
-      seriesOf('已掌握', '#10b981', 'mastered'),
-      seriesOf('模糊', '#f59e0b', 'fuzzy'),
-      seriesOf('不会', '#ef4444', 'wrong'),
+      seriesOf('已掌握', statusColor('mastered'), 'mastered'),
+      seriesOf('模糊', statusColor('fuzzy'), 'fuzzy'),
+      seriesOf('不会', statusColor('wrong'), 'wrong'),
       {
         name: '未学习',
         type: 'bar',
@@ -99,9 +104,9 @@ const pieOption = computed(() => {
         itemStyle: { borderColor: isDark.value ? '#18181b' : '#ffffff', borderWidth: 2 },
         label: { show: false },
         data: [
-          { name: '已掌握', value: mastered.value, itemStyle: { color: '#10b981' } },
-          { name: '模糊', value: progress.statusCounts.fuzzy, itemStyle: { color: '#f59e0b' } },
-          { name: '不会', value: progress.statusCounts.wrong, itemStyle: { color: '#ef4444' } },
+          { name: '已掌握', value: mastered.value, itemStyle: { color: statusColor('mastered') } },
+          { name: '模糊', value: progress.statusCounts.fuzzy, itemStyle: { color: statusColor('fuzzy') } },
+          { name: '不会', value: progress.statusCounts.wrong, itemStyle: { color: statusColor('wrong') } },
           { name: '未学习', value: unseen, itemStyle: { color: isDark.value ? '#3f3f46' : '#e4e4e7' } },
         ],
       },
@@ -308,7 +313,7 @@ function resetProgress() {
           >
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-sm font-medium">{{ w.topic.name }}</span>
-              <Badge variant="outline" class="shrink-0 border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400">
+              <Badge variant="outline" class="status-wrong shrink-0">
                 {{ Math.round(w.rate * 100) }}% 薄弱
               </Badge>
             </div>

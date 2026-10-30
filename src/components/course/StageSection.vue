@@ -77,7 +77,7 @@ function onCheckpointComplete() {
       </span>
       <span class="hidden shrink-0 items-center gap-2 sm:flex">
         <Progress :model-value="stageProgress.pct" class="h-1.5 w-16" />
-        <span class="text-[11px] tabular-nums text-muted-foreground">
+        <span class="text-xs tabular-nums text-muted-foreground">
           {{ stageProgress.done }}/{{ stageProgress.total }}
         </span>
       </span>
@@ -98,7 +98,7 @@ function onCheckpointComplete() {
           class="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/60"
         >
           <span
-            class="flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-medium tabular-nums"
+            class="flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium tabular-nums"
             :class="
               courseStore.isLessonComplete(courseId, lesson.id)
                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
@@ -123,12 +123,12 @@ function onCheckpointComplete() {
             >
               {{ lesson.title }}
             </span>
-            <span class="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span class="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span
                 class="rounded px-1 py-px"
                 :class="
                   lesson.kind === 'concept'
-                    ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                    ? 'bg-sky-500/10 text-sky-700 dark:text-sky-400'
                     : 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
                 "
               >
@@ -156,7 +156,7 @@ function onCheckpointComplete() {
           </span>
           <div class="min-w-0 flex-1">
             <p class="text-sm font-medium">阶段验收</p>
-            <p class="text-[11px] text-muted-foreground">
+            <p class="text-xs text-muted-foreground">
               {{ stage.checkpoint.questionIds.length }} 道混合题 · 掌握
               {{ Math.round(stage.checkpoint.passRatio * 100) }}% 以上算通过 ·
               已自评 {{ checkpointIds.length }}/{{ stage.checkpoint.questionIds.length }}
