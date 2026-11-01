@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { MoonIcon, SearchIcon, SunIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
@@ -9,6 +9,7 @@ import MobileShell from '@/components/mobile/MobileShell.vue'
 import SearchCommand from '@/components/SearchCommand.vue'
 import { useTheme } from '@/composables/useTheme'
 import { usePlatform } from '@/composables/usePlatform'
+import { prefetchRouteChunks } from '@/router'
 import { useCourseStore } from '@/stores/course'
 import { useDataStore } from '@/stores/data'
 
@@ -25,6 +26,13 @@ courseStore.init()
 
 const searchOpen = ref(false)
 const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
+
+// 首屏渲染完的空闲期预取全部路由 chunk:移动端点 tab 不用再等下载
+onMounted(() => {
+  const idle = (cb: () => void) =>
+    'requestIdleCallback' in window ? requestIdleCallback(cb, { timeout: 4000 }) : setTimeout(cb, 1500)
+  idle(prefetchRouteChunks)
+})
 </script>
 
 <template>

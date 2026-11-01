@@ -47,4 +47,23 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
+/**
+ * 空闲预取全部懒加载路由 chunk。
+ * 所有视图都是 () => import() 懒加载,首次点击 tab 才开始下载该页 JS——
+ * 手机蜂窝网络下题库(~170KB)要等近秒级、统计页(echarts,610KB)更久,且点击瞬间无任何反馈。
+ * 首屏渲染完后在空闲期把 chunk 拉齐,后续导航就是纯本地切换。
+ * 省流模式(navigator.connection.saveData)跳过。
+ */
+export function prefetchRouteChunks() {
+  // 省流模式跳过(Network Information API,类型未进标准 lib)
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+  if (connection?.saveData) return
+  for (const record of router.getRoutes()) {
+    const component = record.components?.default
+    if (typeof component === 'function') {
+      void (component as () => Promise<unknown>)().catch(() => {})
+    }
+  }
+}
+
 export default router
