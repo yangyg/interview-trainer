@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeftIcon,
@@ -28,7 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { BottomSheet, SegmentedTabs } from '@/components/mobile'
+import { BottomSheet, QuestionDetailLayer, SegmentedTabs } from '@/components/mobile'
 import { AiChatPanel } from '@/components/ai'
 import AnswerBody from '@/components/AnswerBody.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -184,15 +184,6 @@ function stepQuestion(delta: number) {
   const next = filtered.value[idx]
   if (next) router.replace({ query: { ...route.query, q: next.id } })
 }
-
-// 移动端全屏详情层:切题时把内部滚动复位到顶部
-const layerScrollRef = ref<HTMLElement | null>(null)
-watch(selected, async (q, old) => {
-  if (q && old && q.id !== old.id) {
-    await nextTick()
-    layerScrollRef.value?.scrollTo({ top: 0 })
-  }
-})
 
 function topicProgress(t: Topic): { learned: number; total: number; pct: number } {
   const total = t.count
@@ -485,7 +476,7 @@ const langOptions = LANGUAGES.map((l) => ({ value: l, label: LANG_META[l].label 
       </div>
     </BottomSheet>
 
-    <!-- 移动端全屏详情层:从右滑入,底部固定操作条 -->
+    <!-- 移动端全屏详情层:卡片堆叠,左滑下一题/右滑上一题(见 QuestionDetailLayer) -->
     <Teleport to="body">
       <Transition name="layer">
         <div
@@ -494,64 +485,16 @@ const langOptions = LANGUAGES.map((l) => ({ value: l, label: LANG_META[l].label 
           role="dialog"
           aria-label="题目详情"
         >
-          <div class="pt-safe">
-            <div class="flex h-12 items-center gap-1 border-b border-border/60 px-2">
-              <Button variant="ghost" size="icon" class="pressable" aria-label="返回列表" @click="closeQuestion">
-                <ArrowLeftIcon />
-              </Button>
-              <span class="min-w-0 flex-1 truncate text-center text-[13px] text-muted-foreground">
-                {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="pressable"
-                :disabled="selectedIndex <= 0"
-                aria-label="上一题"
-                @click="stepQuestion(-1)"
-              >
-                <ChevronLeftIcon />
-              </Button>
-              <span class="min-w-10 text-center font-mono text-xs tabular-nums text-muted-foreground">
-                {{ selectedIndex + 1 }}/{{ filtered.length }}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="pressable"
-                :disabled="selectedIndex < 0 || selectedIndex >= filtered.length - 1"
-                aria-label="下一题"
-                @click="stepQuestion(1)"
-              >
-                <ChevronRightIcon />
-              </Button>
-            </div>
-          </div>
-
-          <div ref="layerScrollRef" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <div class="px-safe py-4">
-              <div class="space-y-3">
-                <p class="text-xs text-muted-foreground">
-                  {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }} · {{ selected.no }}
-                </p>
-                <h2 class="text-lg font-semibold leading-snug">{{ selected.title }}</h2>
-                <QuestionMeta :question="selected" show-status />
-              </div>
-              <div class="mt-4">
-                <AnswerBody :question="selected" />
-              </div>
-            </div>
-          </div>
-
-          <div class="border-t border-border/60 bg-background/90 px-safe py-2.5 pb-safe backdrop-blur-xl">
-            <div class="flex items-center gap-2">
-              <Button variant="outline" class="pressable flex-1" @click="aiOpen = true">
-                <SparklesIcon />
-                AI 助手
-              </Button>
-              <StatusActions :question-id="selected.id" compact />
-            </div>
-          </div>
+          <QuestionDetailLayer
+            :question="selected"
+            :index="selectedIndex"
+            :total="filtered.length"
+            :topic-name="dataStore.topicName(selected.topicId)"
+            :chapter="selected.chapter"
+            @close="closeQuestion"
+            @step="stepQuestion"
+            @ai="aiOpen = true"
+          />
         </div>
       </Transition>
     </Teleport>

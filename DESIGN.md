@@ -54,6 +54,7 @@
 - 触屏上去掉 tap 高亮（`-webkit-tap-highlight-color`），可点元素加 `.pressable`（按压 0.97 缩放）替代 hover；自定义滚动条在 `pointer: coarse` 下隐藏。
 - 输入控件移动端字号 ≥16px（shadcn 组件已是 `text-base md:text-sm`），避免 iOS 聚焦自动放大。
 - 背题卡片翻开后支持滑动评分（右=会 / 上=模糊 / 左=不会，`useSwipe` 仅触屏生效），按钮与键盘（1/2/3）并存。
+- 题目详情为卡片堆叠（`QuestionDetailLayer`）：左滑下一题、右滑上一题，实时跟手拖拽（阈值 72px 或快速轻扫）；`pre/table` 内的横滑保留给横向滚动，垂直滚动始终原生（`touch-action: pan-y`）。
 
 **视觉例外**
 - 移动端卡片去描边、圆角升为 `rounded-2xl`、改用 `shadow-xs` 浅阴影（`Card` 组件内置响应式双形态）；列表行高 ≥44px 触摸目标。
