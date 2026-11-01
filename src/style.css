@@ -138,6 +138,69 @@
   }
 }
 
+/* ── 移动原生基建 ───────────────────────────────────────────────────────
+   触屏设备上去掉点按高亮与双击缩放延迟,用按压态(.pressable)提供反馈;
+   隐藏自定义滚动条(iOS/Android 悬浮滚动条本就不可见);
+   overscroll-behavior 阻断整页橡皮筋,配合 PWA standalone 的稳定观感。 */
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    overscroll-behavior-y: none;
+  }
+  @media (pointer: coarse) {
+    button,
+    a,
+    [role='button'],
+    input,
+    select,
+    textarea,
+    label {
+      touch-action: manipulation;
+    }
+    * {
+      scrollbar-width: none;
+    }
+    ::-webkit-scrollbar {
+      display: none;
+    }
+  }
+}
+
+/* safe-area 工具类:viewport-fit=cover 后 env() 在刘海/手势机上才有值 */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility px-safe {
+  /* max() 兜底:无刘海设备取 1rem,可直接替代 px-4 作为内容区横向留白 */
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* 移动底栏高度基准:内容区 pb-tabbar 让位,组件内允许微调但须保持变量一致 */
+:root {
+  --tabbar-height: 3.5rem;
+}
+@utility pb-tabbar {
+  padding-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom) + 1rem);
+}
+
+/* 按压态:触屏上替代 hover 的轻反馈。加在可点元素上,桌面 hover 规则不受影响 */
+@utility pressable {
+  touch-action: manipulation;
+  transition:
+    transform 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.15s ease;
+  &:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+  }
+}
+
 /* ---------- 页面切换过渡 ---------- */
 
 .page-enter-active {
@@ -151,6 +214,54 @@
   transform: translateY(8px);
 }
 .page-leave-to {
+  opacity: 0;
+}
+
+/* ── 移动端方向性路由转场 ──────────────────────────────────────────────
+   下钻(level 1→2)右滑入、返回左滑出,tab 平级用淡入淡出;
+   进出同时渲染,离场元素绝对定位叠在原位,由壳容器提供 position:relative。 */
+.slide-forward-enter-active,
+.slide-back-enter-active {
+  transition:
+    opacity 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.slide-forward-leave-active,
+.slide-back-leave-active {
+  transition:
+    opacity 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.slide-forward-enter-from {
+  opacity: 0;
+  transform: translateX(28px);
+}
+.slide-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-18px);
+}
+.slide-back-enter-from {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+.slide-back-leave-to {
+  opacity: 0;
+  transform: translateX(18px);
+}
+.slide-forward-leave-active,
+.slide-back-leave-active,
+.tab-fade-leave-active {
+  position: absolute;
+  inset: 0;
+}
+.tab-fade-enter-active {
+  transition: opacity 0.18s ease;
+}
+.tab-fade-leave-active {
+  transition: opacity 0.12s ease;
+}
+.tab-fade-enter-from,
+.tab-fade-leave-to {
   opacity: 0;
 }
 

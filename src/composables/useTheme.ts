@@ -16,6 +16,11 @@ const isDark = computed(() => mode.value === 'dark' || (mode.value === 'system' 
 watchEffect(() => {
   document.documentElement.classList.toggle('dark', isDark.value)
   document.documentElement.style.colorScheme = isDark.value ? 'dark' : 'light'
+  // 同步状态栏/PWA 标题栏颜色(与 index.html 首帧脚本同色值)
+  const color = isDark.value ? '#0a0a0a' : '#ffffff'
+  for (const el of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    el.setAttribute('content', color)
+  }
 })
 
 export function useTheme() {

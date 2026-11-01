@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SegmentedTabs } from '@/components/mobile'
 import EmptyState from '@/components/EmptyState.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
 import { useDataStore } from '@/stores/data'
@@ -35,6 +36,11 @@ const statusFilter = ref('all')
 const topicOptions = computed(() =>
   lang.value === 'all' ? dataStore.topics : dataStore.topicsOf(lang.value as Language),
 )
+
+const langOptions = [
+  { value: 'all', label: '全部' },
+  ...LANGUAGES.map((l) => ({ value: l as string, label: LANG_META[l].label })),
+]
 
 const results = computed<Question[]>(() => {
   let list: Question[]
@@ -66,7 +72,7 @@ function openQuestion(q: Question) {
 
 <template>
   <div>
-    <div class="mb-4">
+    <div class="mb-4 hidden lg:block">
       <h1 class="text-xl font-semibold tracking-tight">搜索</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         全文检索全部 {{ dataStore.total }} 道题的标题与答案,支持中文关键词
@@ -76,9 +82,15 @@ function openQuestion(q: Question) {
     <div class="space-y-3">
       <div class="flex flex-wrap items-center gap-2">
         <div class="min-w-0 flex-1 basis-56">
-          <Input v-model="query" placeholder="搜索关键词,如:HashMap、GC、B+ 树…" class="h-9" aria-label="搜索题目" autofocus />
+          <Input v-model="query" placeholder="搜索关键词,如:HashMap、GC、B+ 树…" class="h-10 lg:h-9" aria-label="搜索题目" autofocus />
         </div>
-        <Tabs v-model="lang">
+        <SegmentedTabs
+          class="lg:hidden"
+          :options="langOptions"
+          :model-value="lang"
+          @update:model-value="lang = String($event)"
+        />
+        <Tabs v-model="lang" class="hidden lg:block">
           <TabsList>
             <TabsTrigger value="all">全部</TabsTrigger>
             <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l">
@@ -145,17 +157,17 @@ function openQuestion(q: Question) {
         description="换个关键词试试,中文支持任意连续两字匹配。"
       />
 
-      <div v-else class="overflow-hidden rounded-xl border">
+      <div v-else class="overflow-hidden rounded-2xl bg-card shadow-xs lg:rounded-xl lg:border lg:shadow-none">
         <button
           v-for="q in results.slice(0, 100)"
           :key="q.id"
           type="button"
-          class="group flex w-full flex-col gap-1.5 border-b px-3.5 py-2.5 text-left transition-colors last:border-b-0 hover:bg-accent/60"
+          class="group flex w-full flex-col gap-1.5 border-b px-3.5 py-3 text-left transition-colors last:border-b-0 hover:bg-accent/60 active:bg-accent/60 lg:py-2.5"
           @click="openQuestion(q)"
         >
           <div class="flex w-full items-center gap-3">
-            <span class="w-12 shrink-0 font-mono text-xs text-muted-foreground transition-colors group-hover:text-foreground/70">{{ q.no }}</span>
-            <span class="min-w-0 flex-1 truncate text-sm transition-transform duration-150 group-hover:translate-x-0.5">{{ q.title }}</span>
+            <span class="w-12 shrink-0 font-mono text-xs text-muted-foreground">{{ q.no }}</span>
+            <span class="min-w-0 flex-1 truncate text-sm">{{ q.title }}</span>
             <span class="shrink-0 text-xs text-muted-foreground">{{ dataStore.topicName(q.topicId) }}</span>
           </div>
           <div class="pl-[60px]">

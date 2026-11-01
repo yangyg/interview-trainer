@@ -49,15 +49,15 @@ function confirmRemove() {
 <template>
   <div>
     <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div>
+      <div class="hidden lg:block">
         <h1 class="text-xl font-semibold tracking-tight">错题本</h1>
         <p class="mt-0.5 text-sm text-muted-foreground">
           自评「不会」的题目共 {{ wrongQuestions.length }} 道,重刷后自评「会」即可移出
         </p>
       </div>
-      <Button v-if="wrongQuestions.length" @click="restudy">
+      <Button v-if="wrongQuestions.length" class="pressable w-full sm:w-auto" @click="restudy">
         <RefreshCwIcon />
-        开始重刷
+        开始重刷({{ wrongQuestions.length }})
       </Button>
     </div>
 

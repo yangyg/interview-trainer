@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SegmentedTabs } from '@/components/mobile'
 import CourseCard from '@/components/course/CourseCard.vue'
 import { LANG_META, LANGUAGES } from '@/lib/langs'
 import { useCourseStore } from '@/stores/course'
@@ -66,12 +67,17 @@ const languageCount = computed(() => {
 })
 
 const loading = computed(() => !courseStore.isIndexReady && !courseStore.indexError)
+
+const tabOptions = computed(() => [
+  { value: 'all' as const, label: '全部' },
+  ...LANGUAGES.map((l) => ({ value: l, label: LANG_META[l].label })),
+])
 </script>
 
 <template>
   <div>
     <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div>
+      <div class="hidden lg:block">
         <h1 class="text-balance text-xl font-semibold tracking-tight">学习路径</h1>
         <p class="mt-0.5 max-w-prose text-sm text-muted-foreground">
           {{ courseStore.courses.length }} 门课按「由浅入深」排好序:每课时先讲清一张知识地图,再用关联真题逐题自评。
@@ -85,7 +91,14 @@ const loading = computed(() => !courseStore.isIndexReady && !courseStore.indexEr
       </div>
     </div>
 
-    <Tabs :model-value="tab" class="mb-4" @update:model-value="setTab(String($event))">
+    <!-- 移动端分段控件 / 桌面 Tabs -->
+    <SegmentedTabs
+      class="mb-4 lg:hidden"
+      :options="tabOptions"
+      :model-value="tab"
+      @update:model-value="setTab(String($event))"
+    />
+    <Tabs :model-value="tab" class="mb-4 hidden lg:block" @update:model-value="setTab(String($event))">
       <TabsList>
         <TabsTrigger value="all">全部 {{ languageCount.all }}</TabsTrigger>
         <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l">

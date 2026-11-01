@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SegmentedTabs } from "@/components/mobile";
 import { cn } from "@/lib/utils";
 import { useCourseStore } from "@/stores/course";
 import { useDataStore } from "@/stores/data";
@@ -111,6 +112,9 @@ function goResume() {
 const topLangs = computed(() =>
   LANGUAGES.filter((l) => (dataStore.index?.topLists[l]?.length ?? 0) > 0),
 );
+const topLangOptions = computed(() =>
+  topLangs.value.map((l) => ({ value: l as string, label: LANG_META[l].label })),
+);
 function topCount(l: Language) {
   return dataStore.index?.topLists[l]?.length ?? 0;
 }
@@ -138,9 +142,7 @@ function langCard(language: Language) {
         class="bg-grid pointer-events-none absolute inset-0"
         aria-hidden="true"
       ></div>
-      <div
-        class="relative flex flex-wrap items-end justify-between gap-4 p-6 sm:p-8"
-      >
+      <div class="relative flex flex-wrap items-end justify-between gap-4 p-5 sm:p-8">
         <div class="max-w-2xl">
           <p
             class="mb-2 text-xs tracking-wide text-muted-foreground"
@@ -163,12 +165,12 @@ function langCard(language: Language) {
             {{ dataStore.index?.generatedAt.slice(0, 10) }}
           </p>
         </div>
-        <div class="flex gap-2">
-          <Button @click="router.push({ name: 'flashcards' })">
+        <div class="flex w-full gap-2 sm:w-auto">
+          <Button class="pressable flex-1 sm:flex-none" @click="router.push({ name: 'flashcards' })">
             <LayersIcon />
             开始背题
           </Button>
-          <Button variant="outline" @click="router.push({ name: 'quiz' })">
+          <Button variant="outline" class="pressable flex-1 sm:flex-none" @click="router.push({ name: 'quiz' })">
             <TimerIcon />
             模拟面试
           </Button>
@@ -176,8 +178,8 @@ function langCard(language: Language) {
       </div>
     </div>
 
-    <!-- 指标条 -->
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <!-- 指标条:手机 2×2,平板 2 列,桌面 4 列 -->
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Card>
         <CardContent class="p-4">
           <div class="flex items-center justify-between">
@@ -261,14 +263,15 @@ function langCard(language: Language) {
             </span>
           </div>
         </div>
-        <div class="flex shrink-0 gap-2">
-          <Button size="sm" @click="goResume">
+        <div class="flex w-full shrink-0 gap-2 sm:w-auto">
+          <Button size="sm" class="pressable flex-1 sm:flex-none" @click="goResume">
             继续学习
             <ArrowRightIcon />
           </Button>
           <Button
             size="sm"
             variant="ghost"
+            class="flex-1 sm:flex-none"
             @click="router.push({ name: 'courses' })"
           >
             全部课程
@@ -340,7 +343,14 @@ function langCard(language: Language) {
               <FlameIcon class="size-4 text-orange-500" />
               高频题速查
             </CardTitle>
-            <Tabs v-model="topTab" class="min-w-0 max-w-full">
+            <!-- 移动端分段控件 / 桌面 Tabs -->
+            <SegmentedTabs
+              class="mb-1 lg:hidden"
+              :options="topLangOptions"
+              :model-value="topTab"
+              @update:model-value="topTab = String($event)"
+            />
+            <Tabs v-model="topTab" class="hidden min-w-0 max-w-full lg:block">
               <TabsList class="h-auto max-w-full flex-wrap justify-start">
                 <TabsTrigger
                   v-for="l in topLangs"
@@ -361,7 +371,7 @@ function langCard(language: Language) {
               v-for="item in topList"
               :key="item.rank"
               type="button"
-              class="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors first:border-t-0 hover:bg-accent/60"
+              class="flex w-full items-center gap-3 border-t px-4 py-3 text-left transition-colors first:border-t-0 hover:bg-accent/60 active:bg-accent/60 lg:py-2.5"
               :class="!item.questionId && 'cursor-default'"
               @click="goTop(item)"
             >
@@ -408,7 +418,7 @@ function langCard(language: Language) {
             v-for="d in dataStore.index?.docs ?? []"
             :key="d.id"
             type="button"
-            class="flex items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent"
+            class="flex items-center gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent active:bg-accent"
             @click="openDoc(d.id)"
           >
             <span

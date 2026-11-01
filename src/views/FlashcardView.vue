@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useSwipe } from '@vueuse/core'
 import {
   EyeIcon,
   LayersIcon,
@@ -20,11 +21,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SegmentedTabs } from '@/components/mobile'
 import AnswerBody from '@/components/AnswerBody.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
 import StatusActions from '@/components/StatusActions.vue'
 import { dueText } from '@/lib/srs'
+import { usePlatform } from '@/composables/usePlatform'
+import { useTabBarHidden } from '@/composables/useTabBarHidden'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
 import { LANG_META, LANGUAGES } from '@/lib/langs'
@@ -34,6 +38,8 @@ const route = useRoute()
 const router = useRouter()
 const dataStore = useDataStore()
 const progress = useProgressStore()
+const { coarsePointer } = usePlatform()
+const { setTabBarHidden } = useTabBarHidden()
 
 // ---------- 配置 ----------
 
@@ -47,6 +53,11 @@ const order = ref('random')
 const topicOptions = computed(() =>
   lang.value === 'all' ? dataStore.topics : dataStore.topicsOf(lang.value as Language),
 )
+
+const langOptions = [
+  { value: 'all', label: '全部' },
+  ...LANGUAGES.map((l) => ({ value: l as string, label: LANG_META[l].label })),
+]
 
 const matched = computed<Question[]>(() => {
   let list = dataStore.allQuestions
@@ -67,6 +78,9 @@ const session = ref<Question[] | null>(null)
 const index = ref(0)
 const flipped = ref(false)
 const results = ref<{ mastered: number; fuzzy: number; wrong: number }>({ mastered: 0, fuzzy: 0, wrong: 0 })
+
+// 会话进行中隐藏底栏进入沉浸模式;离开页面时还原
+watch(session, (v) => setTabBarHidden(!!v))
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
@@ -139,6 +153,27 @@ function gradeByKey(questionId: string, result: GradeResult) {
   advance(result)
 }
 
+// ---------- 移动端滑卡评分 ----------
+// 翻卡后:右滑=会、上滑=模糊、左滑=不会。只在触屏生效;onSwipeEnd 在松手时触发,
+// 不会像 watch(direction) 那样在滑动中途误判。
+// Card 是组件,ref 拿到的是实例,取 $el 给 useSwipe。
+const cardRef = ref<{ $el: HTMLElement } | null>(null)
+const cardEl = computed<HTMLElement | null>(() => cardRef.value?.$el ?? null)
+useSwipe(cardEl, {
+  threshold: 48,
+  onSwipeEnd(_e, d) {
+    if (!coarsePointer.value || !session.value || finished.value || !flipped.value) return
+    const q = current.value
+    if (!q) return
+    const result: GradeResult | null =
+      d === 'right' ? 'mastered' : d === 'up' ? 'fuzzy' : d === 'left' ? 'wrong' : null
+    if (result) {
+      progress.grade(q.id, result)
+      advance(result)
+    }
+  },
+})
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   // 支持外部直达:首页「待复习」、错题本「重刷」等 (?pool=due|wrong|fuzzy|unseen)
@@ -153,12 +188,13 @@ onMounted(() => {
 // 必须成对解绑:否则离开页面后监听仍在,反复进入会叠加多个 handler,一次按键多次评分
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  setTabBarHidden(false)
 })
 </script>
 
 <template>
   <div>
-    <div class="mb-4">
+    <div class="mb-4 hidden lg:block">
       <h1 class="text-balance text-xl font-semibold tracking-tight">背题卡片</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         翻卡自评,答对升盒、答错回炉;间隔 1/2/4/7/15/30 天循环推送
@@ -178,7 +214,13 @@ onUnmounted(() => {
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">语言</p>
-            <Tabs v-model="lang">
+            <SegmentedTabs
+              class="lg:hidden"
+              :options="langOptions"
+              :model-value="lang"
+              @update:model-value="lang = String($event)"
+            />
+            <Tabs v-model="lang" class="hidden lg:block">
               <TabsList class="w-full">
                 <TabsTrigger value="all" class="flex-1">全部</TabsTrigger>
                 <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l" class="flex-1">
@@ -255,14 +297,15 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex flex-wrap gap-2 pt-1">
-          <Button :disabled="!matched.length" @click="start()">
+        <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:flex-wrap">
+          <Button :disabled="!matched.length" class="pressable w-full sm:w-auto" @click="start()">
             <SparklesIcon />
             开始背题
           </Button>
           <Button
             variant="outline"
             :disabled="!progress.dueIds.length"
+            class="w-full sm:w-auto"
             @click="pool = 'due'; start(dataStore.allQuestions.filter((q) => {
               const r = progress.recordOf(q.id)
               return !!r && r.due <= Date.now()
@@ -309,7 +352,7 @@ onUnmounted(() => {
       </Card>
 
       <!-- 卡片 -->
-      <Card v-else-if="current" class="mx-auto min-h-[50vh]">
+      <Card v-else-if="current" ref="cardRef" class="mx-auto min-h-[50vh]">
         <CardHeader class="gap-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <QuestionMeta :question="current" />
@@ -323,21 +366,40 @@ onUnmounted(() => {
           <Transition name="flip" mode="out-in">
             <div v-if="flipped" key="answer" class="space-y-4">
               <AnswerBody :question="current" />
-              <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+              <!-- 桌面:内联自评;移动端固定底条见下方 -->
+              <div class="hidden flex-wrap items-center justify-between gap-3 border-t pt-4 lg:flex">
                 <span class="text-xs text-muted-foreground">自评(快捷键 1 / 2 / 3)</span>
                 <StatusActions :question-id="current.id" compact @graded="advance" />
               </div>
             </div>
             <div v-else key="front" class="flex flex-col items-center gap-3 py-10">
-              <Button size="lg" @click="flipped = true">
+              <Button size="lg" class="pressable w-full sm:w-auto" @click="flipped = true">
                 <EyeIcon />
                 显示答案
               </Button>
-              <p class="text-xs text-muted-foreground">先自己作答,再对照要点(空格键翻卡)</p>
+              <p class="text-xs text-muted-foreground">
+                先自己作答,再对照要点(空格键翻卡<template v-if="coarsePointer">;翻卡后左右滑动评分</template>)
+              </p>
             </div>
           </Transition>
         </CardContent>
       </Card>
+
+      <!-- 移动端:翻卡后底部固定自评条(右滑=会 / 上滑=模糊 / 左滑=不会) -->
+      <div
+        v-if="flipped && current && !finished"
+        class="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-border/60 bg-background/90 px-4 py-2.5 pb-safe backdrop-blur-xl lg:hidden"
+      >
+        <Button variant="outline" class="status-mastered flex-1" @click="progress.grade(current.id, 'mastered'); advance('mastered')">
+          会
+        </Button>
+        <Button variant="outline" class="status-fuzzy flex-1" @click="progress.grade(current.id, 'fuzzy'); advance('fuzzy')">
+          模糊
+        </Button>
+        <Button variant="outline" class="status-wrong flex-1" @click="progress.grade(current.id, 'wrong'); advance('wrong')">
+          不会
+        </Button>
+      </div>
     </div>
 
     <!-- 空池提示 -->

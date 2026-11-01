@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeftIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ListFilterIcon,
+  RotateCcwIcon,
   SearchXIcon,
   SparklesIcon,
 } from '@lucide/vue'
@@ -27,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { BottomSheet, SegmentedTabs } from '@/components/mobile'
 import { AiChatPanel } from '@/components/ai'
 import AnswerBody from '@/components/AnswerBody.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -34,6 +36,7 @@ import QuestionMeta from '@/components/QuestionMeta.vue'
 import StatusActions from '@/components/StatusActions.vue'
 import { cn } from '@/lib/utils'
 import { LANG_META, LANGUAGES } from '@/lib/langs'
+import { usePlatform } from '@/composables/usePlatform'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
 import type { Language, Question, Topic } from '@/lib/types'
@@ -42,6 +45,7 @@ const route = useRoute()
 const router = useRouter()
 const dataStore = useDataStore()
 const progress = useProgressStore()
+const { isMobile } = usePlatform()
 
 // ---------- 路由状态 ----------
 
@@ -89,12 +93,15 @@ function selectTopic(t: Topic) {
   router.replace({ query: { ...route.query, lang: t.language, topic: t.id, q: undefined } })
 }
 
+/** 从列表点进详情:push 留历史,返回时才能恢复列表滚动位置 */
 function openQuestion(q: Question) {
-  router.replace({ query: { ...route.query, q: q.id } })
+  router.push({ query: { ...route.query, q: q.id } })
 }
 
 function closeQuestion() {
-  router.replace({ query: { ...route.query, q: undefined } })
+  // 有历史则回退(恢复列表滚动),直达链接落地时退化为 replace
+  if (window.history.state?.back) router.back()
+  else router.replace({ query: { ...route.query, q: undefined } })
 }
 
 // ---------- 筛选 ----------
@@ -103,8 +110,7 @@ const textFilter = ref('')
 const chapterFilter = ref('all')
 const frequencyFilter = ref('all')
 const statusFilter = ref('all')
-
-// 支持外部跳转带 filter=wrong 等初始状态
+const filterOpen = ref(false)
 const aiOpen = ref(false)
 
 const VALID_STATUS = ['all', 'unseen', 'mastered', 'fuzzy', 'wrong', 'due']
@@ -146,6 +152,22 @@ const filtered = computed(() => {
   return list
 })
 
+/** 生效中的筛选条件数,给移动端筛选按钮加角标 */
+const activeFilterCount = computed(
+  () =>
+    (textFilter.value ? 1 : 0) +
+    (chapterFilter.value !== 'all' ? 1 : 0) +
+    (frequencyFilter.value !== 'all' ? 1 : 0) +
+    (statusFilter.value !== 'all' ? 1 : 0),
+)
+
+function resetFilters() {
+  textFilter.value = ''
+  chapterFilter.value = 'all'
+  frequencyFilter.value = 'all'
+  statusFilter.value = 'all'
+}
+
 const selected = computed<Question | undefined>(() => {
   const id = questionId.value
   return id ? dataStore.questionsById[id] : undefined
@@ -156,11 +178,21 @@ const selectedIndex = computed(() => {
   return filtered.value.findIndex((q) => q.id === selected.value!.id)
 })
 
+/** 上一题/下一题:原地换题不产生历史 */
 function stepQuestion(delta: number) {
   const idx = selectedIndex.value + delta
   const next = filtered.value[idx]
-  if (next) openQuestion(next)
+  if (next) router.replace({ query: { ...route.query, q: next.id } })
 }
+
+// 移动端全屏详情层:切题时把内部滚动复位到顶部
+const layerScrollRef = ref<HTMLElement | null>(null)
+watch(selected, async (q, old) => {
+  if (q && old && q.id !== old.id) {
+    await nextTick()
+    layerScrollRef.value?.scrollTo({ top: 0 })
+  }
+})
 
 function topicProgress(t: Topic): { learned: number; total: number; pct: number } {
   const total = t.count
@@ -169,11 +201,13 @@ function topicProgress(t: Topic): { learned: number; total: number; pct: number 
 }
 
 const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
+
+const langOptions = LANGUAGES.map((l) => ({ value: l, label: LANG_META[l].label }))
 </script>
 
 <template>
   <div>
-    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div class="mb-4 hidden flex-wrap items-center justify-between gap-3 lg:flex">
       <div>
         <h1 class="text-balance text-xl font-semibold tracking-tight">题库浏览</h1>
         <p class="mt-0.5 text-sm text-muted-foreground">
@@ -185,7 +219,7 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
     <div class="flex gap-5">
       <!-- 专题栏(桌面) -->
       <!-- self-start + sticky:长列表滚动时专题栏吸顶;max-h 保证内部导航可独立滚动 -->
-      <aside class="hidden w-56 shrink-0 flex-col gap-3 self-start md:sticky md:top-14 md:flex md:max-h-[calc(100vh-3.5rem)]">
+      <aside class="hidden w-56 shrink-0 flex-col gap-3 self-start lg:sticky lg:top-14 lg:flex lg:max-h-[calc(100vh-3.5rem)]">
         <Tabs :model-value="lang" @update:model-value="lang = String($event)">
           <TabsList class="w-full">
             <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l" class="flex-1">
@@ -222,27 +256,43 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
 
       <!-- 主区 -->
       <div class="min-w-0 flex-1">
-        <!-- 移动端专题选择 -->
-        <div class="mb-3 flex gap-2 md:hidden">
-          <Tabs :model-value="lang" class="shrink-0" @update:model-value="lang = String($event)">
-            <TabsList>
-              <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l">
-                {{ LANG_META[l].label }}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Select :model-value="topicId" @update:model-value="topicId = String($event)">
-            <SelectTrigger class="min-w-0 flex-1" aria-label="专题">
-              <SelectValue placeholder="选择专题" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="t in langTopics" :key="t.id" :value="t.id">{{ t.name }}</SelectItem>
-            </SelectContent>
-          </Select>
+        <!-- 移动端:语言分段 + 专题横滑 chips + 筛选弹层入口 -->
+        <div class="mb-3 flex flex-col gap-2 lg:hidden">
+          <SegmentedTabs :options="langOptions" :model-value="lang" @update:model-value="lang = String($event)" />
+          <div class="flex items-center gap-2">
+            <nav class="-mx-1 min-w-0 flex-1 overflow-x-auto px-1" aria-label="专题">
+              <div class="flex w-max items-center gap-1.5 py-0.5">
+                <button
+                  v-for="t in langTopics"
+                  :key="t.id"
+                  type="button"
+                  :class="cn(
+                    'pressable whitespace-nowrap rounded-full border px-3 py-1.5 text-[13px] transition-colors',
+                    topicId === t.id
+                      ? 'border-transparent bg-primary font-medium text-primary-foreground'
+                      : 'border-border bg-card text-muted-foreground',
+                  )"
+                  @click="selectTopic(t)"
+                >
+                  {{ t.name }}
+                  <span class="ml-0.5 text-[11px] opacity-70">{{ t.count }}</span>
+                </button>
+              </div>
+            </nav>
+            <Button variant="outline" class="pressable relative shrink-0" aria-label="筛选" @click="filterOpen = true">
+              <ListFilterIcon />
+              筛选
+              <span
+                v-if="activeFilterCount"
+                class="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground"
+              >{{ activeFilterCount }}</span>
+            </Button>
+          </div>
+          <p class="text-xs text-muted-foreground">共 {{ filtered.length }} 题 · 点击题目查看详解</p>
         </div>
 
-        <!-- 题目详情 -->
-        <template v-if="selected">
+        <!-- 题目详情(桌面:内嵌卡片) -->
+        <template v-if="selected && !isMobile">
           <div class="mb-3 flex items-center justify-between gap-2">
             <Button variant="ghost" size="sm" @click="closeQuestion">
               <ArrowLeftIcon />
@@ -298,7 +348,8 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
 
         <!-- 题目列表 -->
         <template v-else-if="currentTopic">
-          <div class="mb-3 flex flex-wrap items-center gap-2">
+          <!-- 桌面筛选行 -->
+          <div class="mb-3 hidden flex-wrap items-center gap-2 lg:flex">
             <div class="min-w-0 flex-1 basis-44">
               <Input v-model="textFilter" placeholder="按标题过滤…" class="h-8" aria-label="按标题过滤" />
             </div>
@@ -350,20 +401,20 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
             />
           </div>
 
-          <div v-else class="overflow-hidden rounded-xl border">
+          <div v-else class="overflow-hidden rounded-2xl bg-card shadow-xs lg:rounded-xl lg:shadow-none lg:border">
             <button
               v-for="(q, i) in filtered"
               :key="q.id"
               type="button"
               :class="cn(
-                'group flex w-full items-center gap-3 border-b px-3.5 py-2.5 text-left transition-colors last:border-b-0 hover:bg-accent/60',
+                'group flex w-full items-center gap-3 border-b px-3.5 py-3 text-left transition-colors last:border-b-0 hover:bg-accent/60 active:bg-accent/60 lg:py-2.5',
                 i % 2 === 1 && 'bg-muted/30',
               )"
               @click="openQuestion(q)"
             >
               <span class="w-12 shrink-0 font-mono text-xs text-muted-foreground transition-colors group-hover:text-foreground/70">{{ q.no }}</span>
-              <span class="min-w-0 flex-1 truncate text-sm transition-transform duration-150 group-hover:translate-x-0.5">{{ q.title }}</span>
-              <span class="hidden shrink-0 sm:block">
+              <span class="min-w-0 flex-1 truncate text-sm">{{ q.title }}</span>
+              <span class="shrink-0">
                 <QuestionMeta :question="q" show-status />
               </span>
             </button>
@@ -372,19 +423,178 @@ const langTopics = computed(() => dataStore.topicsOf(lang.value as Language))
       </div>
     </div>
 
-    <!-- AI 助手 -->
-    <Dialog v-model:open="aiOpen">
-      <DialogContent class="flex h-[80vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader v-if="selected" class="border-b px-4 py-3">
-          <DialogTitle class="truncate pr-6 text-sm">{{ selected.title }}</DialogTitle>
-          <DialogDescription class="text-xs">
-            {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }} · AI 生成内容仅供参考
-          </DialogDescription>
-        </DialogHeader>
-        <div v-if="selected" class="min-h-0 flex-1">
+    <!-- 移动端筛选弹层 -->
+    <BottomSheet v-model:open="filterOpen" title="筛选">
+      <div class="flex flex-col gap-4 py-1">
+        <label class="flex flex-col gap-1.5 text-sm">
+          标题关键字
+          <Input v-model="textFilter" placeholder="按标题过滤…" class="h-10" aria-label="按标题过滤" />
+        </label>
+        <label class="flex flex-col gap-1.5 text-sm">
+          章节
+          <Select v-model="chapterFilter">
+            <SelectTrigger class="h-10 w-full" aria-label="章节">
+              <SelectValue placeholder="章节" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部章节</SelectItem>
+              <SelectItem v-for="c in chapterOptions" :key="c.name" :value="c.name">
+                {{ c.name }}({{ c.count }})
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <label class="flex flex-col gap-1.5 text-sm">
+          频率
+          <Select v-model="frequencyFilter">
+            <SelectTrigger class="h-10 w-full" aria-label="频率">
+              <SelectValue placeholder="频率" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">频率不限</SelectItem>
+              <SelectItem value="3">🔥 高频</SelectItem>
+              <SelectItem value="2">🔥≥2</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <label class="flex flex-col gap-1.5 text-sm">
+          掌握状态
+          <Select v-model="statusFilter">
+            <SelectTrigger class="h-10 w-full" aria-label="掌握状态">
+              <SelectValue placeholder="状态" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">状态不限</SelectItem>
+              <SelectItem value="unseen">未学习</SelectItem>
+              <SelectItem value="mastered">已掌握</SelectItem>
+              <SelectItem value="fuzzy">模糊</SelectItem>
+              <SelectItem value="wrong">不会</SelectItem>
+              <SelectItem value="due">待复习</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <Button variant="ghost" class="pressable" @click="resetFilters">
+          <RotateCcwIcon />
+          重置筛选
+        </Button>
+      </div>
+      <div class="sticky bottom-0 bg-background py-3">
+        <Button class="pressable w-full" size="lg" @click="filterOpen = false">
+          查看 {{ filtered.length }} 题
+        </Button>
+      </div>
+    </BottomSheet>
+
+    <!-- 移动端全屏详情层:从右滑入,底部固定操作条 -->
+    <Teleport to="body">
+      <Transition name="layer">
+        <div
+          v-if="selected && isMobile"
+          class="fixed inset-0 z-40 flex flex-col bg-background"
+          role="dialog"
+          aria-label="题目详情"
+        >
+          <div class="pt-safe">
+            <div class="flex h-12 items-center gap-1 border-b border-border/60 px-2">
+              <Button variant="ghost" size="icon" class="pressable" aria-label="返回列表" @click="closeQuestion">
+                <ArrowLeftIcon />
+              </Button>
+              <span class="min-w-0 flex-1 truncate text-center text-[13px] text-muted-foreground">
+                {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="pressable"
+                :disabled="selectedIndex <= 0"
+                aria-label="上一题"
+                @click="stepQuestion(-1)"
+              >
+                <ChevronLeftIcon />
+              </Button>
+              <span class="min-w-10 text-center font-mono text-xs tabular-nums text-muted-foreground">
+                {{ selectedIndex + 1 }}/{{ filtered.length }}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="pressable"
+                :disabled="selectedIndex < 0 || selectedIndex >= filtered.length - 1"
+                aria-label="下一题"
+                @click="stepQuestion(1)"
+              >
+                <ChevronRightIcon />
+              </Button>
+            </div>
+          </div>
+
+          <div ref="layerScrollRef" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div class="px-safe py-4">
+              <div class="space-y-3">
+                <p class="text-xs text-muted-foreground">
+                  {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }} · {{ selected.no }}
+                </p>
+                <h2 class="text-lg font-semibold leading-snug">{{ selected.title }}</h2>
+                <QuestionMeta :question="selected" show-status />
+              </div>
+              <div class="mt-4">
+                <AnswerBody :question="selected" />
+              </div>
+            </div>
+          </div>
+
+          <div class="border-t border-border/60 bg-background/90 px-safe py-2.5 pb-safe backdrop-blur-xl">
+            <div class="flex items-center gap-2">
+              <Button variant="outline" class="pressable flex-1" @click="aiOpen = true">
+                <SparklesIcon />
+                AI 助手
+              </Button>
+              <StatusActions :question-id="selected.id" compact />
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- AI 助手:移动端全高底部弹层,桌面保持居中对话框 -->
+    <template v-if="selected">
+      <BottomSheet
+        v-if="isMobile"
+        v-model:open="aiOpen"
+        :title="`AI 助手 · ${selected.no}`"
+        content-class="overflow-hidden"
+      >
+        <div class="flex h-[80svh] flex-col">
           <AiChatPanel :question="selected" />
         </div>
-      </DialogContent>
-    </Dialog>
+      </BottomSheet>
+      <Dialog v-else v-model:open="aiOpen">
+        <DialogContent class="flex h-[80vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+          <DialogHeader v-if="selected" class="border-b px-4 py-3">
+            <DialogTitle class="truncate pr-6 text-sm">{{ selected.title }}</DialogTitle>
+            <DialogDescription class="text-xs">
+              {{ dataStore.topicName(selected.topicId) }} · {{ selected.chapter }} · AI 生成内容仅供参考
+            </DialogDescription>
+          </DialogHeader>
+          <div v-if="selected" class="min-h-0 flex-1">
+            <AiChatPanel :question="selected" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </template>
   </div>
 </template>
+
+<style scoped>
+/* 移动端全屏详情层:从右滑入/滑出( reduced-motion 由全局降级块接管) */
+.layer-enter-active {
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.layer-leave-active {
+  transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.layer-enter-from,
+.layer-leave-to {
+  transform: translateX(100%);
+}
+</style>

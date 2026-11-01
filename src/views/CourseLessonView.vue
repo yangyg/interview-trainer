@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useWindowSize, useWindowScroll } from '@vueuse/core'
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
   CircleCheckIcon,
   ClockIcon,
   FileQuestionIcon,
+  ListIcon,
   LockIcon,
 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -14,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { BottomSheet } from '@/components/mobile'
 import EmptyState from '@/components/EmptyState.vue'
 import LessonContent from '@/components/course/LessonContent.vue'
 import LessonQuestionIndex from '@/components/course/LessonQuestionIndex.vue'
@@ -101,6 +104,23 @@ function onComplete() {
 function go(id: string) {
   router.push({ name: 'course-lesson', params: { courseId: courseId.value, lessonId: id } })
 }
+
+// ---------- 移动端:阅读进度条 + 目录弹层 ----------
+
+const { y } = useWindowScroll()
+const winHeight = useWindowSize().height
+const readPct = computed(() => {
+  const max = document.documentElement.scrollHeight - winHeight.value
+  return max > 0 ? Math.min(100, Math.round((y.value / max) * 100)) : 0
+})
+
+const tocOpen = ref(false)
+
+/** 先关弹层再滚动,避免 smooth 滚动被弹层关闭打断 */
+function goToc(id: string) {
+  tocOpen.value = false
+  void nextTick(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
 </script>
 
 <template>
@@ -149,6 +169,15 @@ function go(id: string) {
     </div>
 
     <template v-else>
+      <!-- 移动端阅读进度条:贴在页头下缘 -->
+      <div
+        class="fixed inset-x-0 z-30 h-0.5 lg:hidden"
+        style="top: calc(env(safe-area-inset-top) + 3rem)"
+        aria-hidden="true"
+      >
+        <div class="h-full bg-primary/70 transition-[width] duration-150" :style="{ width: `${readPct}%` }" />
+      </div>
+
       <div class="xl:grid xl:grid-cols-[minmax(0,1fr)_11rem] xl:gap-6">
         <div class="min-w-0">
       <!-- 课时头 -->
@@ -184,6 +213,17 @@ function go(id: string) {
             <LockIcon class="size-3" />
             前一课未完成
           </Badge>
+          <!-- 移动端目录入口(桌面右上角有常驻 TOC) -->
+          <Button
+            v-if="tocItems.length"
+            variant="outline"
+            size="sm"
+            class="pressable ml-auto lg:hidden"
+            @click="tocOpen = true"
+          >
+            <ListIcon />
+            目录
+          </Button>
         </div>
         <h1 class="text-balance text-xl font-semibold tracking-tight sm:text-2xl">
           {{ lesson.title }}
@@ -266,5 +306,21 @@ function go(id: string) {
         </aside>
       </div>
     </template>
+
+    <!-- 移动端本课目录弹层 -->
+    <BottomSheet v-model:open="tocOpen" title="本课目录">
+      <ul class="pb-2 pt-1">
+        <li v-for="(it, i) in tocItems" :key="it.id">
+          <button
+            type="button"
+            class="pressable flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-accent active:bg-accent"
+            @click="goToc(it.id)"
+          >
+            <span class="w-5 shrink-0 text-right font-mono text-xs text-muted-foreground">{{ i + 1 }}</span>
+            <span class="min-w-0 flex-1 text-sm leading-snug">{{ it.title }}</span>
+          </button>
+        </li>
+      </ul>
+    </BottomSheet>
   </div>
 </template>

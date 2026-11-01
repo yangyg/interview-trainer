@@ -142,7 +142,7 @@ function goLesson(lessonId: string) {
               </div>
             </div>
             <div class="flex w-full shrink-0 flex-col gap-2 sm:w-auto">
-              <Button :disabled="!targetLessonId" @click="goLesson(targetLessonId)">
+              <Button class="pressable" :disabled="!targetLessonId" @click="goLesson(targetLessonId)">
                 {{ done ? '从头复习' : progress.done > 0 ? '继续学习' : '开始学习' }}
                 <ArrowRightIcon />
               </Button>

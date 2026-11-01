@@ -37,8 +37,9 @@ function isActive(to: { name: string; params?: { id?: string } }): boolean {
     </div>
 
     <nav class="flex flex-col gap-0.5">
+      <!-- 桌面侧栏直接列出全部功能;「我的」是移动端聚合页,桌面不展示 -->
       <RouterLink
-        v-for="item in MAIN_NAV"
+        v-for="item in MAIN_NAV.filter((nav) => nav.key !== 'more')"
         :key="item.key"
         :to="item.to"
         :class="cn(

@@ -2,8 +2,18 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover:内容延伸进刘海/手势区,配合 src/style.css 的 safe-area 工具类;
+         interactive-widget=resizes-content:安卓键盘弹出时压缩视口而非遮挡输入框 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- standalone 下状态栏透明,内容由 safe-area 顶开 -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="刷题" />
+    <!-- 运行时由首帧脚本与 useTheme 按亮暗动态同步 -->
+    <meta name="theme-color" content="#ffffff" />
     <title>面试刷题工作台 · Java / Golang / AI 八股题库</title>
     <meta name="description" content="基于本地 Java / Golang / AI 面试题库文档构建的刷题应用:浏览检索、背题卡片、模拟面试、进度统计" />
     <script>
@@ -14,6 +24,8 @@
           var dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
           if (dark) document.documentElement.classList.add('dark')
           document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+          var themeColor = document.querySelector('meta[name="theme-color"]')
+          if (themeColor) themeColor.setAttribute('content', dark ? '#0a0a0a' : '#ffffff')
         } catch (e) {}
       })()
     </script>

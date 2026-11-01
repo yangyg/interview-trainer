@@ -23,8 +23,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SegmentedTabs } from '@/components/mobile'
 import AnswerBody from '@/components/AnswerBody.vue'
 import QuestionMeta from '@/components/QuestionMeta.vue'
+import { usePlatform } from '@/composables/usePlatform'
+import { useTabBarHidden } from '@/composables/useTabBarHidden'
 import { useDataStore } from '@/stores/data'
 import { useProgressStore } from '@/stores/progress'
 import { LANG_META, LANGUAGES } from '@/lib/langs'
@@ -33,6 +36,8 @@ import type { GradeResult, Language, Question } from '@/lib/types'
 const dataStore = useDataStore()
 const progress = useProgressStore()
 const router = useRouter()
+const { isMobile } = usePlatform()
+const { setTabBarHidden } = useTabBarHidden()
 
 // ---------- 配置 ----------
 
@@ -47,6 +52,11 @@ const includeCodeOutput = ref(true)
 const topicOptions = computed(() =>
   lang.value === 'all' ? dataStore.topics : dataStore.topicsOf(lang.value as Language),
 )
+
+const langOptions = [
+  { value: 'all', label: '全部' },
+  ...LANGUAGES.map((l) => ({ value: l as string, label: LANG_META[l].label })),
+]
 
 const matched = computed<Question[]>(() => {
   let list = dataStore.allQuestions
@@ -67,6 +77,9 @@ const revealed = ref(false)
 const timeLeft = ref(0)
 const timeUp = ref(false)
 const results = ref<{ q: Question; grade: GradeResult }[]>([])
+
+// 会话进行中隐藏底栏进入沉浸模式;离开页面时还原
+watch(session, (v) => setTabBarHidden(!!v))
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -158,12 +171,15 @@ watch([current, revealed], ([, rev]) => {
   if (rev) stopTimer()
 })
 
-onBeforeUnmount(stopTimer)
+onBeforeUnmount(() => {
+  stopTimer()
+  setTabBarHidden(false)
+})
 </script>
 
 <template>
   <div>
-    <div class="mb-4">
+    <div class="mb-4 hidden lg:block">
       <h1 class="text-balance text-xl font-semibold tracking-tight">模拟面试</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">
         随机抽题限时作答,先自己讲一遍,再对照参考答案自评
@@ -183,7 +199,13 @@ onBeforeUnmount(stopTimer)
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="space-y-1.5">
             <p class="text-xs font-medium text-muted-foreground">语言</p>
-            <Tabs v-model="lang">
+            <SegmentedTabs
+              class="lg:hidden"
+              :options="langOptions"
+              :model-value="lang"
+              @update:model-value="lang = String($event)"
+            />
+            <Tabs v-model="lang" class="hidden lg:block">
               <TabsList class="w-full">
                 <TabsTrigger value="all" class="flex-1">全部</TabsTrigger>
                 <TabsTrigger v-for="l in LANGUAGES" :key="l" :value="l" class="flex-1">
@@ -257,7 +279,7 @@ onBeforeUnmount(stopTimer)
           </div>
         </div>
 
-        <Button :disabled="!matched.length" @click="start()">
+        <Button :disabled="!matched.length" class="pressable w-full sm:w-auto" @click="start()">
           <PlayIcon />
           开始面试
         </Button>
@@ -345,7 +367,8 @@ onBeforeUnmount(stopTimer)
         <CardContent class="space-y-4">
           <template v-if="revealed">
             <AnswerBody :question="current" />
-            <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+            <!-- 桌面:内联自评行;移动端固定底条见下方 -->
+            <div class="hidden flex-wrap items-center justify-between gap-3 border-t pt-4 lg:flex">
               <span class="text-xs text-muted-foreground">对照要点自评(计入学习记录)</span>
               <div class="flex gap-2">
                 <Button size="sm" variant="outline" class="status-mastered" @click="grade('mastered')">
@@ -363,7 +386,7 @@ onBeforeUnmount(stopTimer)
             </div>
           </template>
           <div v-else class="flex flex-col items-center gap-3 py-10">
-            <Button size="lg" @click="revealed = true">
+            <Button size="lg" class="pressable w-full sm:w-auto" @click="revealed = true">
               <EyeIcon />
               作答完毕,查看参考答案
             </Button>
@@ -371,6 +394,24 @@ onBeforeUnmount(stopTimer)
           </div>
         </CardContent>
       </Card>
+
+      <!-- 移动端:揭示答案后底部固定自评条 -->
+      <div
+        v-if="revealed && current && isMobile"
+        class="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-border/60 bg-background/90 px-4 py-2.5 pb-safe backdrop-blur-xl"
+      >
+        <Button variant="outline" class="status-mastered flex-1" @click="grade('mastered')">
+          <CheckCircle2Icon />
+          会
+        </Button>
+        <Button variant="outline" class="status-fuzzy flex-1" @click="grade('fuzzy')">
+          模糊
+        </Button>
+        <Button variant="outline" class="status-wrong flex-1" @click="grade('wrong')">
+          <XCircleIcon />
+          不会
+        </Button>
+      </div>
     </div>
   </div>
 </template>

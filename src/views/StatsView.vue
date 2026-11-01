@@ -195,7 +195,7 @@ function resetProgress() {
 
 <template>
   <div>
-    <div class="mb-4">
+    <div class="mb-4 hidden lg:block">
       <h1 class="text-xl font-semibold tracking-tight">学习统计</h1>
       <p class="mt-0.5 text-sm text-muted-foreground">进度、薄弱点与数据备份(进度存于浏览器 localStorage)</p>
     </div>

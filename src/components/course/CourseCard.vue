@@ -31,7 +31,7 @@ function open() {
 <template>
   <button
     type="button"
-    class="group flex h-full flex-col rounded-xl border bg-card p-4 text-left transition-colors hover:border-foreground/25"
+    class="group flex h-full flex-col rounded-2xl bg-card p-4 text-left shadow-xs transition-colors hover:border-foreground/25 lg:rounded-xl lg:border lg:shadow-none"
     @click="open"
   >
     <div class="flex items-start gap-2.5">
