@@ -4,6 +4,7 @@ import {
   BookOpenIcon,
   CalculatorIcon,
   CircleUserIcon,
+  CastleIcon,
   HomeIcon,
   LayersIcon,
   NotebookIcon,
@@ -36,6 +37,8 @@ export const MAIN_NAV: NavItem[] = [
   { key: 'courses', label: '学习路径', short: '课程', icon: RouteIcon, to: { name: 'courses' }, mobile: true },
   { key: 'browse', label: '题库浏览', short: '题库', icon: BookOpenIcon, to: { name: 'browse' }, mobile: true },
   { key: 'flashcards', label: '背题卡片', short: '背题', icon: LayersIcon, to: { name: 'flashcards' }, mobile: true },
+  // 移动底栏已满 5 项，爬塔从首页与「我的」进入，不占 tab
+  { key: 'tower', label: '爬塔', short: '爬塔', icon: CastleIcon, to: { name: 'tower' }, mobile: false },
   { key: 'more', label: '我的', short: '我的', icon: CircleUserIcon, to: { name: 'more' }, mobile: true },
   { key: 'quiz', label: '模拟面试', short: '模考', icon: TimerIcon, to: { name: 'quiz' }, mobile: false },
   { key: 'stats', label: '学习统计', short: '统计', icon: CalculatorIcon, to: { name: 'stats' }, mobile: false },

@@ -25,6 +25,7 @@ dist-ssr
 
 # 本地工作记录与构建产物
 .workbuddy/
+.shots/
 scripts/curriculum/.report.json
 scripts/curriculum/.blockindex.json
 

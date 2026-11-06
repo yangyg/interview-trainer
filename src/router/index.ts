@@ -4,8 +4,8 @@ declare module 'vue-router' {
   interface RouteMeta {
     /** 移动端页头标题 */
     title?: string
-    /** 移动端转场层级:1 = tab 根页(平级淡切),2 = 下钻页(方向性滑动) */
-    level?: 1 | 2
+    /** 移动端转场层级:1 = tab 根页(平级淡切),2 = 下钻页(方向性滑动),3 = 沉浸会话(战斗/结算) */
+    level?: 1 | 2 | 3
     /** 桌面侧栏 / 移动底栏高亮归并 key */
     nav?: string
   }
@@ -23,6 +23,19 @@ const router = createRouter({
     { path: '/wrongbook', name: 'wrongbook', component: () => import('@/views/WrongBookView.vue'), meta: { title: '错题本', level: 2 } },
     { path: '/docs/:id', name: 'doc', component: () => import('@/views/DocView.vue'), meta: { title: '面经资料', level: 2 } },
     { path: '/more', name: 'more', component: () => import('@/views/MoreView.vue'), meta: { title: '我的', level: 1 } },
+    // 爬塔：总览 -> 某一层（战斗与结算同页，靠 store 的 status 切换）
+    {
+      path: '/tower',
+      name: 'tower',
+      component: () => import('@/views/TowerView.vue'),
+      meta: { nav: 'tower', title: '爬塔', level: 1 },
+    },
+    {
+      path: '/tower/:layerId',
+      name: 'tower-layer',
+      component: () => import('@/views/TowerRoomView.vue'),
+      meta: { nav: 'tower', title: '爬塔', level: 2 },
+    },
     // 课程三个层级共用 meta.nav='courses',侧边栏与底栏才能在同一条导航项上高亮
     {
       path: '/courses',

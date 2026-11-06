@@ -621,3 +621,94 @@
   text-underline-offset: 0.22em;
   text-decoration-color: color-mix(in oklab, var(--rich-danger) 55%, transparent);
 }
+
+/* ── 爬塔（Tower）───────────────────────────────────────────────
+   HP / 伤害 / 回血各用独立变量，不复用 --status-*：
+   语义不同（血量是资源，掌握状态是学习判定），混用会让调色互相牵连。 */
+:root {
+  --hp-full: oklch(0.55 0.14 165);
+  --hp-mid: oklch(0.6 0.15 70);
+  --hp-low: oklch(0.55 0.2 27);
+  --damage: oklch(0.55 0.2 27);
+  --heal: oklch(0.55 0.13 165);
+}
+.dark {
+  --hp-full: oklch(0.76 0.16 163);
+  --hp-mid: oklch(0.82 0.16 84);
+  --hp-low: oklch(0.7 0.19 22);
+  --damage: oklch(0.72 0.19 22);
+  --heal: oklch(0.76 0.15 163);
+}
+
+.hp-track {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.hp-fill-full {
+  background: var(--hp-full);
+}
+.hp-fill-mid {
+  background: var(--hp-mid);
+}
+.hp-fill-low {
+  background: var(--hp-low);
+}
+.hp-fill-enemy {
+  background: var(--damage);
+}
+
+/* 挖空占位：题干里被挖掉的术语 */
+.blank {
+  display: inline-block;
+  min-width: 4em;
+  border-bottom: 2px solid var(--primary);
+  vertical-align: baseline;
+}
+
+.tower-stem-title {
+  @apply text-base font-semibold leading-relaxed;
+}
+.tower-stem-context {
+  @apply mt-1 text-[0.8125rem] leading-relaxed;
+}
+
+/* 伤害数字：只动 opacity/transform */
+.damage-float {
+  color: var(--damage);
+  animation: tower-rise 700ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+.heal-float {
+  color: var(--heal);
+  animation: tower-rise 700ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+@keyframes tower-rise {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-1.5rem);
+  }
+}
+
+/* 玩家受击：只闪一次描边，不做整页抖动 */
+.tower-hit {
+  animation: tower-hit 320ms ease-out;
+}
+@keyframes tower-hit {
+  0%,
+  100% {
+    border-color: var(--border);
+  }
+  40% {
+    border-color: var(--damage);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .damage-float,
+  .heal-float,
+  .tower-hit {
+    animation: none;
+  }
+}
