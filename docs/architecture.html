@@ -1,0 +1,1216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>面试刷题工作台 · 整体架构与数据流向</title>
+<style>
+  :root{
+    --bg:#08090b;
+    --panel:#0e1013;
+    --panel-2:#14171c;
+    --line:rgba(255,255,255,.075);
+    --line-2:rgba(255,255,255,.16);
+    --fg:#eef1f6;
+    --fg-2:#98a1b0;
+    --fg-3:#646d7c;
+    --amber:#e8a33d;
+    --cyan:#33c2d6;
+    --violet:#9b8cff;
+    --blue:#5b9dff;
+    --emerald:#34d399;
+    --orange:#ff8f5e;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  .app{height:100%;display:flex;flex-direction:column}
+
+  /* ---------- 顶栏 ---------- */
+  .top{
+    display:flex;align-items:flex-end;gap:24px;
+    padding:18px 26px 12px;flex:0 0 auto;
+  }
+  .kicker{
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;
+    color:rgba(51,194,214,.75);text-transform:uppercase;margin-bottom:7px;
+  }
+  .top h1{font-size:20px;font-weight:600;letter-spacing:.01em;line-height:1.25}
+  .top .sub{margin-top:6px;font-size:12px;color:var(--fg-3)}
+  .top .sub b{color:var(--fg-2);font-weight:500}
+  .tools{margin-left:auto;display:flex;align-items:center;gap:6px;padding-bottom:4px}
+  .tbtn{
+    appearance:none;border:1px solid var(--line);background:var(--panel);
+    color:var(--fg-2);font-size:12px;font-family:inherit;
+    padding:6px 10px;border-radius:8px;cursor:pointer;transition:.16s;
+    display:flex;align-items:center;gap:5px;white-space:nowrap;
+  }
+  .tbtn:hover{background:var(--panel-2);border-color:var(--line-2);color:var(--fg)}
+  .zoombox{
+    display:flex;align-items:center;gap:2px;border:1px solid var(--line);
+    background:var(--panel);border-radius:8px;padding:2px;
+  }
+  .zoombox button{
+    appearance:none;border:0;background:transparent;color:var(--fg-2);
+    width:26px;height:24px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;
+  }
+  .zoombox button:hover{background:var(--panel-2);color:var(--fg)}
+  #zoomVal{
+    font-family:var(--mono);font-size:11px;color:var(--fg-3);
+    min-width:42px;text-align:center;
+  }
+
+  /* ---------- 场景 chips ---------- */
+  .chips{
+    display:flex;gap:8px;padding:0 26px 14px;flex:0 0 auto;
+    overflow-x:auto;scrollbar-width:none;
+  }
+  .chips::-webkit-scrollbar{display:none}
+  .chip{
+    appearance:none;border:1px solid var(--line);background:var(--panel);
+    color:var(--fg-2);font-family:inherit;font-size:12px;
+    padding:7px 12px 7px 11px;border-radius:999px;cursor:pointer;
+    display:flex;align-items:center;gap:8px;white-space:nowrap;transition:.16s;
+  }
+  .chip .cdot{
+    width:6px;height:6px;border-radius:50%;background:var(--fg-3);
+    transition:.16s;flex:0 0 auto;
+  }
+  .chip:hover{background:var(--panel-2);border-color:var(--line-2);color:var(--fg)}
+  .chip.on{
+    background:rgba(51,194,214,.1);border-color:rgba(51,194,214,.45);color:#bfeef7;
+  }
+  .chip.on .cdot{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+  .chip em{
+    font-style:normal;font-family:var(--mono);font-size:10px;
+    color:var(--fg-3);padding-left:2px;
+  }
+
+  /* ---------- 画布 ---------- */
+  .viewport{
+    position:relative;flex:1 1 auto;margin:0 26px;border:1px solid var(--line);
+    border-radius:16px;overflow:hidden;
+    background:
+      radial-gradient(1200px 620px at 18% -10%,rgba(51,194,214,.045),transparent 60%),
+      radial-gradient(900px 520px at 88% 110%,rgba(155,140,255,.05),transparent 60%),
+      #0a0b0e;
+    cursor:grab;
+  }
+  .viewport.dragging{cursor:grabbing}
+  .stage{position:absolute;left:0;top:0;width:1600px;height:920px;transform-origin:0 0;
+    animation:stageIn .45s cubic-bezier(.32,.72,0,1) both}
+  @keyframes stageIn{from{opacity:.55}to{opacity:1}}
+  #wires{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+  #nodes{position:absolute;left:0;top:0;width:1600px;height:920px}
+
+  /* 分层带 */
+  .band{
+    position:absolute;border-radius:16px;
+    border:1px solid rgba(255,255,255,.05);
+    background:rgba(255,255,255,.014);
+  }
+  .band-label{
+    position:absolute;top:11px;left:16px;font-size:11px;
+    letter-spacing:.04em;color:var(--fg-3);
+    display:flex;align-items:center;gap:7px;
+  }
+  .band-label i{
+    width:5px;height:5px;border-radius:50%;background:var(--tone);
+    display:inline-block;opacity:.85;
+  }
+  .band-label b{font-weight:500;color:rgba(255,255,255,.42)}
+  .band-note{
+    position:absolute;top:12px;right:16px;left:auto;bottom:auto;
+    font-size:10px;color:rgba(255,255,255,.22);line-height:1.5;
+    font-family:var(--mono);letter-spacing:.01em;
+  }
+
+  /* 路由容器 */
+  .router-box{
+    position:absolute;border:1px dashed rgba(91,157,255,.22);
+    border-radius:14px;background:rgba(91,157,255,.022);
+  }
+  .router-box .rb-label{
+    position:absolute;left:16px;bottom:10px;font-size:10.5px;
+    color:rgba(91,157,255,.55);font-family:var(--mono);
+  }
+
+  /* 节点 */
+  .node{
+    position:absolute;border-radius:11px;padding:11px 13px;
+    background:linear-gradient(180deg,#1c2028,#15181e);
+    border:1px solid rgba(255,255,255,.1);cursor:pointer;
+    display:flex;flex-direction:column;justify-content:center;gap:4px;overflow:hidden;
+    transition:border-color .18s,background .18s,box-shadow .18s,opacity .3s,filter .3s;
+    z-index:2;
+  }
+  .node.compact{padding:9px 12px}
+  .node::before{
+    content:"";position:absolute;left:0;top:11px;bottom:11px;width:2.5px;
+    border-radius:0 3px 3px 0;background:var(--tone);opacity:.85;
+  }
+  .node[data-band="build"]{--tone:var(--amber)}
+  .node[data-band="data"]{--tone:var(--cyan)}
+  .node[data-band="state"]{--tone:var(--violet)}
+  .node[data-band="view"]{--tone:var(--blue)}
+  .node[data-band="persist"]{--tone:var(--emerald)}
+  .node[data-band="ext"]{--tone:var(--orange)}
+  .node.floor{border-style:dashed;background:linear-gradient(180deg,#141a18,#101413)}
+  .node:hover{border-color:rgba(255,255,255,.24);background:linear-gradient(180deg,#242a34,#1a1e26)}
+  .node.active{
+    border-color:var(--tone);
+    box-shadow:0 0 0 1px rgba(255,255,255,.03),0 0 30px -8px var(--tone);
+    background:linear-gradient(180deg,#252b35,#1a1e26);
+  }
+  .node.on{
+    border-color:var(--tone);
+    box-shadow:0 0 0 1px rgba(255,255,255,.02),0 0 24px -9px var(--tone);
+    background:linear-gradient(180deg,#21262f,#161a20);
+  }
+  .node.dim{opacity:.14;filter:saturate(.35)}
+  .node.soft{opacity:.4}
+  .n-row{display:flex;align-items:center;gap:7px;min-width:0}
+  .n-dot{
+    width:6px;height:6px;border-radius:50%;background:var(--tone);
+    flex:0 0 auto;opacity:.9;
+  }
+  .n-title{
+    font-size:13px;font-weight:600;letter-spacing:.005em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .n-tag{
+    margin-left:auto;flex:0 0 auto;font-size:9.5px;color:var(--fg-3);
+    border:1px solid var(--line);border-radius:999px;padding:1px 6px;
+    font-weight:400;letter-spacing:.01em;
+  }
+  .n-sub{
+    font-size:11px;color:var(--fg-2);line-height:1.4;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    padding-left:13px;
+  }
+  .n-meta{
+    font-family:var(--mono);font-size:10px;color:#7b8494;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    padding-left:13px;line-height:1.4;
+  }
+
+  /* 连线 */
+  .wire{
+    fill:none;stroke-width:1.5;stroke-linecap:round;
+    transition:opacity .3s,stroke-width .25s,stroke-opacity .25s;
+    opacity:.62;
+  }
+  .wire.dashed{stroke-dasharray:5 6;animation:flow 1.1s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-22}}
+  .wire.dim{opacity:.1}
+  .wire.soft{opacity:.3}
+  .wire.active{opacity:1;stroke-width:2.2}
+  .tone-amber{stroke:var(--amber)}
+  .tone-cyan{stroke:var(--cyan)}
+  .tone-violet{stroke:var(--violet)}
+  .tone-blue{stroke:var(--blue)}
+  .tone-emerald{stroke:var(--emerald)}
+  .tone-orange{stroke:var(--orange)}
+  .elabel text{
+    font-family:var(--mono);font-size:9.5px;fill:var(--fg-2);
+    text-anchor:middle;dominant-baseline:middle;
+  }
+  .elabel rect{fill:#0d0f12;stroke:rgba(255,255,255,.08);rx:4}
+
+  /* ---------- 详情抽屉 ---------- */
+  .inspector{
+    position:absolute;top:12px;right:12px;bottom:12px;width:372px;
+    background:rgba(13,15,19,.94);backdrop-filter:blur(14px);
+    border:1px solid var(--line-2);border-radius:14px;
+    padding:18px 18px 16px;overflow-y:auto;
+    transform:translateX(calc(100% + 20px));opacity:0;
+    transition:transform .3s cubic-bezier(.32,.72,0,1),opacity .25s;
+    z-index:20;scrollbar-width:thin;
+  }
+  .inspector.open{transform:none;opacity:1}
+  .inspector::-webkit-scrollbar{width:6px}
+  .inspector::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+  .ins-top{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .ins-badge{
+    font-size:9.5px;letter-spacing:.04em;padding:2px 7px;border-radius:999px;
+    border:1px solid currentColor;opacity:.9;
+  }
+  .ins-close{
+    margin-left:auto;appearance:none;background:transparent;border:0;color:var(--fg-3);
+    cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;border-radius:6px;
+  }
+  .ins-close:hover{color:var(--fg);background:rgba(255,255,255,.06)}
+  .ins-title{font-size:15px;font-weight:600;line-height:1.35;margin-bottom:8px}
+  .ins-file{
+    font-family:var(--mono);font-size:10.5px;color:var(--fg-2);
+    background:rgba(255,255,255,.035);border:1px solid var(--line);
+    border-radius:7px;padding:6px 8px;word-break:break-all;line-height:1.5;
+  }
+  .ins-role{
+    font-size:12.5px;color:var(--fg-2);line-height:1.65;margin:14px 0 4px;
+  }
+  .ins-h{
+    font-size:10px;letter-spacing:.14em;color:var(--fg-3);
+    font-family:var(--mono);margin:16px 0 8px;
+  }
+  .ins-list{list-style:none;display:flex;flex-direction:column;gap:8px}
+  .ins-list li{
+    font-size:12px;line-height:1.65;color:#c3cad6;padding-left:12px;position:relative;
+  }
+  .ins-list li::before{
+    content:"";position:absolute;left:0;top:8px;width:4px;height:4px;
+    border-radius:50%;background:var(--tone,#666);opacity:.8;
+  }
+  .ins-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .ins-link{
+    appearance:none;border:1px solid var(--line);background:rgba(255,255,255,.02);
+    color:var(--fg-2);font-family:inherit;font-size:11px;
+    padding:4px 9px;border-radius:7px;cursor:pointer;transition:.15s;
+  }
+  .ins-link:hover{border-color:var(--line-2);color:var(--fg);background:rgba(255,255,255,.05)}
+
+  /* ---------- 图例 ---------- */
+  .panhint{display:none}
+  @media (max-width:900px){
+    .panhint{
+      display:block;position:absolute;right:10px;bottom:10px;z-index:11;
+      font-size:10.5px;color:var(--fg-3);background:rgba(10,11,14,.82);
+      border:1px solid var(--line);padding:5px 9px;border-radius:8px;
+      backdrop-filter:blur(8px);
+    }
+  }
+  .legend{
+    position:absolute;left:14px;bottom:12px;z-index:10;
+    display:flex;gap:14px;align-items:center;
+    background:rgba(10,11,14,.82);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:10px;
+    padding:8px 12px;font-size:10.5px;color:var(--fg-3);
+  }
+  .lg{display:flex;align-items:center;gap:6px}
+  .lg svg{display:block;overflow:visible}
+
+  /* ---------- 底部 ---------- */
+  .foot{
+    flex:0 0 auto;display:flex;align-items:center;gap:16px;
+    padding:12px 26px 16px;min-height:52px;
+  }
+  .foot-l{display:flex;align-items:center;gap:10px;min-width:0}
+  .foot-dot{
+    width:7px;height:7px;border-radius:50%;background:var(--cyan);flex:0 0 auto;
+    box-shadow:0 0 10px rgba(51,194,214,.7);
+  }
+  .foot-dot.idle{background:var(--fg-3);box-shadow:none}
+  .foot-name{font-size:12px;color:var(--fg);font-weight:500;white-space:nowrap}
+  .foot-text{font-size:12px;color:var(--fg-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .foot-text b{color:var(--fg-2);font-weight:400}
+  .foot-r{margin-left:auto;display:flex;align-items:center;gap:5px}
+  .fdot{width:18px;height:3px;border-radius:2px;background:rgba(255,255,255,.1);transition:.25s}
+  .fdot.on{background:var(--cyan);box-shadow:0 0 8px rgba(51,194,214,.6)}
+
+  @media (max-width:900px){
+    .top{padding:14px 16px 10px;flex-wrap:wrap;gap:10px}
+    .top h1{font-size:16px}
+    .top .sub{font-size:11px}
+    .tools{margin-left:0;width:100%}
+    .chips{padding:0 16px 10px}
+    .viewport{margin:0 12px;border-radius:12px}
+    .inspector{
+      width:auto;left:8px;right:8px;top:auto;bottom:8px;height:64%;
+      transform:translateY(calc(100% + 20px));
+    }
+    .inspector.open{transform:none}
+    .legend{display:none}
+    .foot{padding:10px 16px 14px;flex-wrap:wrap}
+    .foot-r{display:none}
+    .foot-text{white-space:normal;font-size:11px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="kicker">architecture · interview trainer</div>
+      <h1>面试刷题工作台 · 整体架构与数据流向</h1>
+      <p class="sub"><b>Vue 3 纯静态前端</b> · 构建期预渲染 · 无服务端 · 本地持久化 · 1421 题 / 15 门课</p>
+    </div>
+    <div class="tools">
+      <div class="zoombox">
+        <button id="zoomOut" title="缩小">−</button>
+        <span id="zoomVal">100%</span>
+        <button id="zoomIn" title="放大">+</button>
+      </div>
+      <button class="tbtn" id="fit">适配画布</button>
+    </div>
+  </header>
+
+  <nav class="chips" id="chips"></nav>
+
+  <main class="viewport" id="viewport">
+    <div class="stage" id="stage">
+      <svg id="wires" width="1600" height="920" viewBox="0 0 1600 920"></svg>
+      <div id="nodes"></div>
+    </div>
+    <aside class="inspector" id="inspector"></aside>
+    <div class="panhint">拖拽平移 · 点 + 放大</div>
+    <div class="legend">
+      <div class="lg">
+        <svg width="26" height="8"><path d="M0,4 L24,4" stroke="#e8a33d" stroke-width="1.6" fill="none"/><path d="M19,1 L24,4 L19,7" fill="#e8a33d"/></svg>
+        构建
+      </div>
+      <div class="lg">
+        <svg width="26" height="8"><path d="M0,4 L24,4" stroke="#33c2d6" stroke-width="1.6" fill="none"/><path d="M19,1 L24,4 L19,7" fill="#33c2d6"/></svg>
+        供给
+      </div>
+      <div class="lg">
+        <svg width="26" height="8"><path d="M0,4 L24,4" stroke="#34d399" stroke-width="1.6" stroke-dasharray="4 4" fill="none"/><path d="M19,1 L24,4 L19,7" fill="#34d399"/></svg>
+        写回 / 缓存
+      </div>
+      <div class="lg">
+        <svg width="26" height="8"><path d="M0,4 L24,4" stroke="#ff8f5e" stroke-width="1.6" stroke-dasharray="4 4" fill="none"/></svg>
+        外部网络
+      </div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <div class="foot-l">
+      <span class="foot-dot idle" id="footDot"></span>
+      <span class="foot-name" id="footName"></span>
+      <span class="foot-text" id="footText">点节点看实现细节 · 上方选一个场景可播放完整数据流</span>
+    </div>
+    <div class="foot-r" id="footDots"></div>
+  </footer>
+</div>
+
+<script>
+/* =========================================================
+   1. 数据模型
+   ========================================================= */
+const TONE = { build:'amber', data:'cyan', state:'violet', view:'blue', persist:'emerald', ext:'orange' };
+
+const BANDS = [
+  { id:'build', x:24,  y:8, w:316, h:784, label:'① 构建时', note:'npm run parse · courses', tone:'amber' },
+  { id:'data',  x:400, y:8, w:272, h:784, label:'② 静态产物', note:'直接部署 · 无接口', tone:'cyan' },
+  { id:'state', x:732, y:8, w:356, h:784, label:'③ 运行时状态', note:'唯一数据出入口', tone:'violet' },
+  { id:'view',  x:1148,y:8, w:428, h:784, label:'④ 视图层', note:'双壳 · 12 条路由', tone:'blue' },
+];
+
+const NODES = {
+  /* ---- 构建时 ---- */
+  A1:{x:44,y:56,w:276,h:104,band:'build',title:'源文档 · Markdown',tag:'事实源',
+      sub:'java 889 · go 304 · ai 136 · arch 92',
+      meta:'../java · ../golang · ../ai · ../arch',
+      file:'../java  ../golang  ../ai  ../arch',
+      role:'题库与面经的唯一事实源，全部以 Markdown 笔记维护。',
+      points:[
+        'java 11 册 889 题、go 6 册 304 题、ai 7 册 136 题、arch 5 册 92 题，合计 1421 题',
+        '专题、章节、题号全部由文档标题层级推导，改文档即改题库',
+        '只被构建脚本读取，运行时完全接触不到 Markdown',
+      ]},
+  A2:{x:44,y:192,w:276,h:124,band:'build',title:'parse.mjs · 题库解析',tag:'npm run parse',
+      sub:'Markdown → JSON，构建期预渲染 HTML',
+      meta:'marked + highlight.js · 题数自检',
+      file:'scripts/parse.mjs',
+      role:'把 Markdown 一次性编译成前端可直接使用的 JSON，运行时不解析 Markdown。',
+      points:[
+        '输出 index.json（专题元数据 / 高频榜 / 文档目录）、{topicId}.json（题目）、docs/{id}.json（整篇面经）',
+        'marked + highlight.js 在构建期把代码块染好色，前端主包因此不需要这两个依赖',
+        '带题数自检：与逐文件实测基准比对，偏差直接报错退出，避免静默漏题',
+        '由 predev / prebuild 自动触发，正常开发不会忘记跑',
+      ]},
+  A3:{x:44,y:348,w:276,h:104,band:'build',title:'curriculum · 课程作者源',tag:'authoring',
+      sub:'阶段 / 讲义 / 章节选择器',
+      meta:'schema 约束 · audit 教学审计',
+      file:'scripts/curriculum/{java,go,ai,arch}/*.mjs',
+      role:'课程作者源：声明阶段、讲义与「章节选择器」，只引用题目 id。',
+      points:[
+        'schema.mjs 约束块类型与字段上限，audit.mjs 做教学审计（讲义字数、explore 分支必填项）',
+        '与题库解耦：不复制题面，题库改题不必改课程',
+        '每门课在 index.mjs 注册，构建时统一读取',
+      ]},
+  A4:{x:44,y:484,w:276,h:124,band:'build',title:'build-courses.mjs',tag:'npm run courses',
+      sub:'校验 → 覆盖率 → 课程 JSON',
+      meta:'--check / --partial / --audit',
+      file:'scripts/build-courses.mjs',
+      role:'把作者源编译成课程 JSON，并把不合格的课程挡在产物之外。',
+      points:[
+        '校验讲义长度、全局题目覆盖率、教学审计；--check 只校验不写盘',
+        '产出 courses/index.json（摘要 + buildHash）与 courses/{id}.json（阶段 / 课时 / questionIds）',
+        '同时写 .blockindex.json（块地址 → 指纹），供 course-tool 定点改块',
+        '--skeleton / --partial 是分批写作的过渡态，避免半成品阻塞整条流水线',
+      ]},
+  A5:{x:44,y:640,w:276,h:84,band:'build',title:'course-tool.mjs',tag:'块级编辑',
+      sub:'按指纹定位讲义块',
+      meta:'改作者源，产物仍需重建',
+      file:'scripts/course-tool.mjs',
+      compact:true,
+      role:'课程块的定点编辑工具，避免手写偏移。',
+      points:[
+        '用 .blockindex.json 的块指纹在作者源里定位某个讲义块',
+        '只改作者源；想看到效果必须重新跑 build',
+      ]},
+
+  /* ---- 静态产物 ---- */
+  B1:{x:420,y:64,w:232,h:104,band:'data',title:'index.json',tag:'入口',
+      sub:'专题元数据 · 高频榜 · 文档目录',
+      meta:'counts 缺失时运行时补齐',
+      file:'public/data/index.json',
+      role:'题库入口索引，一次请求拿到全部专题与文档目录。',
+      points:[
+        'topics[] 带语言、题目数、顺序；counts 汇总各语言题量（当前 1421）',
+        '旧产物缺 counts 字段时，dataStore 会按 topics 求和补齐——JSON 一律当外部输入',
+        '首页、筛选栏、搜索入口、DocView 的标题都只依赖它',
+      ]},
+  B2:{x:420,y:200,w:232,h:104,band:'data',title:'{topicId}.json ×29',tag:'正文',
+      sub:'题目 + 预渲染 HTML',
+      meta:'3.0MB · 全部并行加载',
+      file:'public/data/{topicId}.json',
+      role:'单专题的全部题目，正文是构建期预渲染好的 HTML。',
+      points:[
+        '字段：id / title / chapter / no / tags / searchText / html',
+        '29 个文件约 3.0MB，首屏 Promise.all 全量并行拉取',
+        '题目数涨到 3000 前后应改为按语言分片，否则请求数与内存线性增长',
+      ]},
+  B3:{x:420,y:336,w:232,h:88,band:'data',title:'docs/{id}.json',tag:'直连 fetch',
+      sub:'面经 / 岗位分析整篇 HTML',
+      meta:'DocView 直接取，不进 store',
+      file:'public/data/docs/{id}.json',
+      compact:true,
+      role:'长文档类内容，整篇渲染，不参与题库索引。',
+      points:[
+        '不进 Pinia：DocView 直接 fetch 后 v-html 渲染',
+        '内容为构建期自产，属可信数据，因此不需要 DOMPurify',
+      ]},
+  B4:{x:420,y:452,w:232,h:88,band:'data',title:'courses/index.json',tag:'课程',
+      sub:'课程摘要 + buildHash',
+      meta:'列表页只读它',
+      file:'public/data/courses/index.json',
+      compact:true,
+      role:'课程列表的唯一数据源。',
+      points:[
+        'version: 1 + courses[]（id / 语言 / 标题 / 课时数 / order / buildHash）',
+        '列表页只读它，不加载任何课程正文',
+        'buildHash 用于判断产物是否过期',
+      ]},
+  B5:{x:420,y:568,w:232,h:88,band:'data',title:'courses/{id}.json',tag:'课程',
+      sub:'阶段 / 课时 / questionIds',
+      meta:'按需加载，不预载',
+      file:'public/data/courses/{courseId}.json',
+      compact:true,
+      role:'单门课程的完整内容，共 15 门、6.8MB。',
+      points:[
+        'stages → lessons → questionIds，课时正文由题库回答，不重复存储',
+        '运行时再校验 version / id / stages，构建产物同样按外部输入对待',
+        '按需加载，同一门课并发进入共用一次请求（inflight Map）',
+      ]},
+  B6:{x:420,y:684,w:232,h:72,band:'data',title:'静态产物 ≈ 9.8MB',tag:'无服务端',
+      sub:'public/ 直接部署',
+      meta:'任何静态托管都能跑',
+      file:'public/data/**',
+      compact:true,
+      role:'全部产物都是静态文件，没有接口、没有数据库。',
+      points:[
+        '题库 3.0MB + 课程 6.8MB，可放任意静态托管或对象存储',
+        '同时是 PWA 预缓存的对象，因此离线可用',
+      ]},
+
+  /* ---- 运行时状态 ---- */
+  C1:{x:752,y:56,w:316,h:140,band:'state',title:'dataStore',tag:'Pinia',
+      sub:'题库正文 + 全文索引，分两阶段就绪',
+      meta:'contentReady / searchReady',
+      file:'src/stores/data.ts',
+      role:'题库正文与搜索索引的唯一入口，渲染只等正文，不等索引。',
+      points:[
+        'init()：先取 index.json，再 Promise.all 并发拉全部专题 JSON',
+        'markRaw 跳过深层响应式代理——1400+ 只读对象没必要逐个 Proxy 包装',
+        'contentReady 一置位 DataGate 立即放行，首屏不被 600ms 的索引构建拖住',
+        '首屏后 requestIdleCallback 触发 MiniSearch 构建，每 100 题一片、片间让出主线程',
+        '分词：CJK 二元组 + 拉丁整词；title 权重 6 / tags 3 / no 2，prefix + fuzzy 0.2',
+        'searchReady 之前 searchQuestions 返回空，UI 显示「索引构建中」',
+      ]},
+  C2:{x:752,y:224,w:316,h:112,band:'state',title:'courseStore',tag:'Pinia',
+      sub:'课程按需加载 + 完成度',
+      meta:'shallowRef · inflight 去重',
+      file:'src/stores/course.ts',
+      role:'课程索引与正文的按需加载，完成度独立持久化。',
+      points:[
+        'shallowRef 存 index / loaded，避免整库深响应式',
+        'inflight Map：同一门课并发进入只发一次请求',
+        'parseCourse 运行时校验 version / id / stages，构建产物仍视为外部输入',
+        '完成度存独立 key course-v1——重置学习记录不会抹掉课程解锁状态',
+      ]},
+  C3:{x:752,y:364,w:316,h:120,band:'state',title:'progressStore',tag:'唯一写入口',
+      sub:'SRS 进度 · 浏览 / 背题 / 模考共用',
+      meta:'Leitner 6 盒 · localStorage',
+      file:'src/stores/progress.ts',
+      role:'所有自评的唯一写入点，学习数据只从这里进。',
+      points:[
+        'grade(questionId, result, kind)：Leitner 6 盒 [1,2,4,7,15,30] 天',
+        '会→升盒；模糊→不升盒、次日再见；不会→回 0 盒、6 小时后重来',
+        'history 按天聚合，同题同日只计一次 studied；quiz 单独计数',
+        '派生 computed：dueIds / wrongIds / statusCounts / streak / recentDays',
+        '导入导出严格校验 version: 1，重置需二次确认',
+        'onError 上报 storageIssue：配额写满会在页面顶部告警，而不是静默丢进度',
+      ]},
+  C4:{x:752,y:512,w:316,h:132,band:'state',title:'aiStore',tag:'Pinia',
+      sub:'三协议流式对话，纯前端直连',
+      meta:'SSE · 200ms 节流 · 三级裁剪',
+      file:'src/stores/ai.ts',
+      role:'把三种供应商协议抹平成同一个流式接口。',
+      points:[
+        '适配 OpenAI 兼容 / Anthropic messages / Gemini streamGenerateContent，逐行解析 SSE data:',
+        'AbortController 支持「停止生成」；生成中状态是内存态，刷新即中断',
+        '流式写入 200ms 节流：每个 token 都全量序列化会直接卡住输入',
+        '容量三级裁剪：单会话 6 万字符 → 最多 100 个会话 → 全局 150 万字符',
+        'AI 输出属不可信内容，经 DOMPurify 消毒后才渲染',
+        'API Key 与对话存在 localStorage，换设备需重新配置',
+      ]},
+  LS:{x:752,y:672,w:316,h:96,band:'persist',title:'localStorage',tag:'持久层',
+      sub:'progress-v1 · course-v1 · ai-config / ai-chats',
+      meta:'useLocalStorage · 多标签同步',
+      file:'interview-trainer/*  ·  浏览器 localStorage',
+      role:'本地持久层，三个互不干扰的命名空间。',
+      points:[
+        'progress-v1：卡片 SRS 记录 + 每日统计',
+        'course-v1：课程完成度，与 SRS 进度分离',
+        'ai-config-v1 / ai-chats-v1：供应商配置与对话正文',
+        'listenToStorageChanges：多标签页自动同步',
+        '写失败（配额满）→ storageIssue → DataGate 顶部黄条告警',
+      ]},
+
+  /* ---- 视图层 ---- */
+  D1:{x:1168,y:56,w:388,h:112,band:'view',title:'App 壳 · 路由',tag:'双壳',
+      sub:'桌面侧栏 / 移动壳 · DataGate 门控',
+      meta:'hash 路由 12 条 · 懒加载 + 空闲预取',
+      file:'src/App.vue · src/router/index.ts · components/DataGate.vue',
+      role:'外壳按断点分成两套，数据门控只有一处。',
+      points:[
+        'usePlatform().isMobile 在 lg 断点切换 MobileShell 与桌面侧栏',
+        'DataGate 只等 contentReady；课程索引独立加载，不参与门控',
+        '12 条 hash 路由全部懒加载，meta.level 决定移动端转场方向（下钻 / 返回 / 平级淡切）',
+        '首屏后空闲预取全部路由 chunk，点 tab 不再等下载；省流模式（saveData）跳过',
+      ]},
+  D2:{x:1168,y:232,w:388,h:88,band:'view',title:'首页 · 题库 · 搜索',tag:'level 1',
+      sub:'只读 dataStore',
+      meta:'SearchCommand · ⌘K / Ctrl K',
+      file:'views/HomeView · BrowseView · SearchView',
+      compact:true,
+      role:'三个入口，全部只读。',
+      points:[
+        '首页：题量、今日进度、待复习、语言分组',
+        '题库：按专题折叠浏览，支持掌握状态筛选',
+        '搜索：⌘K 唤起 SearchCommand，索引未就绪时提示构建中',
+      ]},
+  D3:{x:1168,y:336,w:388,h:88,band:'view',title:'背题 · 模考 · 错题本',tag:'level 1–2',
+      sub:'读 dataStore + 写 progressStore',
+      meta:'滑动评分 · 键盘 1 / 2 / 3',
+      file:'views/FlashcardView · QuizView · WrongBookView',
+      compact:true,
+      role:'练习闭环：取题、自评、回到调度。',
+      points:[
+        '背题：翻卡后滑动或按键评分，右=会 / 上=模糊 / 左=不会',
+        '模考：按专题抽题，quiz 单独计入当日统计',
+        '错题本：由 wrongIds 派生，答对后自动移出',
+        '评分统一走 progress.grade，没有第二个写入点',
+      ]},
+  D4:{x:1168,y:440,w:388,h:88,band:'view',title:'课程：列表 / 详情 / 课时',tag:'level 1–2',
+      sub:'读 courseStore + progressStore',
+      meta:'LessonRunner · 阶段验收',
+      file:'views/CoursesView · CourseDetailView · CourseLessonView',
+      compact:true,
+      role:'三层课程浏览与课时学习。',
+      points:[
+        '列表 → 详情 → 课时，共用 meta.nav="courses" 保持侧栏高亮',
+        '课时内容 = 讲义块 + 题目练习，练习复用 useQuestionSession 状态机',
+        '阶段验收按阶段汇总自评，完成度写回 course-v1',
+      ]},
+  D5:{x:1168,y:544,w:388,h:80,band:'view',title:'学习统计 · 我的',tag:'level 2',
+      sub:'读 progressStore',
+      meta:'ECharts · 热力图 · 导入导出',
+      file:'views/StatsView · MoreView',
+      compact:true,
+      role:'统计与设置，全部从同一份进度派生。',
+      points:[
+        '图表颜色读 CSS 变量，与掌握状态三色同源，不写死十六进制',
+        '热力图来自 recentDays，连续天数来自 streak',
+        '导入 / 导出 JSON 备份，重置二次确认',
+      ]},
+  D6:{x:1168,y:648,w:388,h:80,band:'view',title:'AI 面板 · 设置',tag:'浮层',
+      sub:'读 aiStore',
+      meta:'解读 / 追问 / 自由',
+      file:'components/ai/AiChatPanel.vue · AiSettingsDialog.vue',
+      compact:true,
+      role:'题目上下文内的 AI 对话浮层。',
+      points:[
+        '三种模式：AI 解读 / 追问演练 / 自由提问',
+        'system prompt 带上题目参考要点与用户自评状态，按状态调难度',
+        '流式增量渲染，可随时停止；设置里可切预设或自定义 baseUrl / model',
+      ]},
+
+  /* ---- 底部：离线 & 外部 ---- */
+  SW:{x:400,y:816,w:272,h:88,band:'persist',title:'Service Worker',tag:'Workbox',
+      sub:'预缓存全部 JS / CSS / JSON',
+      meta:'navigateFallback → index.html',
+      file:'vite.config.ts · vite-plugin-pwa',
+      floor:true,compact:true,
+      role:'离线可用：产物全部进预缓存，断网也能刷题。',
+      points:[
+        'globPatterns 覆盖 js/css/html/svg/png/woff2/json，约 9.8MB 全量预缓存',
+        'navigateFallback → index.html，配合 hash 路由不需要额外重写规则',
+        '断网后 data/*.json 由 SW 直接返回，fetch 语义不变，store 无感知',
+        'registerType: autoUpdate，新版本静默接管',
+      ]},
+  LLM:{x:1148,y:816,w:428,h:88,band:'ext',title:'LLM Provider · 外部',tag:'fetch 直连',
+      sub:'DeepSeek · Kimi · 通义 · GLM · Claude · Gemini · Ollama',
+      meta:'Key 存 localStorage，无后端代理',
+      file:'https://…/chat/completions  ·  /v1/messages  ·  /v1beta/models/…',
+      floor:true,compact:true,
+      role:'大模型供应商，浏览器直接请求，中间没有任何服务端。',
+      points:[
+        '预设 8 家：DeepSeek / Kimi / 通义千问 / 智谱 GLM / OpenRouter / Claude / Gemini / Ollama',
+        'Anthropic 需 anthropic-dangerous-direct-browser-access 头；Gemini 用 x-goog-api-key',
+        'CORS 与网络策略由供应商决定；本地 Ollama 需 OLLAMA_ORIGINS=*',
+        '没有后端代理：Key 在浏览器里，属个人单机工具的取舍',
+      ]},
+};
+
+const EDGES = [
+  /* 构建：题库 */
+  {id:'e_a1a2', from:'A1', to:'A2', fs:'bottom', ts:'top', tone:'amber'},
+  {id:'e_a2b1', from:'A2', to:'B1', fs:'right', ts:'left', fo:.42, tone:'amber'},
+  {id:'e_a2b2', from:'A2', to:'B2', fs:'right', ts:'left', fo:.62, tone:'amber'},
+  {id:'e_a2b3', from:'A2', to:'B3', fs:'right', ts:'left', fo:.82, tone:'amber'},
+  /* 构建：课程 */
+  {id:'e_a3a4', from:'A3', to:'A4', fs:'bottom', ts:'top', tone:'amber'},
+  {id:'e_a4b4', from:'A4', to:'B4', fs:'right', ts:'left', fo:.38, tone:'amber'},
+  {id:'e_a4b5', from:'A4', to:'B5', fs:'right', ts:'left', fo:.7,  tone:'amber'},
+  {id:'e_a4a5', from:'A5', to:'A4', fs:'top', ts:'bottom', tone:'amber', both:true, dashed:true},
+  /* 数据供给 */
+  {id:'e_b1c1', from:'B1', to:'C1', fs:'right', ts:'left', ti:.3,  tone:'cyan', label:'fetch'},
+  {id:'e_b2c1', from:'B2', to:'C1', fs:'right', ts:'left', ti:.74, tone:'cyan', label:'并发 29'},
+  {id:'e_b4c2', from:'B4', to:'C2', fs:'right', ts:'left', fo:.4, ti:.28, tone:'cyan'},
+  {id:'e_b5c2', from:'B5', to:'C2', fs:'right', ts:'left', fo:.4, ti:.7,  tone:'cyan'},
+  /* 状态供给视图 */
+  {id:'e_c1d2', from:'C1', to:'D2', fs:'right', ts:'left', fo:.28, ti:.5,  tone:'violet', mid:1116},
+  {id:'e_c1d3', from:'C1', to:'D3', fs:'right', ts:'left', fo:.8,  ti:.35, tone:'violet', mid:1104},
+  {id:'e_c3d3', from:'C3', to:'D3', fs:'right', ts:'left', fo:.3,  ti:.75, tone:'emerald', both:true, label:'自评'},
+  {id:'e_c3d5', from:'C3', to:'D5', fs:'right', ts:'left', fo:.82, ti:.5,  tone:'violet'},
+  {id:'e_c2d4', from:'C2', to:'D4', fs:'right', ts:'left', fo:.55, ti:.5,  tone:'violet', mid:1116},
+  {id:'e_c4d6', from:'C4', to:'D6', fs:'right', ts:'left', fo:.42, ti:.5,  tone:'violet'},
+  /* 持久化 */
+  {id:'e_c4ls', from:'C4', to:'LS', fs:'bottom', ts:'top', tone:'emerald', both:true, dashed:true, fo:.62},
+  {id:'e_c3ls', from:'C3', to:'LS', fs:'left', ts:'left', wp:[{x:716,y:424},{x:716,y:701}], tone:'emerald', both:true, dashed:true, stub:36, ti:.3},
+  {id:'e_c2ls', from:'C2', to:'LS', fs:'left', ts:'left', wp:[{x:700,y:280},{x:700,y:720}], tone:'emerald', both:true, dashed:true, stub:52},
+  /* 外部 */
+  {id:'e_c4llm', from:'C4', to:'LLM', fs:'right', ts:'top',
+   wp:[{x:1120,y:565},{x:1120,y:806},{x:1360,y:806}], tone:'orange', both:true, dashed:true, label:'SSE', lp:.12},
+  /* 离线 */
+  {id:'e_sw', from:'SW', to:'B6', fs:'top', ts:'bottom', tone:'emerald', both:true, dashed:true},
+];
+
+const SCENES = [
+  {
+    id:'cold', name:'冷启动加载', hint:'从 Markdown 到首屏',
+    nodes:['A1','A2','B1','B2','C1','D1','D2'],
+    edges:['e_a1a2','e_a2b1','e_a2b2','e_b1c1','e_b2c1','e_c1d2'],
+    steps:[
+      {t:'npm run parse 把 Markdown 一次性编译成 JSON',n:['A1','A2'],e:['e_a1a2']},
+      {t:'产物落到 public/data：入口索引 + 29 个专题文件',n:['B1','B2'],e:['e_a2b1','e_a2b2']},
+      {t:'dataStore.init() 先取索引，再并发拉全部专题（约 3MB）',n:['C1'],e:['e_b1c1','e_b2c1']},
+      {t:'markRaw 跳过响应式代理，contentReady 置位',n:['C1'],e:[]},
+      {t:'DataGate 放行，首屏渲染不与搜索索引抢夺主线程',n:['D1','D2'],e:['e_c1d2']},
+    ],
+  },
+  {
+    id:'search', name:'全文搜索', hint:'索引只在空闲时建',
+    nodes:['B2','C1','D2'],
+    edges:['e_b2c1','e_c1d2'],
+    steps:[
+      {t:'正文就绪后才轮到索引：requestIdleCallback 触发',n:['C1'],e:['e_b2c1']},
+      {t:'每 100 题一片，片间 setTimeout(0) 让出主线程',n:['C1'],e:[]},
+      {t:'CJK 二元组 + 拉丁整词；title 权重 6、prefix、fuzzy 0.2',n:['C1'],e:[]},
+      {t:'searchReady 前 SearchCommand 显示「索引构建中」',n:['C1','D2'],e:['e_c1d2']},
+    ],
+  },
+  {
+    id:'grade', name:'自评写盘', hint:'唯一写入点 + SRS',
+    nodes:['D3','C3','D5','LS'],
+    edges:['e_c3d3','e_c3d5','e_c3ls','e_c4ls'],
+    steps:[
+      {t:'点「会 / 模糊 / 不会」→ progress.grade()',n:['D3','C3'],e:['e_c3d3']},
+      {t:'Leitner 推进盒级与 due；history 按天累加，同题同日只计一次',n:['C3'],e:[]},
+      {t:'useLocalStorage 序列化写入 progress-v1，多标签自动同步',n:['C3','LS'],e:['e_c3ls']},
+      {t:'统计页的 dueIds / streak / 热力图全部由同一份数据派生',n:['D5'],e:['e_c3d5']},
+    ],
+  },
+  {
+    id:'build', name:'课程构建', hint:'作者源 → 课程 JSON',
+    nodes:['A3','A4','A5','B4','B5','C2','D4'],
+    edges:['e_a3a4','e_a4b4','e_a4b5','e_a4a5','e_b4c2','e_b5c2','e_c2d4'],
+    steps:[
+      {t:'作者源声明阶段与讲义，只引用题目 id，不复制题面',n:['A3'],e:[]},
+      {t:'build 校验覆盖率 / 讲义长度 / 教学审计，任一不过即失败',n:['A4'],e:['e_a3a4']},
+      {t:'blockindex 记录块指纹，course-tool 据此定点改块',n:['A5','A4'],e:['e_a4a5']},
+      {t:'产出课程索引与每课全文（索引带 buildHash）',n:['B4','B5'],e:['e_a4b4','e_a4b5']},
+      {t:'运行时按需加载，shallowRef + inflight 去重',n:['C2'],e:['e_b4c2','e_b5c2']},
+      {t:'课时内容 = 讲义块 + 题目练习，完成度写 course-v1',n:['D4'],e:['e_c2d4']},
+    ],
+  },
+  {
+    id:'ai', name:'AI 解读', hint:'浏览器直连大模型',
+    nodes:['D6','C4','LLM','LS'],
+    edges:['e_c4d6','e_c4llm','e_c4ls'],
+    steps:[
+      {t:'题目要点 + 自评状态拼进 system prompt，三种模式分流',n:['D6','C4'],e:['e_c4d6']},
+      {t:'按供应商类型走三套协议，fetch 直连，无代理',n:['C4','LLM'],e:['e_c4llm']},
+      {t:'SSE 逐行解析，AbortController 可随时中断',n:['C4'],e:[]},
+      {t:'200ms 节流落盘；超限按「单会话 → 会话数 → 总量」三级裁剪',n:['C4','LS'],e:['e_c4ls']},
+    ],
+  },
+  {
+    id:'offline', name:'离线可用', hint:'SW 全量预缓存',
+    nodes:['SW','B1','B2','B4','B5','C1','C2','D2','D4'],
+    edges:['e_sw','e_b1c1','e_b2c1','e_b4c2','e_b5c2'],
+    steps:[
+      {t:'首次访问：Service Worker 预缓存全部 JS / CSS / JSON（≈9.8MB）',n:['SW','B6'],e:['e_sw']},
+      {t:'断网后导航走 navigateFallback → index.html',n:['SW'],e:[]},
+      {t:'data/*.json 由 SW 直接命中缓存，store 完全无感知',n:['B1','B2','C1'],e:['e_b1c1','e_b2c1']},
+      {t:'进度与对话本就在 localStorage，离线读写不受影响',n:['C1','C2','D2','D4'],e:[]},
+    ],
+  },
+];
+
+/* =========================================================
+   2. 几何 / 路径
+   ========================================================= */
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+function sidePoint(n, side, ratio){
+  const r = ratio == null ? .5 : ratio;
+  if(side === 'right')  return {x:n.x + n.w,        y:n.y + n.h*r};
+  if(side === 'left')   return {x:n.x,              y:n.y + n.h*r};
+  if(side === 'top')    return {x:n.x + n.w*r,      y:n.y};
+  return                       {x:n.x + n.w*r,      y:n.y + n.h};
+}
+const OUT_DIR = { right:[1,0], left:[-1,0], top:[0,-1], bottom:[0,1] };
+const IN_DIR  = { left:[1,0], right:[-1,0], top:[0,1], bottom:[0,-1] };
+
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+function dedupe(pts){
+  const out = [];
+  for(const p of pts){
+    const last = out[out.length-1];
+    if(!last || Math.abs(last.x-p.x) > .4 || Math.abs(last.y-p.y) > .4) out.push({x:p.x,y:p.y});
+  }
+  return out;
+}
+
+/** 在需要斜线的位置插入正交拐点：优先延续来向 */
+function orthogonalize(pts){
+  const out = [pts[0]];
+  for(let i=1;i<pts.length;i++){
+    const a = out[out.length-1], prev = out[out.length-2], b = pts[i];
+    if(Math.abs(a.x-b.x) > .5 && Math.abs(a.y-b.y) > .5){
+      const cameHorizontal = prev ? Math.abs(prev.y-a.y) < .5 : true;
+      out.push(cameHorizontal ? {x:b.x, y:a.y} : {x:a.x, y:b.y});
+    }
+    out.push(b);
+  }
+  return dedupe(out);
+}
+
+function roundedPath(pts, r){
+  const p = dedupe(pts);
+  if(p.length < 2) return '';
+  if(p.length === 2) return `M${p[0].x},${p[0].y} L${p[1].x},${p[1].y}`;
+  let d = `M${p[0].x},${p[0].y}`;
+  for(let i=1;i<p.length-1;i++){
+    const prev = p[i-1], cur = p[i], next = p[i+1];
+    const l1 = dist(prev,cur), l2 = dist(cur,next);
+    const rr = Math.min(r, l1/2, l2/2);
+    const v1 = {x:(prev.x-cur.x)/l1, y:(prev.y-cur.y)/l1};
+    const v2 = {x:(next.x-cur.x)/l2, y:(next.y-cur.y)/l2};
+    const a = {x:cur.x + v1.x*rr, y:cur.y + v1.y*rr};
+    const b = {x:cur.x + v2.x*rr, y:cur.y + v2.y*rr};
+    d += ` L${a.x.toFixed(1)},${a.y.toFixed(1)} Q${cur.x},${cur.y} ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+  }
+  const end = p[p.length-1];
+  d += ` L${end.x},${end.y}`;
+  return d;
+}
+
+function edgeGeometry(edge){
+  const a = NODES[edge.from], b = NODES[edge.to];
+  const p0 = sidePoint(a, edge.fs, edge.fo);
+  const p1 = sidePoint(b, edge.ts, edge.ti);
+  const od = OUT_DIR[edge.fs], id = IN_DIR[edge.ts];
+  const stub = edge.stub || 18;
+  const s1 = {x:p0.x + od[0]*stub, y:p0.y + od[1]*stub};
+  const s2 = {x:p1.x - id[0]*stub, y:p1.y - id[1]*stub};
+
+  const raw = [p0, s1];
+  if(edge.wp) raw.push(...edge.wp);
+  else if(edge.mid != null && od[0] !== 0 && id[0] !== 0){
+    const mid = edge.mid;
+    raw.push({x:mid, y:s1.y}, {x:mid, y:s2.y});
+  }
+  raw.push(s2, p1);
+  return roundedPath(orthogonalize(raw), 10);
+}
+
+/* =========================================================
+   3. 渲染
+   ========================================================= */
+const stage = document.getElementById('stage');
+const nodesEl = document.getElementById('nodes');
+const svg = document.getElementById('wires');
+const viewport = document.getElementById('viewport');
+
+const TONES = ['amber','cyan','violet','blue','emerald','orange'];
+
+function renderStatic(){
+  // 分层带
+  const bandHtml = BANDS.map(b => `
+    <div class="band" data-band="${b.id}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;--tone:var(--${b.tone})">
+      <div class="band-label"><i></i><b>${b.label}</b></div>
+      <div class="band-note">${b.note}</div>
+    </div>`).join('');
+
+  const routerBox = `
+    <div class="router-box" style="left:1152px;top:196px;width:416px;height:596px">
+      <div class="rb-label">RouterView · 12 视图 · 懒加载 + 空闲预取</div>
+    </div>`;
+
+  nodesEl.insertAdjacentHTML('beforebegin', bandHtml + routerBox);
+
+  // 节点
+  nodesEl.innerHTML = Object.entries(NODES).map(([id,n]) => `
+    <div class="node${n.compact?' compact':''}${n.floor?' floor':''}" data-id="${id}" data-band="${n.band}"
+         style="left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px">
+      <div class="n-row"><span class="n-dot"></span><span class="n-title">${n.title}</span><span class="n-tag">${n.tag}</span></div>
+      <div class="n-sub">${n.sub}</div>
+      <div class="n-meta">${n.meta}</div>
+    </div>`).join('');
+
+  // 箭头定义
+  const defs = document.createElementNS(SVGNS,'defs');
+  defs.innerHTML = TONES.map(t => `
+    <marker id="ar-${t}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5.5" markerHeight="5.5"
+            orient="auto-start-reverse"><path d="M0.6,0.6 L7.6,4 L0.6,7.4 Z" fill="var(--${t})"/></marker>`).join('');
+  svg.appendChild(defs);
+
+  // 连线
+  const edgeLayer = document.createElementNS(SVGNS,'g');
+  edgeLayer.setAttribute('class','edge-layer');
+  svg.appendChild(edgeLayer);
+
+  for(const e of EDGES){
+    const p = document.createElementNS(SVGNS,'path');
+    p.setAttribute('d', edgeGeometry(e));
+    p.setAttribute('class', `wire tone-${e.tone}${e.dashed?' dashed':''}`);
+    p.dataset.id = e.id;
+    if(e.both){
+      p.setAttribute('marker-end', `url(#ar-${e.tone})`);
+      p.setAttribute('marker-start', `url(#ar-${e.tone})`);
+    } else {
+      p.setAttribute('marker-end', `url(#ar-${e.tone})`);
+    }
+    edgeLayer.appendChild(p);
+  }
+
+  // 边标签
+  const labelLayer = document.createElementNS(SVGNS,'g');
+  labelLayer.setAttribute('class','label-layer');
+  svg.appendChild(labelLayer);
+  for(const e of EDGES){
+    if(!e.label) continue;
+    const path = edgeLayer.querySelector(`[data-id="${e.id}"]`);
+    const len = path.getTotalLength();
+    const pt = path.getPointAtLength(len * (e.lp == null ? .5 : e.lp));
+    const w = e.label.length * 6.4 + 12;
+    const g = document.createElementNS(SVGNS,'g');
+    g.setAttribute('class','elabel');
+    g.dataset.for = e.id;
+    g.innerHTML = `<rect x="${pt.x - w/2}" y="${pt.y - 7.5}" width="${w}" height="15" rx="4"></rect>
+                   <text x="${pt.x}" y="${pt.y + .5}">${e.label}</text>`;
+    labelLayer.appendChild(g);
+  }
+}
+
+/* =========================================================
+   4. 视图变换
+   ========================================================= */
+const view = { x:0, y:0, s:1 };
+
+function apply(){
+  stage.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.s})`;
+  document.getElementById('zoomVal').textContent = Math.round(view.s * 100) + '%';
+}
+
+function fit(){
+  const r = viewport.getBoundingClientRect();
+  const s = Math.min((r.width - 20) / 1600, (r.height - 20) / 920, 1.2);
+  // 窄屏全图会缩到 30% 完全不可读：改为按可读比例停在第一列，拖拽查看
+  if(r.width < 900 && s < .5){
+    view.s = .55;
+    view.x = 12;
+    view.y = Math.max(8, (r.height - 920 * .55) / 2);
+    apply();
+    return;
+  }
+  view.s = Math.max(s, .3);
+  view.x = (r.width - 1600 * view.s) / 2;
+  view.y = (r.height - 920 * view.s) / 2;
+  apply();
+}
+
+function zoomAt(cx, cy, factor){
+  const next = Math.min(2.2, Math.max(.32, view.s * factor));
+  const k = next / view.s;
+  view.x = cx - (cx - view.x) * k;
+  view.y = cy - (cy - view.y) * k;
+  view.s = next;
+  apply();
+}
+
+viewport.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  const r = viewport.getBoundingClientRect();
+  zoomAt(ev.clientX - r.left, ev.clientY - r.top, ev.deltaY > 0 ? .9 : 1.1);
+}, { passive:false });
+
+let drag = null;
+let suppressClick = false;
+viewport.addEventListener('pointerdown', (ev) => {
+  if(ev.target.closest('.node') || ev.target.closest('.inspector') || ev.target.closest('.legend')) return;
+  drag = { sx:ev.clientX, sy:ev.clientY, ox:view.x, oy:view.y, moved:false };
+  viewport.classList.add('dragging');
+  viewport.setPointerCapture(ev.pointerId);
+});
+viewport.addEventListener('pointermove', (ev) => {
+  if(!drag) return;
+  if(Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) > 6) drag.moved = true;
+  view.x = drag.ox + (ev.clientX - drag.sx);
+  view.y = drag.oy + (ev.clientY - drag.sy);
+  apply();
+});
+viewport.addEventListener('pointerup', () => {
+  // 拖完图会紧跟一次 click，别把面板关掉
+  if(drag && drag.moved){
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 0);
+  }
+  drag = null;
+  viewport.classList.remove('dragging');
+});
+viewport.addEventListener('pointercancel', () => { drag = null; viewport.classList.remove('dragging'); });
+
+document.getElementById('zoomIn').onclick = () => {
+  const r = viewport.getBoundingClientRect();
+  zoomAt(r.width/2, r.height/2, 1.15);
+};
+document.getElementById('zoomOut').onclick = () => {
+  const r = viewport.getBoundingClientRect();
+  zoomAt(r.width/2, r.height/2, 1/1.15);
+};
+document.getElementById('fit').onclick = fit;
+window.addEventListener('resize', () => { if(!activeScene) fit(); });
+
+/* =========================================================
+   5. 详情抽屉
+   ========================================================= */
+const inspector = document.getElementById('inspector');
+let selected = null;
+
+function neighborsOf(id){
+  const set = new Set();
+  for(const e of EDGES){
+    if(e.from === id) set.add(e.to);
+    if(e.to === id) set.add(e.from);
+  }
+  return [...set];
+}
+
+function openNode(id){
+  const n = NODES[id];
+  if(!n) return;
+  selected = id;
+
+  document.querySelectorAll('.node').forEach(el => {
+    el.classList.toggle('active', el.dataset.id === id);
+  });
+
+  const band = BANDS.find(b => b.id === n.band);
+  const toneName = n.band === 'persist' ? 'emerald' : n.band === 'ext' ? 'orange' : TONE[n.band];
+  const bandLabel = band ? band.label : (n.band === 'persist' ? '持久 / 离线' : '外部服务');
+  const nb = neighborsOf(id);
+
+  inspector.style.setProperty('--tone', `var(--${toneName})`);
+  inspector.innerHTML = `
+    <div class="ins-top">
+      <span class="ins-badge" style="color:var(--${toneName})">${bandLabel}</span>
+      <span class="ins-badge" style="color:var(--fg-3)">${n.tag}</span>
+      <button class="ins-close" id="insClose" aria-label="关闭">×</button>
+    </div>
+    <div class="ins-title">${n.title}</div>
+    <div class="ins-file">${n.file}</div>
+    <p class="ins-role">${n.role}</p>
+    <div class="ins-h">实 现 要 点</div>
+    <ul class="ins-list">${n.points.map(p => `<li>${p}</li>`).join('')}</ul>
+    ${nb.length ? `<div class="ins-h">关 联 节 点</div>
+      <div class="ins-links">${nb.map(x => `<button class="ins-link" data-goto="${x}">${NODES[x].title}</button>`).join('')}</div>` : ''}
+  `;
+  inspector.classList.add('open');
+  inspector.querySelector('#insClose').onclick = closeInspector;
+  inspector.querySelectorAll('[data-goto]').forEach(btn => {
+    btn.onclick = () => openNode(btn.dataset.goto);
+  });
+}
+
+function closeInspector(){
+  inspector.classList.remove('open');
+  selected = null;
+  document.querySelectorAll('.node.active').forEach(el => el.classList.remove('active'));
+}
+
+document.addEventListener('click', (ev) => {
+  if(suppressClick) return;
+  const node = ev.target.closest('.node');
+  if(node){ openNode(node.dataset.id); }
+  else if(!ev.target.closest('.inspector')){ closeInspector(); }
+});
+document.addEventListener('keydown', (ev) => {
+  if(ev.key === 'Escape'){ closeInspector(); stopScene(); }
+});
+
+/* =========================================================
+   6. 场景播放
+   ========================================================= */
+const chipsEl = document.getElementById('chips');
+const footName = document.getElementById('footName');
+const footText = document.getElementById('footText');
+const footDot = document.getElementById('footDot');
+const footDots = document.getElementById('footDots');
+
+chipsEl.innerHTML = SCENES.map((s,i) => `
+  <button class="chip" data-scene="${s.id}"><span class="cdot"></span>${s.name}<em>${i+1}</em></button>
+`).join('');
+
+let activeScene = null;
+let sceneTimers = [];
+let currentStep = -1;
+
+function clearTimers(){
+  sceneTimers.forEach(t => clearTimeout(t));
+  sceneTimers = [];
+}
+
+function paint(sceneNodes, sceneEdges, activeNodes, activeEdges){
+  const sn = new Set(sceneNodes), se = new Set(sceneEdges);
+  const an = new Set(activeNodes || []), ae = new Set(activeEdges || []);
+
+  document.querySelectorAll('.node').forEach(el => {
+    const id = el.dataset.id;
+    el.classList.toggle('dim', !sn.has(id));
+    el.classList.toggle('soft', sn.has(id) && !an.has(id));
+    el.classList.toggle('on', an.has(id));
+  });
+  document.querySelectorAll('.wire').forEach(el => {
+    const id = el.dataset.id;
+    el.classList.toggle('dim', !se.has(id));
+    el.classList.toggle('soft', se.has(id) && !ae.has(id));
+    el.classList.toggle('active', ae.has(id));
+  });
+  document.querySelectorAll('.elabel').forEach(el => {
+    const on = ae.has(el.dataset.for);
+    el.style.opacity = on ? '1' : '.2';
+  });
+}
+
+function resetPaint(){
+  document.querySelectorAll('.node').forEach(el => el.classList.remove('dim','soft','on'));
+  document.querySelectorAll('.wire').forEach(el => el.classList.remove('dim','soft','active'));
+  document.querySelectorAll('.elabel').forEach(el => el.style.opacity = '');
+}
+
+function setFoot(scene, idx){
+  if(!scene){
+    footName.textContent = '';
+    footText.textContent = '点节点看实现细节 · 上方选一个场景可播放完整数据流';
+    footDot.classList.add('idle');
+    footDots.innerHTML = '';
+    return;
+  }
+  footDot.classList.remove('idle');
+  footName.textContent = scene.name;
+  const step = scene.steps[idx];
+  footText.innerHTML = step
+    ? `<b>${idx+1}/${scene.steps.length}</b> &nbsp;${step.t}`
+    : `<b>${scene.steps.length}/${scene.steps.length}</b> &nbsp;${scene.hint} · 已播完，可再点一次取消`;
+  footDots.innerHTML = scene.steps.map((_,i) =>
+    `<span class="fdot${i <= idx ? ' on' : ''}"></span>`).join('');
+}
+
+function playScene(id){
+  const scene = SCENES.find(s => s.id === id);
+  if(!scene) return;
+
+  // 再次点击同一个场景 → 取消
+  if(activeScene && activeScene.id === id){ stopScene(); return; }
+
+  clearTimers();
+  closeInspector();
+  activeScene = scene;
+  currentStep = -1;
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.scene === id));
+
+  let i = 0;
+  const total = scene.steps.length;
+
+  const run = () => {
+    if(i >= total){
+      setFoot(scene, total - 1);
+      paint(scene.nodes, scene.edges, scene.nodes, scene.edges);
+      return;
+    }
+    const st = scene.steps[i];
+    setFoot(scene, i);
+    paint(scene.nodes, scene.edges, st.n, st.e);
+    i++;
+    sceneTimers.push(setTimeout(run, 1500));
+  };
+  run();
+}
+
+function stopScene(){
+  clearTimers();
+  activeScene = null;
+  currentStep = -1;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  resetPaint();
+  setFoot(null, 0);
+}
+
+chipsEl.addEventListener('click', (ev) => {
+  const chip = ev.target.closest('.chip');
+  if(chip) playScene(chip.dataset.scene);
+});
+
+/* =========================================================
+   7. 启动
+   ========================================================= */
+renderStatic();
+fit();
+setFoot(null, 0);
+</script>
+</body>
+</html>
