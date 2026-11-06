@@ -50,16 +50,88 @@ export default {
             ],
             sections: [
               {
-                kind: 'concept',
-                title: '「值传递」这句话不完整,完整版是「拷贝 + 里面装了什么」',
-                body: [
-                  '很多资料说「Go 只有值传递」,这句话对,但它不能解释任何现象。因为面试题问的从来不是「是不是值传递」,而是「为什么这里改得动、那里改不动」。要回答这个问题,你需要把「值」拆开看:值有多大?值里面有没有指针?',
-                  '把 Go 的所有类型按「拷贝时发生了什么」分成三档,判据就只剩一条:',
-                  '第一档:纯数据,拷贝就是复制整块内存。`int`、`float64`、`bool`、`struct`、数组都属于这档。`var b = a` 之后 `a` 和 `b` 毫无关系,各自改各自的。`f(x)` 传参也一样,函数里改的是副本,调用方看不见。',
-                  '第二档:小结构 + 内部指针,拷贝的是「头」,数据仍被共享。`slice`(24 字节:`array` 指针 + `len` + `cap`)、`string`(16 字节:数据指针 + 长度)、`map`(1 个指针)、`chan`(1 个指针)、`func`、`interface`(2 个字)都属于这档。这类类型在函数里「改数据」能生效(因为指针指向同一块内存),但「改头」(改长度、改容量、换指向)不生效(因为你改的是副本的头)。',
-                  '第三档:显式指针 `*T`。它本身是个地址值,也是拷贝,但拷贝出来的地址指向同一处,所以 `*p = x` 一定生效。',
-                  '于是万能判据诞生了:先问「我改的是数据还是头」,再问「这个类型的头里有没有指针」。`s[0] = 1` 改数据 → 生效;`s = append(s, 1)` 改头 → 不一定生效;`arr[0] = 1` 改数据但数组没有指针 → 不生效。',
+                kind: 'compare',
+                title: '题目地图:本课 7 道关联题各落在哪',
+                head: [
+                  '题号',
+                  '问的是什么',
+                  '讲义落点',
                 ],
+                rows: [
+                  [
+                    'go-01-Q2',
+                    'slice / map / chan 传参后为什么可见',
+                    '三档拷贝表 + Q2 真题',
+                  ],
+                  [
+                    'go-01-Q5',
+                    'slice 底层结构与拷贝代价',
+                    '切片内存图 + Q5 真题',
+                  ],
+                  [
+                    'go-01-Q7',
+                    'append 的共享底层数组陷阱',
+                    'append 分支图 + 代码 + Q7 真题',
+                  ],
+                  [
+                    'go-01-Q8',
+                    'nil / 空 / 零切片',
+                    '三种空切片矩阵 + Q8 真题',
+                  ],
+                  [
+                    'go-01-Q9',
+                    'copy 与深浅拷贝',
+                    'Q9 真题(浅拷贝见三档表)',
+                  ],
+                  [
+                    'go-01-Q10',
+                    '切片作为函数参数怎么传',
+                    '三档表 + 内存图 + Q10 真题',
+                  ],
+                  [
+                    'go-01-Q11',
+                    '如何删除切片元素',
+                    'Q11 真题',
+                  ],
+                ],
+                note: '这张表是本课索引:先按题号找落点,再回到对应图示、表格或真题块。Q8 / Q10 的知识点散在前面的结构里,Q9 / Q11 由末尾真题补齐。',
+                caption: '读法:每道题都能指到一个结构;指不到就是缺口,而不是「大概讲过」。',
+              },
+              {
+                kind: 'compare',
+                title: '「值传递」这句话不完整,完整版是「拷贝 + 里面装了什么」',
+                head: [
+                  '档位',
+                  '拷贝的是什么',
+                  '典型类型',
+                  '函数内改数据',
+                  '函数内改头 / 长度',
+                ],
+                rows: [
+                  [
+                    '纯数据',
+                    '整块内存',
+                    '`int` / `float64` / `bool` / `struct` / `[N]T`',
+                    '不生效',
+                    '不生效',
+                  ],
+                  [
+                    '小结构 + 内部指针',
+                    '头(指针 + len/cap 等字段)',
+                    '`slice` / `string` / `map` / `chan` / `func` / `interface`',
+                    '生效(共享底层数据)',
+                    '不生效(改的是副本的头)',
+                  ],
+                  [
+                    '显式指针 `*T`',
+                    '一个地址值',
+                    '`*T`',
+                    '生效(`*p = x`)',
+                    '生效(可改指向)',
+                  ],
+                ],
+                note: '判据:先问「我改的是数据还是头」,再问「这个类型的头里有没有指针」。`s[0] = 1` 改数据 → 生效;`s = append(s, 1)` 改头 → 不一定;`arr[0] = 1` 改数据但数组没有指针 → 不生效。',
+                caption: '三档不是三个语法分类,而是三种「拷贝后还剩下什么共享」。下一张内存图把切片这一档拆开。',
               },
               {
                 kind: 'diagram',
@@ -104,57 +176,45 @@ export default {
                 },
               },
               {
-                kind: 'principle',
-                title: '`append` 的两条分支:什么时候共享,什么时候脱钩',
-                body: [
-                  '`append` 是 Go 里最容易被误解的一个内建函数,因为它一件事做了三种可能的行为。只要你能背出它内部的三条判断,所有 append 相关的输出题都能现场推出来,不需要背答案。',
-                ],
-                steps: [
-                  {
-                    title: '① 先看 `len < cap` 吗——够就「原地写」',
-                    detail:
-                      '`append(s, x)` 首先检查 `s.len + 需要追加的元素个数 <= s.cap`。成立时,它直接把 `x` 写进 `s.array[s.len]`,然后返回一个「新头」:`{array: 同一个, len: len+1, cap: 同一个}`。注意「新头」这个词:返回的切片头是新的值,但 `array` 没变,所以底层数组是共享的。',
+                kind: 'diagram',
+                title: '`append` 的两条分支:cap 够就原地写,不够就换数组',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: 'cap 够:`s.len + n <= s.cap`',
+                    tone: 'good',
+                    items: [
+                      '把 `x` 写进 `s.array[s.len]`',
+                      '返回新头:`{array 不变, len+1, cap 不变}`',
+                      '底层数组仍共享:调用方看得见新元素,但 `len` 没变',
+                    ],
                   },
-                  {
-                    title: '② `cap` 不够——分配新数组,把老数据搬过去',
-                    detail:
-                      '这时 `append` 会 `malloc` 一块新数组(扩容策略见下一节),把老的 `len` 个元素 `memmove` 过去,再追加新元素,最后返回一个指向新数组的头。从这一刻起,原切片和新切片指向不同的数组——「脱钩」发生了。此后你往新切片写元素,原切片再也看不到。',
+                  right: {
+                    title: 'cap 不够:`s.len + n > s.cap`',
+                    tone: 'warn',
+                    items: [
+                      '分配新数组,`memmove` 老元素',
+                      '返回新头:`{新 array, 新 len, 新 cap}`',
+                      '从此脱钩:后续写入原切片看不到',
+                    ],
                   },
-                  {
-                    title: '③ 于是「生效与否」只取决于第二参数有没有触发扩容',
-                    detail:
-                      '这是所有 append 面试题的母题。同一个函数,传 `cap` 够的切片进去,外面能看到新增元素;传 `cap` 正好等于 `len` 的切片进去,外面什么也看不到。更阴险的是:即使脱钩了,如果写入位置仍在老的 `cap` 范围内,老数组的数据也可能被「另一个还指向老数组的切片」看到——这就是 C10/C11 那类题。',
-                  },
-                ],
+                  caption: '两条路都返回新头:不接返回值永远是错的写法,哪怕这次没扩容。这是分支,不是时间顺序,所以用静态对照,不接播放器。',
+                },
               },
               {
                 kind: 'code',
                 title: '一个函数,两种结果:扩容与否决定「外面看得见吗」',
                 lang: 'go',
-                code:
-                  "package main\n\nimport \"fmt\"\n\nfunc push(s []int, v int) []int {\n\ts = append(s, v) // 返回「新头」,但这里丢掉了\n\tfmt.Println(\"函数内:\", len(s), cap(s), s)\n\treturn s\n}\n\nfunc main() {\n\t// 情形 A:cap 够(3 < 5)\n\ta := make([]int, 3, 5)\n\tcopy(a, []int{1, 2, 3})\n\tpush(a, 9)\n\tfmt.Println(\"情形A 调用方:\", len(a), cap(a), a) // len 仍是 3\n\n\t// 情形 B:cap 正好用满\n\tb := []int{1, 2, 3} // len=3 cap=3\n\tpush(b, 9)\n\tfmt.Println(\"情形B 调用方:\", len(b), cap(b), b) // 完全不变\n\n\t// 情形 C:正确写法——接收返回值\n\tc := []int{1, 2, 3}\n\tc = push(c, 9)\n\tfmt.Println(\"情形C 调用方:\", len(c), cap(c), c) // 4 [1 2 3 9]\n}\n",
+                code: 'package main\n\nimport "fmt"\n\nfunc push(s []int, v int) []int {\n	s = append(s, v) // 返回「新头」,但这里丢掉了\n	fmt.Println("函数内:", len(s), cap(s), s)\n	return s\n}\n\nfunc main() {\n	// 情形 A:cap 够(3 < 5)\n	a := make([]int, 3, 5)\n	copy(a, []int{1, 2, 3})\n	push(a, 9)\n	fmt.Println("情形A 调用方:", len(a), cap(a), a) // len 仍是 3\n\n	// 情形 B:cap 正好用满\n	b := []int{1, 2, 3} // len=3 cap=3\n	push(b, 9)\n	fmt.Println("情形B 调用方:", len(b), cap(b), b) // 完全不变\n\n	// 情形 C:正确写法——接收返回值\n	c := []int{1, 2, 3}\n	c = push(c, 9)\n	fmt.Println("情形C 调用方:", len(c), cap(c), c) // 4 [1 2 3 9]\n}\n',
                 caption: '情形 A 和 B 的函数内都打印了 4 个元素,但调用方一个是 3、一个也是 3——差别只在底层数组有没有被换掉。',
                 notes: [
                   { line: 's = append(s, v)', text: '这里改的是形参 `s` 这个副本的头,调用方的 `a` / `b` 的头完全不受影响。' },
                   { line: 'func push(s []int, v int) []int', text: '返回值必须被调用方接住才有意义——这就是「Go 里切片要返回」的根因,不是为了链式调用好看。' },
                   { line: 'b := []int{1, 2, 3}', text: '字面量切片的 `cap` 等于 `len`,所以第一次 append 必然扩容——这一点很多人不知道。' },
                 ],
-              },
-              {
-                kind: 'diagram',
-                title: '`append` 的决策流程:只有两条路,但结局差很远',
-                diagram: {
-                  type: 'flow',
-                  direction: 'v',
-                  items: [
-                    { label: '`append(s, x)`', note: '注意:`append` 拿到的是 `s` 这个头的拷贝' },
-                    { label: '判断 `s.len + n <= s.cap`', note: '`n` 是要追加的元素个数' },
-                    { label: '够 → 原地写 `s.array[s.len]`', note: '返回 `{同array, len+1, cap不变}`——数据共享' },
-                    { label: '不够 → 新数组 + `memmove`', note: '返回 `{新array, 新len, 新cap}`——从此脱钩' },
-                    { label: '两条路的共同点:都返回一个新头', note: '所以「不接返回值」永远是错的写法,哪怕这次没扩容' },
-                  ],
-                  caption: '`append` 从不修改入参的头,它只会返回一个新头。记住「它是个纯函数式的操作」,就不会再问「为什么我 append 了外面没变」。',
-                },
+                version: 'Go 1.27',
+                env: '本地 go run',
+                verified: true,
               },
               {
                 kind: 'compare',
@@ -175,8 +235,7 @@ export default {
               {
                 kind: 'analogy',
                 title: '切片像「遥控器 + 电视」,数组像「把电视搬过去」',
-                text:
-                  '切片像「遥控器 + 电视」——你手里握着一个遥控器(切片头),它记着「电视放在哪、现在看到第几个台、最多能收到几个台」;电视本身在客厅(堆上的底层数组)。你把遥控器复印一份给朋友(传参),复印件上的三个信息一模一样,所以朋友一换台,你这边画面也变了(改元素生效)。但「他想看第 9 个台」这件事只写在他那张复印件上(改 `len` 是改副本的字段),你手里的复印件不知道。更彻底的是:他觉得电视太小,自己买了一台搬回房间(扩容),从此他按他的,你看你的,两条线彻底分开。而「数组」相当于你直接把电视搬去他家——他家怎么调,你这边连画面都没有,只剩一台空墙。',
+                text: '切片像「遥控器 + 电视」:遥控器记着电视在哪、看到第几个台、最多能收几个台;电视是堆上的底层数组。把遥控器复印一份给朋友,换台两边都变;但「他想看第 9 个台」只写在他的复印件上;他嫌电视小、自己买一台,从此彻底脱钩。数组则像把电视整体搬走。',
                 mapping: [
                   { real: '你手里的遥控器(带「当前频道」和「能收到的频道上限」)', tech: '切片头 `{array, len, cap}`' },
                   { real: '客厅里那台电视', tech: '底层数组(堆上那块内存)' },
@@ -192,36 +251,50 @@ export default {
                 kind: 'why',
                 title: '为什么 Go 要选值语义,而不是像 Java 那样「对象皆引用」',
                 body: [
-                  '这个问题一旦想通,你会发现 Go 的很多「反直觉」都是同一个设计目标的副产品:可预测的性能。',
-                  'Java 的做法是:基本类型传值,对象传引用。好处是「传大对象不花钱」;代价是:你无法从函数签名看出这个函数会不会改你的对象,而这正是大型项目里 bug 的高发区。同时,「对象在堆上」意味着每次创建都要分配、都要 GC 压力。',
-                  'Go 的选择是:一切按值传,但允许你在值里放指针。于是函数签名 `func f(s []int)` 立刻告诉你「我拿到的是一个头,我改不了你的长度」——意图直接写在类型里。',
-                  '更重要的收益在分配上。因为编译器知道「这个值不会被外面持有」,它就可以把变量放在栈上;栈分配不需要 GC,函数返回即回收。这就是逃逸分析存在的意义:值语义让「不逃逸」成为默认,引用语义会让「不逃逸」几乎不可能。',
-                  '代价也很明确:大结构体按值传会复制。所以 Go 的工程惯例是「小结构体传值,大结构体传指针」,`sync.WaitGroup` 要传 `*sync.WaitGroup`、`http.Request` 要传 `*http.Request`,都是这条惯例的体现。而切片之所以设计成 24 字节的「头」,正是为了让「按值传大集合」变得廉价——这是值语义与「不复制数据」之间的一次精巧妥协。',
+                  '这个问题想通,Go 的很多「反直觉」都是同一个设计目标的副产品:可预测的性能,以及能从函数签名读出「会不会改我的值」。',
                 ],
+                code: {
+                  language: 'go',
+                  caption: '小结构体传值、大结构体传指针:复制成本直接写在类型里。',
+                  code: 'type Big struct{ buf [1024]byte }\n\nfunc byValue(b Big)    { b.buf[0] = 1 } // 改副本,调用方看不到\nfunc byPointer(b *Big) { b.buf[0] = 1 } // 改原对象\n\nfunc main() {\n    var b Big\n    byValue(b)\n    byPointer(&b)\n}',
+                },
+                wrong: [
+                  '**「值语义只是语法选择,和性能无关」**:它直接决定逃逸分析与栈分配的空间。',
+                  '**「引用语义一定更快」**:传引用少一次复制,但堆分配和 GC 压力更大;要看对象大小和生命周期。',
+                ],
+                real: '值语义让「不逃逸」成为默认:编译器知道这个值不会被外部持有,就能放在栈上,函数返回即回收;引用语义让「不逃逸」很难成立。同时 `func f(s []int)` 的签名直接告诉你「我拿到的是一个头,改不了你的长度」。',
+                reveal: '所以 Go 的工程惯例是「小结构体传值,大结构体传指针」;切片设计成 24 字节的头,也是值语义与「不复制数据」的折中。',
+                without: '代价是大结构体按值传会复制;`sync.WaitGroup`、`http.Request` 要传指针,就是这条惯例的体现。',
               },
               {
                 kind: 'concept',
                 title: '数组:长度是类型的一部分,这决定了一切',
                 body: [
                   '`[3]int` 和 `[4]int` 不是「长度不同的同一个类型」,而是两个毫不相干的类型。这一点和 C 完全不同,也是 Go 数组各种「怪」行为的源头。',
-                  '推论一:数组不能「扩容」。`[3]int` 永远只有 3 个位置,想加元素只能新建一个 `[4]int` 再复制。这也是为什么日常代码里几乎见不到数组,全是切片——数组是「定长容器」,而业务数据几乎都是变长的。',
-                  '推论二:`len(arr)` 是编译期常量。所以 `for i := 0; i < len(arr); i++` 不会每次调用 `len`,循环次数在编译时就被定死了;而 `len(s)` 对切片是运行时读字段。这个差别在热点循环里是真实存在的。',
-                  '推论三:数组传参是整体复制。`func f(a [1000]int)` 每次调用复制 8KB。所以数组几乎总是以 `*[N]T` 或 `a[:]` 的形式传出去——`a[:]` 会创建一个指向该数组的切片头,零拷贝,这是把数组「借」给切片的惯用手法。',
-                  '推论四:数组可以作为 map 的 key。因为它是可比较的值类型,`map[[2]int]string` 合法;而 `map[[]int]string` 编译不过,因为切片不可比较。这一点在 Q18 会再遇到。',
                 ],
+                term: { name: '[N]T', def: '数组类型由元素类型和长度共同决定;长度是编译期常量,不能扩容。' },
+                points: [
+                  '**不能扩容**:`[3]int` 永远只有 3 个位置;想加元素只能新建 `[4]int` 再复制。',
+                  '**`len(arr)` 是编译期常量**:`len(s)` 对切片是运行时读字段;热点循环里这个差别真实存在。',
+                  '**传参整体复制**:`func f(a [1000]int)` 每次复制 8KB,所以常用 `*[N]T` 或 `a[:]`。',
+                  '**可比较、可作 map key**:`map[[2]int]string` 合法;`map[[]int]string` 编译不过。',
+                ],
+                caption: '数组是定长容器;日常业务几乎都用切片。下一块代码用一行 `a[:]` 演示「传数组 vs 传切片」。',
               },
               {
                 kind: 'code',
                 title: '数组传参不生效 vs `arr[:]` 生效:一行之差',
                 lang: 'go',
-                code:
-                  "package main\n\nimport \"fmt\"\n\nfunc byValue(a [3]int)  { a[0] = 100 } // 改副本\nfunc bySlice(s []int)   { s[0] = 100 } // 改底层数组\nfunc byPointer(a *[3]int) { a[0] = 100 } // 显式指针\n\nfunc main() {\n\ta := [3]int{1, 2, 3}\n\tbyValue(a)\n\tfmt.Println(\"byValue :\", a) // [1 2 3]\n\n\tbySlice(a[:]) // a[:] 创建指向 a 的切片头,零拷贝\n\tfmt.Println(\"bySlice :\", a) // [100 2 3]\n\n\tbyPointer(&a)\n\tfmt.Println(\"byPtr   :\", a) // [100 2 3]\n\n\t// 数组长度是类型的一部分\n\t// var b [4]int = a  // 编译错误:cannot use a (type [3]int) as type [4]int\n\tfmt.Println(len(a), cap(a)) // 对数组,len == cap == 编译期常量\n}\n",
+                code: 'package main\n\nimport "fmt"\n\nfunc byValue(a [3]int)  { a[0] = 100 } // 改副本\nfunc bySlice(s []int)   { s[0] = 100 } // 改底层数组\nfunc byPointer(a *[3]int) { a[0] = 100 } // 显式指针\n\nfunc main() {\n	a := [3]int{1, 2, 3}\n	byValue(a)\n	fmt.Println("byValue :", a) // [1 2 3]\n\n	bySlice(a[:]) // a[:] 创建指向 a 的切片头,零拷贝\n	fmt.Println("bySlice :", a) // [100 2 3]\n\n	byPointer(&a)\n	fmt.Println("byPtr   :", a) // [100 2 3]\n\n	// 数组长度是类型的一部分\n	// var b [4]int = a  // 编译错误:cannot use a (type [3]int) as type [4]int\n	fmt.Println(len(a), cap(a)) // 对数组,len == cap == 编译期常量\n}\n',
                 caption: '`a[:]` 是「把数组借给切片」的标准手法,零拷贝就能获得切片语义。',
                 notes: [
                   { line: 'func byValue(a [3]int)', text: '整个数组被复制进栈帧。数组越大,调用越贵——这是数组在业务代码里罕见的主因。' },
                   { line: 'bySlice(a[:])', text: '`a[:]` 的 `array` 指针指向 `a` 自己,`len = cap = 3`。所以函数里改元素,`a` 立刻变。' },
                   { line: 'fmt.Println(len(a), cap(a))', text: '数组的 `len` 和 `cap` 都等于长度,且都是编译期常量,不占运行时开销。' },
                 ],
+                version: 'Go 1.27',
+                env: '本地 go run',
+                verified: true,
               },
               {
                 kind: 'principle',
@@ -232,49 +305,84 @@ export default {
                 steps: [
                   {
                     title: '① 小切片按 2 倍扩,大切片按 1.25 倍扩',
-                    detail:
-                      '历史上(Go 1.18 之前)的规则很简单:元素数小于 1024 时翻倍,大于等于 1024 时每次增加 25%。Go 1.18 起改成了更平滑的公式:目标容量按 2 倍估,再按内存大小类(`size class`)向上取整,使得「大约 256 个元素以下翻倍、之后逐步过渡到 1.25 倍」。所以你实测时看到的 `cap` 序列可能是 `1,2,4,8,16,32,48,64,80,96,112,128` 这种非整数倍——那是因为还叠加了内存对齐的取整。',
+                    detail: '历史上(Go 1.18 之前)的规则很简单:元素数小于 1024 时翻倍,大于等于 1024 时每次增加 25%。Go 1.18 起改成了更平滑的公式:目标容量按 2 倍估,再按内存大小类(`size class`)向上取整,使得「大约 256 个元素以下翻倍、之后逐步过渡到 1.25 倍」。所以你实测时看到的 `cap` 序列可能是 `1,2,4,8,16,32,48,64,80,96,112,128` 这种非整数倍——那是因为还叠加了内存对齐的取整。',
                   },
                   {
                     title: '② 为什么大切片要降低增长率',
-                    detail:
-                      '因为复制成本是「老长度」,而浪费的空间是「cap - len」。翻倍策略下,大切片会浪费接近 100% 的内存;而 1.25 倍策略浪费约 25%,代价是同样次数的 append 会触发更多次扩容。这是一个明确的工程权衡:小切片更在意「少扩容」,大切片更在意「别浪费内存」。',
+                    detail: '因为复制成本是「老长度」,而浪费的空间是「cap - len」。翻倍策略下,大切片会浪费接近 100% 的内存;而 1.25 倍策略浪费约 25%,代价是同样次数的 append 会触发更多次扩容。这是一个明确的工程权衡:小切片更在意「少扩容」,大切片更在意「别浪费内存」。',
                   },
                   {
                     title: '③ 但「摊还」才是不管怎么扩都 O(1) 的原因',
-                    detail:
-                      '无论 2 倍还是 1.25 倍,只要增长率是常数 c > 1,那么 n 次 append 的总复制量就是一个等比级数,和约等于 `n * c/(c-1)` 的量级——均摊到每次 append 就是 O(1)。这就是「append 是摊还 O(1)」的严格含义:单次可能 O(n),但连续 n 次总共 O(n)。注意 1.25 倍的常数更大(`c/(c-1) = 5`),所以大切片 append 的均摊常数确实更高,只是仍然是大 O 意义上的 O(1)。',
+                    detail: '无论 2 倍还是 1.25 倍,只要增长率是常数 c > 1,那么 n 次 append 的总复制量就是一个等比级数,和约等于 `n * c/(c-1)` 的量级——均摊到每次 append 就是 O(1)。这就是「append 是摊还 O(1)」的严格含义:单次可能 O(n),但连续 n 次总共 O(n)。注意 1.25 倍的常数更大(`c/(c-1) = 5`),所以大切片 append 的均摊常数确实更高,只是仍然是大 O 意义上的 O(1)。',
                   },
                   {
                     title: '④ 所以「预分配 `cap`」是最便宜的性能优化',
-                    detail:
-                      '如果你已经知道要装 10000 个元素,写 `make([]int, 0, 10000)`,就彻底避免了所有扩容复制。这一行在热点路径上的收益经常是 2 倍以上,而且没有任何可读性代价。`strings.Builder` 和 `bytes.Buffer` 的 `Grow(n)` 是同一个思路的封装。',
+                    detail: '如果你已经知道要装 10000 个元素,写 `make([]int, 0, 10000)`,就彻底避免了所有扩容复制。这一行在热点路径上的收益经常是 2 倍以上,而且没有任何可读性代价。`strings.Builder` 和 `bytes.Buffer` 的 `Grow(n)` 是同一个思路的封装。',
                   },
-                ],
-              },
-              {
-                kind: 'concept',
-                title: '三种「空」切片:`nil`、`[]T{}`、`make([]T, 0)`',
-                body: [
-                  '这三种写法在「能不能 append」「len 是多少」「range 会不会崩」上完全一致,但在「和 `nil` 比相等」和「JSON 序列化结果」上完全不同。面试很喜欢拿这个考细节。',
-                  '`var s []int` 声明出来的切片,三个字段全是零值:`array = nil, len = 0, cap = 0`。它 `== nil` 为 `true`,可以直接 `append`(append 会分配新数组),可以 `range`(零次迭代)。对 nil 切片取 `s[0]` 会 panic(索引越界),但 `for range` 不会。',
-                  '`s := []int{}` 是「空但有头」的切片:`array` 通常指向一个全局的 `zerobase`(运行时的一个零大小地址),`len = cap = 0`。它 `== nil` 为 `false`。`make([]int, 0)` 同理,也是非 nil。',
-                  '`make([]int, 0, 8)` 则连容量都给了:`array` 指向一块 8 个元素的内存,`len = 0, cap = 8`。它和 `[]int{}` 的区别只在「第一次 append 会不会扩容」。',
-                  '实践建议:函数返回「可能为空」的切片时,优先返回 `nil`(即直接 `return nil`),因为 `nil` 更符合 Go 的零值习惯,而且 `len(nil) == 0` 判断不需要额外分配。但如果是「要序列化成 JSON 数组」的场景,`nil` 会序列化成 `null`,而 `[]int{}` 会序列化成 `[]`——这时候必须返回 `[]int{}`,否则前端拿到 null 会炸。',
                 ],
               },
               {
                 kind: 'diagram',
-                title: '三种「空」的三字段对照',
+                title: '一次不接返回值的 `append` 调用:新头去哪了',
+                diagram: {
+                  type: 'flow',
+                  direction: 'v',
+                  items: [
+                    { label: '① 实参 `s` 的头拷贝给形参 `p`', note: '三个字段复制;两个头指向同一底层数组。' },
+                    { label: '② `append` 检查 cap,决定原地写还是换数组', note: '够:写同一数组;不够:分配新数组并复制老元素——这是分支,但在这一步内部完成。' },
+                    { label: '③ `append` 返回新头', note: '新头可能指向老数组,也可能指向新数组;调用方手里的 `s` 仍是旧头。' },
+                    { label: '④ 返回值被丢弃,调用方头不变', note: '调用方 `len` 不变;若扩容,新数组只有形参知道,内外从此脱钩。' },
+                  ],
+                  caption: '这是一次「不接返回值」的调用链:分支只发生在第 ② 步内部,不是先后两条路。把返回值接住,第 ④ 步才会变成「新头写回调用方」。',
+                },
+              },
+              {
+                kind: 'diagram',
+                title: '三种「空」切片:字段与序列化对照',
                 diagram: {
                   type: 'matrix',
-                  head: ['写法', 'array', 'len / cap', '`== nil`', 'JSON 序列化'],
-                  cols: ['array', 'len / cap', '`== nil`', 'JSON 序列化'],
+                  head: [
+                    '写法',
+                    'array',
+                    'len / cap',
+                    '`== nil`',
+                    'JSON 序列化',
+                  ],
+                  cols: [
+                    'array',
+                    'len / cap',
+                    '`== nil`',
+                    'JSON 序列化',
+                  ],
                   rows: [
-                    ['`var s []int`', 'nil', '0 / 0', 'true', '`null`'],
-                    ['`s := []int{}`', '`zerobase`(非 nil)', '0 / 0', 'false', '`[]`'],
-                    ['`make([]int, 0)`', '`zerobase`(非 nil)', '0 / 0', 'false', '`[]`'],
-                    ['`make([]int, 0, 8)`', '真实分配的 8 元数组', '0 / 8', 'false', '`[]`'],
+                    [
+                      '`var s []int`',
+                      'nil',
+                      '0 / 0',
+                      'true',
+                      '`null`',
+                    ],
+                    [
+                      '`s := []int{}`',
+                      '`zerobase`(非 nil)',
+                      '0 / 0',
+                      'false',
+                      '`[]`',
+                    ],
+                    [
+                      '`make([]int, 0)`',
+                      '`zerobase`(非 nil)',
+                      '0 / 0',
+                      'false',
+                      '`[]`',
+                    ],
+                    [
+                      '`make([]int, 0, 8)`',
+                      '真实分配的 8 元数组',
+                      '0 / 8',
+                      'false',
+                      '`[]`',
+                    ],
                   ],
                   caption: '三者都能 append、都能 range;差别只在「判 nil」和「序列化」。要 JSON 数组就返回 `[]int{}`,要 Go 风格零值就返回 `nil`。',
                 },
@@ -303,6 +411,7 @@ export default {
                   '给出防御手段:需要「独立副本」时用 `append([]int(nil), s...)`(注意会丢 `cap`)或显式 `make` + `copy`;只读场景才允许共享。',
                 ],
                 depth: '补充一个反直觉点:`append([]int(nil), s...)` 分配的新切片 `cap` 可能大于 `len`(因为是按增长率估的),而不是正好等于 `len`。如果你需要「cap 精确等于 len」,要写 `make([]int, len(s))` 再 `copy`。',
+                followup: '共享底层数组时,怎么判断一次 append 会不会覆盖另一个切片?——看写入位置是否还在另一个切片的 `len` 范围内:同数组、未扩容、且写入下标小于它的 `len` 时会覆盖;需要隔离就 `copy` 出独立数组。',
               },
               {
                 kind: 'question',
@@ -316,6 +425,64 @@ export default {
                   '隐性成本二:只要还有切片指向底层数组,整块数组就无法被 GC 回收。从大切片上切一小段长期持有(如 `big[0:1]`),会让整个 `big` 常驻内存——这是真实的内存泄漏源,解法是 `append([]T(nil), big[0:1]...)` 做一次真正的小拷贝。',
                 ],
                 depth: '这就是「切片拷贝便宜,但持有切片可能昂贵」的完整答案。面试里能主动说出「长期持有小切片会拖住大数组」,基本就是这个知识点的高分线。',
+                followup: '为什么长期持有大切片的一小段会阻止 GC?——切片头仍指向原底层数组,只要这个切片活着,整块数组就可达;需要释放就 `copy` 出小数组再持有。',
+              },
+              {
+                kind: 'question',
+                title: 'Q8 · nil 切片、空切片、零切片的区别？',
+                questionId: 'go-01-Q8',
+                intent: '把三者按 len/cap、nil 判定、底层指针、JSON 序列化四个维度分开,别只说「都是空」。',
+                points: [
+                  '**nil 切片**:`var s []int` 或 `*new([]int)`,`len = cap = 0`,`s == nil` 为 true,底层 data 指针为 nil。',
+                  '**空切片**:`[]int{}`、`make([]int, 0)`,`len = cap = 0` 但 `!= nil`,data 指向 `runtime.zerobase`。',
+                  '**零切片**:`make([]int, 5)`,`len = cap = 5`,元素全为零值;它不是「空切片」,只是元素为零值。',
+                  '**实际影响**:JSON 序列化时 nil 输出 `null`,空切片输出 `[]`;append/range 行为相同,nil 切片也能直接 append。',
+                  '**实践选择**:Go 零值习惯返回 `nil`;要序列化成 JSON 数组就返回 `[]int{}`。',
+                ],
+                depth: '`s[0]` 对 nil 切片会 panic(索引越界),但 `for range` 不会;判空用 `len(s) == 0` 比 `s == nil` 更通用。',
+                followup: '为什么 nil 切片可以 append?——append 发现 len=cap=0 时会分配新数组并返回新头;入参的 nil 头本身不会变。',
+              },
+              {
+                kind: 'question',
+                title: 'Q9 · copy 与深浅拷贝？',
+                questionId: 'go-01-Q9',
+                intent: '区分「赋值 / 截取」的浅拷贝和 `copy` 的深拷贝,并说清 `copy` 的长度规则。',
+                points: [
+                  '`=` 赋值和 `s[:]` 截取是**浅拷贝**:只复制切片头,共享底层数组;改一方元素,另一方看得见。',
+                  '`copy(dst, src)` 拷贝 `min(len(dst), len(src))` 个元素,返回实际拷贝数;不改变 dst 的 len/cap。',
+                  '源和目标内存可以重叠,`copy` 按 `memmove` 语义处理;打印切片只按 len 打印,cap 里的隐藏元素不显示。',
+                  '**深拷贝**要新建底层数组:`dst := make([]T, len(src)); copy(dst, src)`,或 `append([]T(nil), src...)`(cap 可能大于 len)。',
+                ],
+                depth: 'dst 比 src 短就只拷前一段,dst 更长则剩余元素保持原值;需要 cap 精确等于 len 时用 `make([]T, len(src))` 再 copy。',
+                followup: '为什么 `copy` 后修改 dst 不影响 src?——dst 已指向独立数组;浅拷贝的 `=` / `s[:]` 才会继续共享。',
+              },
+              {
+                kind: 'question',
+                title: 'Q10 · 切片作为函数参数怎么传？',
+                questionId: 'go-01-Q10',
+                intent: '说清传的是 header 的值拷贝,不是引用传递;改元素可见,改 len/cap 与扩容后的行为要分开。',
+                points: [
+                  '传的是 slice header 的值拷贝(3 个字段),底层数组共享:函数内改元素,外部可见。',
+                  '函数内 `append` 未扩容时写入同一数组,但 `len` 是副本字段,调用方看不到;触发扩容后彻底脱钩。',
+                  '要改调用方的 len/cap:返回新切片,或传 `*[]T`;多数场景返回新切片更符合 Go 习惯。',
+                  '数组 vs 切片:数组传参整体复制,切片只复制头;大函数间传递优先用切片。',
+                ],
+                depth: '`*[]T` 能直接改调用方的头,但可读性差、容易破坏值语义;只有在确实需要原地改长度时才用。',
+                followup: '为什么 `append` 后调用方 len 没变?——函数拿到的是头的副本,append 返回的新头没有写回调用方。',
+              },
+              {
+                kind: 'question',
+                title: 'Q11 · 如何删除切片中的元素？',
+                questionId: 'go-01-Q11',
+                intent: '按索引删除、是否保序、是否缩容、如何释放底层数组,四个点都要说到。',
+                points: [
+                  '**保持顺序**:`s = append(s[:i], s[i+1:]...)`,会移动后续元素,O(n)。',
+                  '**顺序无关**:尾元素覆盖 `s[i] = s[len(s)-1]; s = s[:len(s)-1]`,O(1),但会打乱顺序。',
+                  '**删除不缩容**:`cap` 不变;要释放底层数组,必须 `copy` 到新数组。',
+                  '**边遍历边删除容易漏元素**:倒序遍历,或把保留元素写入新切片。',
+                ],
+                depth: '截短后 `s[len:]` 的部分仍被底层数组持有;如果元素是大对象,先置零再截短,或 `copy` 出新数组。',
+                followup: '删除后内存会立刻释放吗?——不会,底层数组还在;只有没有切片再指向它时才会被 GC。',
               },
             ],
           },
@@ -685,16 +852,67 @@ export default {
             ],
             sections: [
               {
+                kind: 'compare',
+                title: '题目地图:本课 7 道关联题各落在哪',
+                head: [
+                  '题号',
+                  '问的是什么',
+                  '讲义落点',
+                ],
+                rows: [
+                  [
+                    'go-01-Q24',
+                    'defer 执行时机 / return 是否原子',
+                    'return 三步图 + Q24 真题',
+                  ],
+                  [
+                    'go-01-Q25',
+                    'defer 表达式参数何时求值',
+                    '传参 vs 闭包 split + Q25 真题',
+                  ],
+                  [
+                    'go-01-Q26',
+                    '循环里 defer 有什么坑',
+                    '循环 defer 的两个代价 + Q26 真题',
+                  ],
+                  [
+                    'go-01-Q27',
+                    'defer + recover 的正确姿势',
+                    'panic 传播 flow + recover 代码 + Q27 真题',
+                  ],
+                  [
+                    'go-01-Q28',
+                    'defer 的底层与性能',
+                    '_defer 链表图 + 三代实现矩阵 + Q28 真题',
+                  ],
+                  [
+                    'go-01-Q29',
+                    'panic/recover 规则与 recover 不了的情况',
+                    '四条规则 + panic flow + Q29 真题',
+                  ],
+                  [
+                    'go-01-Q30',
+                    'panic 和 error 如何选择',
+                    'Q30 真题',
+                  ],
+                ],
+                note: '这张表是本课索引:先按题号找落点,再回到对应图示、表格或真题块。Q26 / Q27 由新增真题补齐。',
+                caption: '读法:每道题都能指到一个结构;指不到就是缺口,而不是「大概讲过」。',
+              },
+              {
                 kind: 'concept',
                 title: '`defer` 干了什么:注册一个调用,推迟到 return 前执行',
+                term: { name: 'defer 的两个时间点', def: '注册时求值参数和接收者;函数返回前执行函数体;多个 defer 按 LIFO 执行。' },
                 body: [
-                  '`defer f(a, b)` 在编译后会变成三步:求值 `f`、求值 `a` 和 `b`、把 `{f, a, b}` 打包成一个 `_defer` 记录挂到当前 goroutine 的 defer 链表头。注意「求值」发生在这一行被执行的时候,而不是函数返回的时候——这是全部困惑的源头。',
-                  '等到函数 `return` 之前,运行时会从头遍历这条链表,依次执行里面记录的调用。因为是「头插」,所以执行顺序自然是后进先出(LIFO)。这就是「多个 defer 逆序执行」的机制层面解释——不是语法规定,是链表结构决定的。',
-                  '关键推论:参数、接收者、方法值,全部在注册时定死。所以',
-                  '```go\nfor i := 0; i < 3; i++ {\n    defer fmt.Println(i)   // 打印 2 1 0\n}\n```',
-                  '这里三次 `defer` 分别把 `0`、`1`、`2` 拷贝进了各自的 `_defer` 记录,执行时按 LIFO 打出来就是 `2 1 0`。而如果写成 `defer func(){ fmt.Println(i) }()`,闭包捕获的是变量 i 本身,执行时 `i` 已经是 3,于是打出 `3 3 3`(1.22 之前;1.22 起每次迭代新建 `i`,又变回 `2 1 0`)。',
-                  '这两行代码的差别,就是「值拷贝」和「变量捕获」的差别——defer 的绝大多数题目都在这条线上。',
+                  '`defer f(a, b)` 不是把整行推迟,而是把「调用」推迟:注册那一刻就把 `f`、`a`、`b` 定死;理解这两个时间点,输出题都能推。',
                 ],
+                points: [
+                  '**注册时**:执行到 `defer` 那行就求值 `f`、`a`、`b`,打包成 `_defer` 记录,头插到 `g._defer`。',
+                  '**执行时**:函数 `return` 前遍历链表,头插头取 → 后进先出;注册 A→B→C,执行 C→B→A。',
+                  '**推论**:参数、接收者、方法值都在注册时定死;`defer fmt.Println(i)` 打印旧值,`defer func(){ fmt.Println(i) }()` 读执行时值。',
+                  '**循环里**:Go 1.22 前闭包共享同一个 `i`,常打出 `3 3 3`;1.22 起每轮新变量,回到 `2 1 0`,由 `go.mod` 的版本决定。',
+                ],
+                caption: 'defer 的绝大多数题都落在「值拷贝 vs 变量捕获」这条线上;下一张 `_defer` 图把注册与执行拆开。',
               },
               {
                 kind: 'diagram',
@@ -774,20 +992,21 @@ export default {
                 kind: 'code',
                 title: '同一段逻辑,四种返回值:把 defer 的边界一次性看清',
                 lang: 'go',
-                code:
-                  "package main\n\nimport \"fmt\"\n\n// A:具名返回值 + defer 修改 -> 2\nfunc a() (x int) {\n\tdefer func() { x++ }()\n\treturn 1\n}\n\n// B:匿名返回值 + defer 改局部变量 -> 1\nfunc b() int {\n\tvar x = 1\n\tdefer func() { x++ }()\n\treturn x\n}\n\n// C:具名返回值 + defer 修改,但 return 显式赋值 -> 2\nfunc c() (x int) {\n\tdefer func() { x *= 10 }()\n\treturn 3\n}\n\n// D:defer 参数在注册时求值 -> 打印 0,返回 1\nfunc d() (x int) {\n\tdefer fmt.Println(\"defer sees x =\", x) // 注册时 x 还是 0\n\tx = 1\n\treturn\n}\n\nfunc main() {\n\tfmt.Println(a(), b(), c()) // 2 1 30\n\tfmt.Println(d())           // defer sees x = 0 \\n 1\n}\n",
+                code: 'package main\n\nimport "fmt"\n\n// A:具名返回值 + defer 修改 -> 2\nfunc a() (x int) {\n	defer func() { x++ }()\n	return 1\n}\n\n// B:匿名返回值 + defer 改局部变量 -> 1\nfunc b() int {\n	var x = 1\n	defer func() { x++ }()\n	return x\n}\n\n// C:具名返回值 + defer 修改,但 return 显式赋值 -> 2\nfunc c() (x int) {\n	defer func() { x *= 10 }()\n	return 3\n}\n\n// D:defer 参数在注册时求值 -> 打印 0,返回 1\nfunc d() (x int) {\n	defer fmt.Println("defer sees x =", x) // 注册时 x 还是 0\n	x = 1\n	return\n}\n\nfunc main() {\n	fmt.Println(a(), b(), c()) // 2 1 30\n	fmt.Println(d())           // defer sees x = 0 \\n 1\n}\n',
                 caption: '`d` 是最容易被忽略的一个:裸 `return` 等于「返回当前的 `x`」,而 `defer` 打印的是注册时拷贝的 `0`。',
                 notes: [
                   { line: 'defer func() { x++ }()', text: '闭包捕获 `x` 这个变量本身(而不是它的值),所以能在返回前改它。' },
                   { line: 'defer func() { x++ }() // in b()', text: '`b` 里改的是局部变量,返回槽是另一块内存,所以返回 1。' },
                   { line: 'defer fmt.Println("defer sees x =", x)', text: '`fmt.Println` 的参数在注册时就求值并拷贝,所以看到的是 0。想看到最终值要写成 `defer func(){ fmt.Println(x) }()`。' },
                 ],
+                version: 'Go 1.27',
+                env: '本地 go run',
+                verified: true,
               },
               {
                 kind: 'analogy',
                 title: '`defer` 像「退房前的检查清单」,而且是「倒着勾」的',
-                text:
-                  '`defer` 像你在入住时就把要做的事写在便签上贴到门上——注意是「入住时」(注册时)写,所以便签上写的是「关掉 302 房间的灯」这种当时就定死的内容,而不是「关掉当前房间的灯」这种以后才确定的内容。离开时你从最后贴的那张开始撕(后进先出),所以顺序是反的。最后一张便签上你可以写「把押金改成 200」——因为押金单就在你手上(具名返回值是可寻址的变量),你改完再交给前台,前台看到的就是改后的数。但如果押金单已经封进保险柜(匿名的返回槽),你在便签上改的只能是自己的笔记本,保险柜里的数字纹丝不动。如果房子着火了(panic),便签仍然会被一张张撕掉——这就是「panic 时资源也会被释放」的道理;但隔壁楼着火,你这边完全不受影响(`recover` 只管当前 goroutine)。',
+                text: '`defer` 像入住时贴在门上的检查清单:便签上写的是「关掉 302 房间的灯」这种当时定死的内容,离开时从最后贴的那张开始撕(LIFO);最后一张可以写「把押金改成 200」——因为押金单在你手上(具名返回值可寻址);如果押金单封进保险柜(匿名返回槽),你改笔记本没用;房子着火了(panic),便签仍会被撕,但隔壁楼着火与你无关(recover 只管当前 goroutine)。',
                 mapping: [
                   { real: '你入住时就把要做的事写下来贴在门上', tech: '`defer` 注册时立即求值参数' },
                   { real: '纸条上写的是「关掉 302 房间的灯」,而不是「关掉当前房间的灯」', tech: '接收者/参数在注册时定死' },
@@ -801,15 +1020,32 @@ export default {
                 limit: '类比不成立的地方:现实中「纸张顺序」是物理的,而 Go 的 LIFO 来自链表的头插头取;另外 defer 的函数体在注册时不求值,只有参数求值——这一点类比容易让人误以为整个调用都被「记下来待执行」。',
               },
               {
-                kind: 'concept',
-                title: '最容易错的一处:`defer` 传参 vs `defer` 闭包',
-                body: [
-                  '看这两行:',
-                  '```go\ni := 0\ndefer fmt.Println(i)          // 打印 0\ndefer func() { fmt.Println(i) }() // 打印最终值\n```',
-                  '第一个是「传参」:注册时把 `i` 的当前值 0 拷贝进 `_defer` 记录,执行时打印拷贝。第二个是「闭包」:注册时只捕获了变量 `i` 的地址,执行时才去读,所以打印执行那一刻的值。',
-                  '判据: 看括号的位置。`defer f(i)` 的参数在括号里 → 立即求值;`defer func(){ ...i... }()` 的 `i` 在函数体里 → 执行时才读。这一条能秒杀一大片输出题。',
-                  '同样的道理适用于方法调用:`defer wg.Done()` 会在注册时求值 `wg` 这个接收者。所以如果 `wg` 是个结构体指针,`defer` 里用的是注册时的那个指针;如果你后来把 `wg` 变量指向了别的对象,`defer` 仍然操作原来那个——这就是「接收者在注册时求值」的实际后果。',
-                ],
+                kind: 'diagram',
+                title: '`defer` 传参 vs `defer` 闭包:括号里和函数体里,求值时机不同',
+                diagram: {
+                  type: 'split',
+                  left: {
+                    title: '传参:`defer f(i)`',
+                    tone: 'good',
+                    items: [
+                      '注册时把 `i` 的当前值拷进 `_defer`',
+                      '执行时打印的是这份拷贝',
+                      '循环里每次都是独立的值(逆序输出)',
+                      '判据:参数在 `defer f(...)` 的括号里',
+                    ],
+                  },
+                  right: {
+                    title: '闭包:`defer func(){ f(i) }()`',
+                    tone: 'warn',
+                    items: [
+                      '注册时只捕获变量 `i` 的地址',
+                      '执行时才去读 `i`',
+                      'Go 1.22 前循环共享同一个 `i`,常打出 `3 3 3`',
+                      '判据:变量在闭包的函数体里',
+                    ],
+                  },
+                  caption: '看括号位置:参数在 `defer` 调用的括号里 = 注册时求值;在闭包函数体里 = 执行时读。1.22 起循环变量每轮新建,闭包版的坑变小,但判据不变。',
+                },
               },
               {
                 kind: 'compare',
@@ -872,13 +1108,17 @@ export default {
               {
                 kind: 'concept',
                 title: 'panic / recover 的四条硬规则',
+                term: { name: 'panic / recover', def: 'panic 展开当前 goroutine 的栈;recover 只能在 defer 直接调用的函数体内叫停展开。' },
                 body: [
-                  '`panic` 是「放弃当前执行流,开始展开栈」;`recover` 是「在展开过程中叫停」。规则只有四条,但每一条都能出一道题。',
-                  '规则一:`panic` 会依次执行当前 goroutine 上每一层函数的 defer。所以「panic 时 defer 会执行」是对的——这正是 `defer file.Close()` 能在异常时也关文件的原因。但如果某个 defer 里又 panic,新的 panic 会覆盖旧的,之前的信息丢失。',
-                  '规则二:`recover` 只在「被 defer 直接调用的函数内部」有效。`defer func(){ recover() }()` 有效;`defer recover()` 无效(因为 `recover` 是作为参数被求值的,不在 defer 展开的调用栈里)。同理,把 `recover` 包一层再调用(`defer func(){ helper() }()` 里 `helper` 调 `recover`)也无效。',
-                  '规则三:`recover` 只能捕获当前 goroutine 的 panic。在 `go func(){ panic(...) }()` 里崩,外层 `recover` 完全看不到——那个崩溃会直接终止整个进程,因为 Go 的 panic 不会被其他 goroutine 拦住。所以每个可能 panic 的 goroutine 都要自带 `defer recover`。',
-                  '规则四:`recover` 返回 `nil` 有两种含义——「当前没有 panic」或「panic 的值本身就是 nil」(`panic(nil)`)。1.21 起 `panic(nil)` 会转成 `*runtime.PanicNilError`,避免了这个歧义。',
+                  '规则只有四条,但每条都能出一道题;先记住「展开、拦截、goroutine、nil」四个关键词。',
                 ],
+                points: [
+                  '**展开**:`panic` 会依次执行当前 goroutine 每一层函数的 defer;如果 defer 里又 panic,新的 panic 会覆盖旧的,旧信息丢失。',
+                  '**拦截**:`recover` 只在「被 defer 直接调用的函数内部」有效;`defer recover()` 无效,把 `recover` 包一层 helper 也无效。',
+                  '**goroutine**:`recover` 只能捕获当前 goroutine 的 panic;子 goroutine 崩了,外层 `recover` 看不到,进程照样退出。',
+                  '**nil**:`recover()` 返回 nil 有两种含义——没有 panic,或 `panic(nil)`;Go 1.21 起 `panic(nil)` 转成 `*runtime.PanicNilError`,消除歧义。',
+                ],
+                caption: '把四条规则压成三个问题:在 defer 里吗?直接调用吗?同一个 goroutine 吗?',
               },
               {
                 kind: 'diagram',
@@ -900,14 +1140,16 @@ export default {
                 kind: 'code',
                 title: '`recover` 的正确姿势与三个无效姿势',
                 lang: 'go',
-                code:
-                  "package main\n\nimport \"fmt\"\n\n// 正确:defer 的函数体内直接调用\ntry := func(name string, f func()) {\n\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\tfmt.Printf(\"[%s] recovered: %v\\n\", name, r)\n\t\t}\n\t}()\n\tf()\n}\n\nfunc main() {\n\ttry(\"ok\", func() { panic(\"boom\") })\n\n\t// 无效 1:defer recover() —— recover 被当参数求值,返回 nil 后丢弃\n\tfunc() {\n\t\tdefer recover()\n\t\tpanic(\"not caught\")\n\t}()\n}\n",
+                code: 'package main\n\nimport "fmt"\n\n// 正确:defer 的函数体内直接调用\nfunc try(name string, f func()) {\n	defer func() {\n		if r := recover(); r != nil {\n			fmt.Printf("[%s] recovered: %v\\n", name, r)\n		}\n	}()\n	f()\n}\n\nfunc main() {\n	try("ok", func() { panic("boom") })\n\n	// 无效 1:defer recover() —— recover 被当参数求值,返回 nil 后丢弃\n	func() {\n		defer recover()\n		panic("not caught")\n	}()\n}\n',
                 caption: '上面的 `try` 是标准封装:把 `recover` 收在一个辅助函数里,业务代码只管传闭包。下面那个会真的崩,因为 `defer recover()` 是无效写法。',
                 notes: [
                   { line: 'if r := recover(); r != nil', text: '必须在 defer 的匿名函数体内直接调用 `recover`——这是唯一有效的位置。' },
                   { line: 'defer recover()', text: '语法合法但语义是「注册一个对 recover 的调用」,而 `recover()` 的参数在注册时求值 → 那时没有 panic → 返回 nil → 被丢弃。' },
                   { line: 'try("ok", func() { panic("boom") })', text: '注意 `recover` 之后 `try` 正常返回,`main` 继续执行——这是唯一「活着」的场景。' },
                 ],
+                version: 'Go 1.27',
+                env: '本地 go run(第二段故意 panic,进程退出码 2)',
+                verified: true,
               },
               {
                 kind: 'question',
@@ -920,6 +1162,7 @@ export default {
                   '所以能改返回值:具名返回值是一个可寻址的局部变量,defer 闭包捕获了它,于是 `x++` 生效。匿名返回值时 `return expr` 已经把值拷进匿名槽,defer 改局部变量无效。',
                 ],
                 depth: '追问「`os.Exit` 会执行 defer 吗」——不会。`os.Exit` 直接 `exit(2)`,栈不展开,defer 全部跳过。对应的还有 `log.Fatal`(内部调 `os.Exit`)、`runtime.Goexit`(会执行 defer 但不返回)。三者行为不同,常被考。',
+                followup: '`return` 之后再注册 defer 还有机会执行吗?——没有;defer 只在 return 之前的执行路径上注册。',
               },
               {
                 kind: 'question',
@@ -932,6 +1175,35 @@ export default {
                   '推论:循环里 `defer fmt.Println(i)` 打出的是各自注册时的值(逆序);`defer func(){ fmt.Println(i) }()` 在 1.22 前打出全部相同值。',
                 ],
                 followup: '「`defer` 里能改参数的值吗?」 不能改调用方看到的——因为 `_defer` 里存的是拷贝。但闭包捕获变量可以改,这是两回事。',
+                depth: '`defer f(g())` 里 `g()` 在注册时求值;`defer func(){ f(g()) }()` 才在返回前调用 g。',
+              },
+              {
+                kind: 'question',
+                title: 'Q26 · 循环里 defer 有什么坑？',
+                questionId: 'go-01-Q26',
+                intent: '说清「作用域是函数不是代码块」、循环 defer 的两个代价,以及正确写法。',
+                points: [
+                  'defer 的作用域是**函数**不是代码块:循环里注册的 defer 全部推迟到函数返回才执行;循环打开文件会瞬间耗尽句柄。',
+                  '每条 defer 都往 `g._defer` 头插一条记录,循环 N 次挂 N 条,直到函数返回才消费;内存和 GC 压力都随 N 增长。',
+                  'Go 1.14 的 open-coded defer 不适用于循环里的 defer(次数不定),只能退回链表慢路径。',
+                  '正确写法:把循环体抽成独立函数,在函数内 defer,返回即消费;或者不用 defer,显式释放。',
+                ],
+                depth: 'Go 1.22 改变的是循环变量语义(每轮新建),不改变 defer 的作用域;循环里 defer 的记录堆积问题仍在。',
+                followup: '如果必须在循环里打开资源,怎么做?——把循环体封装成函数,让 defer 在每次函数返回时执行;不要指望 defer 在每轮循环结束时执行。',
+              },
+              {
+                kind: 'question',
+                title: 'Q27 · defer + recover 的正确姿势？',
+                questionId: 'go-01-Q27',
+                intent: '说清 recover 唯一有效的位置,以及捕获后返回值怎么处理。',
+                points: [
+                  '**正确姿势**:`defer func(){ if r := recover(); r != nil { ... } }()`;`recover` 必须在被 defer 的函数体内**直接调用**。',
+                  '**无效写法**:`defer recover()` 把 recover 当参数求值,返回 nil 后丢弃;把 recover 包在 helper 里调用也无效。',
+                  'recover 只对当前 goroutine 有效;子 goroutine 的 panic 外层接不住,进程仍会退出。',
+                  '捕获后当前函数正常返回,但不会从 panic 点继续;返回值遵循命名/匿名返回值规则——具名返回值可被 defer 改,匿名的返回零值。',
+                ],
+                depth: 'Go 1.21 起 `panic(nil)` 会转成 `*runtime.PanicNilError`,避免「recover 返回 nil 是没 panic 还是 panic(nil)」的歧义。',
+                followup: 'recover 后能继续执行原函数吗?——不能回到 panic 点;只能让当前函数返回,调用方继续执行。',
               },
               {
                 kind: 'question',
@@ -944,6 +1216,7 @@ export default {
                   '所以「defer 慢」在 1.14 后对绝大多数代码已不成立;真正该避免的是「循环里 defer」,因为它退回链表实现且记录堆积到函数返回。',
                 ],
                 depth: 'open-coded 的关键机制:编译器在函数里预留一块 defer 位图,`defer f()` 变成「置位 + 跳过」,返回时线性检查位图。限制是连续 defer 不超过 8 个(`deferBits` 是 uint8),超过就混用链表实现。',
+                followup: '为什么循环里的 defer 吃不到 open-coded?——次数不定,编译器无法生成固定位图,只能退回链表。',
               },
               {
                 kind: 'question',
@@ -956,6 +1229,7 @@ export default {
                   '`fatal error` 与 `panic` 的区别:`fatal` 走 `fatalthrow`,不执行 defer、不展开栈、不能被 recover;`panic` 会执行 defer 且可被 recover。',
                 ],
                 followup: '「panic 里再 panic 会怎样?」 新 panic 覆盖旧 panic,最终只看到最后一个的值;旧值丢失(1.21 前)。1.21 起引入了 `panic` 链的保留(`PANIC` 值链),但实践中仍应避免。',
+                depth: '`panic(nil)` 在 Go 1.21 起转成 `*runtime.PanicNilError`;`fatal error` 不展开栈、不执行 defer、不能被 recover。',
               },
               {
                 kind: 'question',
@@ -968,6 +1242,7 @@ export default {
                   '库代码的纪律:库不要 panic(除非初始化失败),因为 panic 会穿透调用方的业务逻辑;库也不要 recover 调用方的 panic,那会掩盖 bug。recover 只应出现在「进程边界」——HTTP handler、RPC 入口、goroutine 顶层。',
                 ],
                 depth: '一个实用的中间路线:定义 `ErrXxx` 哨兵错误 + `errors.Is` 判断,配合 `fmt.Errorf("...: %w", err)` 包装保留链。需要携带结构化信息时用自定义 error 类型 + `errors.As`。这比「用 panic 传错误」稳健得多,也是 Go 生态的主流做法。',
+                followup: '库代码可以 recover 吗?——只在进程边界 recover;库内 recover 会掩盖调用方的 bug。',
               },
             ],
           },
