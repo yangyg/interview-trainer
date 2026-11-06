@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-06T08:09:08.101Z",
+  "sourceGeneratedAt": "2026-11-06T08:08:57.381Z",
+  "buildHash": "6fff4f1ffda0d91b",
+  "counts": {
+    "total": 1614,
+    "byType": {
+      "T1": 867,
+      "T2": 747,
+      "T3": 0,
+      "T4": 0
+    }
+  },
+  "topics": [
+    {
+      "id": "java-01",
+      "language": "java",
+      "name": "Java基础",
+      "items": 105,
+      "bosses": 97
+    },
+    {
+      "id": "java-02",
+      "language": "java",
+      "name": "Java集合",
+      "items": 62,
+      "bosses": 61
+    },
+    {
+      "id": "java-03",
+      "language": "java",
+      "name": "并发编程",
+      "items": 66,
+      "bosses": 80
+    },
+    {
+      "id": "java-04",
+      "language": "java",
+      "name": "JVM",
+      "items": 85,
+      "bosses": 72
+    },
+    {
+      "id": "java-05",
+      "language": "java",
+      "name": "Spring与框架",
+      "items": 66,
+      "bosses": 94
+    },
+    {
+      "id": "java-06",
+      "language": "java",
+      "name": "MySQL",
+      "items": 65,
+      "bosses": 90
+    },
+    {
+      "id": "java-07",
+      "language": "java",
+      "name": "Redis",
+      "items": 111,
+      "bosses": 80
+    },
+    {
+      "id": "java-08",
+      "language": "java",
+      "name": "分布式与消息队列",
+      "items": 94,
+      "bosses": 89
+    },
+    {
+      "id": "java-09",
+      "language": "java",
+      "name": "计算机网络与操作系统",
+      "items": 84,
+      "bosses": 76
+    },
+    {
+      "id": "java-10",
+      "language": "java",
+      "name": "设计模式与场景题",
+      "items": 102,
+      "bosses": 56
+    },
+    {
+      "id": "java-11",
+      "language": "java",
+      "name": "算法与手撕代码",
+      "items": 20,
+      "bosses": 94
+    },
+    {
+      "id": "go-index",
+      "language": "go",
+      "name": "Go 精编题库",
+      "items": 397,
+      "bosses": 177
+    },
+    {
+      "id": "go-01",
+      "language": "go",
+      "name": "语言基础与常见代码输出题",
+      "items": 84,
+      "bosses": 62
+    },
+    {
+      "id": "go-02",
+      "language": "go",
+      "name": "并发编程与调度",
+      "items": 9,
+      "bosses": 18
+    },
+    {
+      "id": "go-03",
+      "language": "go",
+      "name": "运行时原理-GC内存与性能分析",
+      "items": 9,
+      "bosses": 12
+    },
+    {
+      "id": "go-04",
+      "language": "go",
+      "name": "工程实践与标准库",
+      "items": 20,
+      "bosses": 12
+    },
+    {
+      "id": "go-05",
+      "language": "go",
+      "name": "后端配套知识",
+      "items": 11,
+      "bosses": 23
+    },
+    {
+      "id": "ai-01",
+      "language": "ai",
+      "name": "大模型基础",
+      "items": 15,
+      "bosses": 22
+    },
+    {
+      "id": "ai-02",
+      "language": "ai",
+      "name": "训练与微调",
+      "items": 16,
+      "bosses": 20
+    },
+    {
+      "id": "ai-03",
+      "language": "ai",
+      "name": "推理与部署",
+      "items": 10,
+      "bosses": 18
+    },
+    {
+      "id": "ai-04",
+      "language": "ai",
+      "name": "Prompt与上下文工程",
+      "items": 12,
+      "bosses": 18
+    },
+    {
+      "id": "ai-05",
+      "language": "ai",
+      "name": "RAG与知识增强",
+      "items": 14,
+      "bosses": 20
+    },
+    {
+      "id": "ai-06",
+      "language": "ai",
+      "name": "Agent与工具调用",
+      "items": 12,
+      "bosses": 22
+    },
+    {
+      "id": "ai-07",
+      "language": "ai",
+      "name": "AI应用工程与安全",
+      "items": 11,
+      "bosses": 16
+    },
+    {
+      "id": "arch-01",
+      "language": "arch",
+      "name": "架构基础与设计原则",
+      "items": 21,
+      "bosses": 20
+    },
+    {
+      "id": "arch-02",
+      "language": "arch",
+      "name": "高可用与容灾设计",
+      "items": 20,
+      "bosses": 18
+    },
+    {
+      "id": "arch-03",
+      "language": "arch",
+      "name": "高性能与缓存架构",
+      "items": 22,
+      "bosses": 18
+    },
+    {
+      "id": "arch-04",
+      "language": "arch",
+      "name": "数据一致性与分布式架构",
+      "items": 27,
+      "bosses": 18
+    },
+    {
+      "id": "arch-05",
+      "language": "arch",
+      "name": "系统设计场景题",
+      "items": 44,
+      "bosses": 18
+    }
+  ]
+}
