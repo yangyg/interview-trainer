@@ -16,12 +16,21 @@ import {
   XIcon,
 } from '@lucide/vue'
 import LessonDiagram from '@/components/course/LessonDiagram.vue'
+import PrincipleDemos from '@/components/course/diagram/PrincipleDemos.vue'
 import HandwriteBlock from '@/components/course/HandwriteBlock.vue'
 import RichText from '@/components/course/RichText.vue'
+import TextAnnotation from '@/components/course/TextAnnotation.vue'
 import { useDataStore } from '@/stores/data'
 import type { LessonContent } from '@/lib/types'
 
-const props = defineProps<{ content: LessonContent }>()
+/**
+ * 图解优先：结构化内容（图示 / 表格 / 步骤 / 代码 / 类比卡）提到标题正下方当主视图，
+ * 解释性正文交给 TextAnnotation 压成注解。文字一字不删，只是不再抢第一眼。
+ */
+const props = withDefaults(
+  defineProps<{ content: LessonContent; textMode?: 'visual' | 'text' }>(),
+  { textMode: 'visual' },
+)
 
 const dataStore = useDataStore()
 
@@ -83,12 +92,7 @@ function versionLabel(lang: string, version: string) {
 
 <template>
   <div class="space-y-6">
-    <!-- 导语 -->
-    <div class="space-y-3 text-[15px] leading-7 text-foreground/90">
-      <p v-for="(p, i) in paragraphs" :key="i"><RichText :text="p" /></p>
-    </div>
-
-    <!-- 知识骨架:讲义很长,先给一张地图 -->
+    <!-- 知识骨架先出场:一进课时先看见结构,而不是先读一段导语 -->
     <div v-if="content.outline.length" class="rounded-xl border bg-muted/30 p-4">
       <p
         class="mb-2.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
@@ -108,6 +112,9 @@ function versionLabel(lang: string, version: string) {
       </ul>
     </div>
 
+    <!-- 导语降为读图注解:首段常显,其余可展开;全文精读时全部展开 -->
+    <TextAnnotation :body="paragraphs" :mode="textMode" lead />
+
     <!-- 教学主体 -->
     <template v-for="(block, bi) in sections" :key="bi">
       <div :id="`blk-${bi}`" class="scroll-mt-24">
@@ -117,9 +124,6 @@ function versionLabel(lang: string, version: string) {
           <component :is="HEAD_ICON.concept" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p v-for="(p, i) in block.body" :key="i" class="text-[15px] leading-7 text-foreground/85">
-          <RichText :text="p" />
-        </p>
         <div
           v-if="block.term"
           class="rounded-lg border-l-[3px] border-primary/50 bg-primary/[0.05] py-2.5 pl-3.5 pr-3"
@@ -139,6 +143,7 @@ function versionLabel(lang: string, version: string) {
             <span class="min-w-0"><RichText :text="p" /></span>
           </li>
         </ul>
+        <TextAnnotation :body="block.body" :mode="textMode" />
         <p
           v-if="block.caption"
           class="rounded-lg bg-muted/50 px-3.5 py-2.5 text-sm leading-6 text-foreground/85"
@@ -147,15 +152,13 @@ function versionLabel(lang: string, version: string) {
         </p>
       </section>
 
-      <!-- 为什么 -->
+      <!-- 为什么：先摆现象，再给现场与答案 -->
       <section v-else-if="block.kind === 'why'" class="space-y-2.5">
         <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.why" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p v-for="(p, i) in block.body" :key="i" class="text-[15px] leading-7 text-foreground/85">
-          <RichText :text="p" />
-        </p>
+        <TextAnnotation :body="block.body" :mode="textMode" />
         <!-- 现场:报错、执行计划、错误输出。读者得先看见,才谈得上猜 -->
         <div v-if="block.code" class="overflow-hidden rounded-lg border bg-muted/40">
           <div class="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
@@ -215,37 +218,16 @@ function versionLabel(lang: string, version: string) {
         </div>
       </section>
 
-      <!-- 原理:机制拆解 -->
+      <!-- 原理:机制拆解走统一播放器,步骤从静态清单变成可走的因果链 -->
       <section v-else-if="block.kind === 'principle'" class="space-y-3">
         <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.principle" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p v-for="(p, i) in block.body" :key="`b${i}`" class="text-[15px] leading-7 text-foreground/85">
-          <RichText :text="p" />
-        </p>
-        <ol class="space-y-0">
-          <li v-for="(s, i) in block.steps" :key="i" class="flex gap-3">
-            <div class="flex flex-col items-center">
-              <span
-                class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold tabular-nums text-primary"
-              >
-                {{ i + 1 }}
-              </span>
-              <span
-                v-if="i < block.steps.length - 1"
-                class="my-1 w-px flex-1 bg-border"
-                aria-hidden="true"
-              />
-            </div>
-            <div class="min-w-0 flex-1 pb-3.5">
-              <p class="text-sm font-medium leading-6"><RichText :text="s.title" /></p>
-              <p class="mt-0.5 text-sm leading-6 text-muted-foreground">
-                <RichText :text="s.detail" />
-              </p>
-            </div>
-          </li>
-        </ol>
+        <div class="rounded-xl border bg-card p-2 sm:p-3">
+          <PrincipleDemos :block="block" :text-mode="textMode" />
+        </div>
+        <TextAnnotation :body="block.body" :mode="textMode" />
         <p
           v-if="block.takeaway"
           class="rounded-lg bg-muted/50 px-3.5 py-2.5 text-sm font-medium leading-6"
@@ -266,13 +248,6 @@ function versionLabel(lang: string, version: string) {
           <component :is="HEAD_ICON.analogy" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p
-          v-for="(p, i) in block.body"
-          :key="`ab${i}`"
-          class="text-[15px] leading-7 text-foreground/85"
-        >
-          <RichText :text="p" />
-        </p>
         <div class="rounded-xl border bg-muted/35 p-4">
           <p class="text-[15px] leading-7 text-foreground/85"><RichText :text="block.text" /></p>
           <div
@@ -296,24 +271,19 @@ function versionLabel(lang: string, version: string) {
             类比的边界:<RichText :text="block.limit" />
           </p>
         </div>
+        <TextAnnotation :body="block.body" :mode="textMode" />
       </section>
 
-      <!-- 图示 -->
+      <!-- 图示：主视图提到标题正下方，正文降为读图注解 -->
       <section v-else-if="block.kind === 'diagram'" class="space-y-2.5">
         <h2 class="flex items-start gap-2 text-[15px] font-semibold leading-6">
           <component :is="HEAD_ICON.diagram" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p
-          v-for="(p, i) in block.body"
-          :key="`b${i}`"
-          class="text-[15px] leading-7 text-foreground/85"
-        >
-          <RichText :text="p" />
-        </p>
-        <div class="rounded-xl border bg-card p-4">
+        <div class="rounded-xl border bg-card p-2 sm:p-3">
           <LessonDiagram :diagram="block.diagram" />
         </div>
+        <TextAnnotation :body="block.body" :mode="textMode" />
         <p
           v-if="block.caption"
           class="rounded-lg bg-muted/50 px-3.5 py-2.5 text-sm leading-6 text-foreground/85"
@@ -328,13 +298,6 @@ function versionLabel(lang: string, version: string) {
           <component :is="HEAD_ICON.compare" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p
-          v-for="(p, i) in block.body"
-          :key="`b${i}`"
-          class="text-[15px] leading-7 text-foreground/85"
-        >
-          <RichText :text="p" />
-        </p>
         <div class="overflow-x-auto rounded-xl border">
           <table class="w-full border-collapse text-left text-sm">
             <thead>
@@ -364,6 +327,7 @@ function versionLabel(lang: string, version: string) {
             </tbody>
           </table>
         </div>
+        <TextAnnotation :body="block.body" :mode="textMode" />
         <p v-if="block.note" class="text-xs leading-5 text-muted-foreground">
           <RichText :text="block.note" />
         </p>
@@ -381,13 +345,6 @@ function versionLabel(lang: string, version: string) {
           <component :is="HEAD_ICON.code" class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0"><RichText :text="block.title" /></span>
         </h2>
-        <p
-          v-for="(p, i) in block.body"
-          :key="`cb${i}`"
-          class="text-[15px] leading-7 text-foreground/85"
-        >
-          <RichText :text="p" />
-        </p>
         <div class="overflow-hidden rounded-lg border bg-muted/40">
           <div class="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
             <span class="font-mono text-xs text-muted-foreground">
@@ -414,6 +371,7 @@ function versionLabel(lang: string, version: string) {
             class="overflow-x-auto p-3 font-mono text-xs leading-6 text-foreground/90"
           ><code>{{ block.code }}</code></pre>
         </div>
+        <TextAnnotation :body="block.body" :mode="textMode" />
         <p v-if="block.env" class="text-xs leading-5 text-muted-foreground">
           运行环境:<RichText :text="block.env" />
         </p>

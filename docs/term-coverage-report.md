@@ -1,6 +1,6 @@
 # 术语覆盖报告
 
-> 生成时间:2026-10-30 10:22 · 由 `.term.mjs` 生成,数据变了可以重跑
+> 生成时间:2026-11-04 14:01 · 由 `.term.mjs` 生成,数据变了可以重跑
 
 对每道题,从「标题 + 答案」抽可检索符号(反引号内容与英文标识符),检查它是否出现在所属课时正文里。
 命中率低于 50% 的题再按三种情况拆分:
@@ -11,7 +11,7 @@
 | 只是换了说法 | 正文写成了中文,英文标识符没保留 | 补一个括号,如「原子性(Atomicity)」 |
 | 真缺口 | 整门课都没出现 | 要补内容 |
 
-**总览**:检查 1464 道题,**375 道**命中率低于 50%。符号层面 覆盖在别处 893 个 / 只是换说法 19 个 / 真缺口 1189 个;去重后真缺口术语 **1076 个**。
+**总览**:检查 1504 道题,**391 道**命中率低于 50%。符号层面 覆盖在别处 954 个 / 只是换说法 19 个 / 真缺口 1226 个;去重后真缺口术语 **1088 个**。
 
 这个指标是下限:正文用中文复述、没保留英文名时会算成「缺口」。所以下面的表不是判决书,是待核对清单。
 
@@ -28,11 +28,14 @@
 | `online` | **是** | 2 | 1 | java-mysql-redis |
 | `initializingbean#` | **是** | 2 | 1 | java-spring |
 | `user_id` | — | 4 | 2 | go-concurrency-runtime、java-design-algorithm |
-| `etcd/zk` | — | 3 | 3 | arch-design、go-engineering-system、go-shortlink |
+| `nacos` | — | 4 | 2 | go-engineering-system、go-shortlink |
 | `grpc` | — | 3 | 3 | arch-design、go-concurrency-runtime、java-design-algorithm |
 | `redis+lua` | — | 3 | 3 | go-engineering-system、go-shortlink、java-mysql-redis |
-| `setnx` | — | 3 | 2 | arch-design、go-shortlink |
+| `sharded` | — | 3 | 3 | go-engineering-system、go-language、go-shortlink |
+| `tcc` | — | 3 | 3 | go-shortlink、java-design-algorithm、java-mysql-redis |
 | `apm` | — | 3 | 2 | go-concurrency-runtime、java-mysql-redis |
+| `eureka/nacos` | — | 3 | 2 | go-engineering-system、go-shortlink |
+| `cow` | — | 3 | 2 | go-engineering-system、go-shortlink |
 | `crud` | — | 3 | 2 | java-mysql-redis、java-spring |
 | `vlm` | — | 2 | 2 | ai-foundation、ai-rag-agent |
 | `checksum` | — | 2 | 2 | ai-rag-agent、java-mysql-redis |
@@ -40,6 +43,7 @@
 | `sequential` | — | 2 | 2 | arch-design、go-concurrency-runtime |
 | `deadline` | — | 2 | 2 | arch-design、go-concurrency-runtime |
 | `kill` | — | 2 | 2 | arch-design、java-lang-collections |
+| `etcd/zk` | — | 2 | 2 | arch-design、go-engineering-system |
 | `n/2` | — | 2 | 2 | arch-design、java-lang-collections |
 | `orderid` | — | 2 | 2 | arch-design、java-spring |
 | `store` | — | 2 | 2 | arch-design、go-language |
@@ -50,17 +54,13 @@
 | `r.context` | — | 2 | 2 | go-concurrency-runtime、go-shortlink |
 | `sql.errnorows` | — | 2 | 2 | go-concurrency-runtime、go-language |
 | `offset` | — | 2 | 2 | go-concurrency-runtime、java-spring |
-| `prestop` | — | 2 | 2 | go-engineering-system、java-spring |
-| `sigterm` | — | 2 | 2 | go-engineering-system、java-spring |
-| `switching` | — | 2 | 2 | go-engineering-system、java-distributed-network |
-| `protocols` | — | 2 | 2 | go-engineering-system、java-distributed-network |
-| `extract` | — | 2 | 2 | go-engineering-system、go-shortlink |
-| `peer` | — | 2 | 2 | go-engineering-system、go-shortlink |
-| `net.errclosed` | — | 2 | 2 | go-engineering-system、go-shortlink |
-| `syscall.epipe` | — | 2 | 2 | go-engineering-system、go-shortlink |
-| `cpu/db` | — | 2 | 2 | go-engineering-system、go-shortlink |
-| `avl` | — | 2 | 2 | go-engineering-system、go-shortlink |
-| `mongodb` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `errcheck` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `govet` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `ineffassign` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `gosec` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `revive` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `bodyclose` | — | 2 | 2 | go-engineering-system、go-shortlink |
+| `sqlclosecheck` | — | 2 | 2 | go-engineering-system、go-shortlink |
 
 ## 二、按课程
 
@@ -379,9 +379,33 @@
 
 ### 短链服务:从 0 到可运维 (`go-shortlink`)
 
-缺口术语 32 个(出现 ≥2 次的 0 个),涉及 5 个课时。
+缺口术语 85 个(出现 ≥2 次的 3 个),涉及 13 个课时。
+
+| 术语 | 次数 |
+|---|---|
+| `eureka/nacos` | 2 |
+| `cow` | 2 |
+| `nacos` | 2 |
 
 <details><summary>课时明细(缺 2 个以上符号的题)</summary>
+
+**`rate-limit`** 限流:把过载挡在门外
+
+- `go-index-Q122` 常见的限流算法有哪些？各自的优缺点？ — 缺 `rate.newlimiter` `rate.limit`
+- `go-index-Q123` 分布式限流怎么实现？单机限流的问题是什么？ — 缺 `nginx` `limit_req` `apisix/kong` `envoy` `local/global`
+- `go-index-Q124` 熔断器的工作原理是什么？和限流有什么区别？ — 缺 `half` `google` `breaker`
+
+**`idempotency-key`** 接口幂等:让重试不产生副作用
+
+- `go-index-Q126` 超时应该怎么设？为什么会出现重试风暴？ — 缺 `random` `budget`
+- `go-index-Q150` MySQL 的事务隔离级别与 MVCC 是怎么实现的？ — 缺 `mvcc` `db_trx_id` `db_roll_ptr` `undo`
+- `go-index-Q120` 分布式事务有哪些方案？各自适用什么场景？ — 缺 `tcc` `confirm` `saga`
+
+**`gates`** 门禁:让「验过了」和「没验成」不可能被混淆
+
+- `go-index-Q146` 一个 Go 项目的 CI/CD 流水线应该包含什么？ — 缺 `helm/kustomize` `govulncheck` `trivy`
+- `go-index-Q145` Go 项目应该配哪些静态检查？ — 缺 `errcheck` `govet` `ineffassign` `gosec` `revive` `bodyclose` `sqlclosecheck` `goimports` `golangci.yml`
+- `go-index-Q78` 一台服务器最大能支撑多少个 TCP 连接？瓶颈在哪？ — 缺 `fs.file` `sbuf` `c1000k` `net.core.somaxconn` `tcp_max_syn_backlog` `reuseport`
 
 **`id-and-schema`** 号段发号与短码建表
 
@@ -395,8 +419,23 @@
 
 **`async-tap`** 打点:把重活从 302 上摘下来
 
-- `go-05-Q21` CAP 与 BASE？etcd/ZooKeeper/Redis 是哪种？ — 缺 `etcd/zk` `raft/zab` `eureka/nacos` `lease` `watch`
-- `go-05-Q24` 限流算法？熔断/降级？ — 缺 `golang.org/x/time/rate` `redis+lua` `envoy/istio` `zero` `breakpoint/sentinel` `golang/hystrix` `semaphore`
+- `go-05-Q21` CAP 与 BASE？etcd/ZooKeeper/Redis 是哪种？ — 缺 `raft/zab` `eureka/nacos`
+- `go-05-Q24` 限流算法？熔断/降级？ — 缺 `redis+lua` `envoy/istio` `breakpoint/sentinel` `golang/hystrix` `semaphore`
+
+**`distributed-lock`** 分布式锁:跨进程的临界区
+
+- `go-index-Q108` 怎么发现和优化锁竞争？ — 缺 `debug/pprof/mutex` `contention` `sharded` `cow`
+- `go-index-Q153` Redis 的持久化方式有哪些？怎么选？ — 缺 `cow` `appendfsync` `always`
+
+**`metrics-cardinality`** 指标:为什么 /metrics 必须长在另一个端口上
+
+- `go-index-Q112` 服务 p99 延迟有毛刺，可能是哪些原因？ — 缺 `mutator` `assist`
+- `go-index-Q139` 灰度发布、蓝绿部署、金丝雀发布有什么区别？ — 缺 `mesh` `virtualservice` `nacos`
+
+**`image-and-scratch`** 镜像:为什么最终是 15MB,而且里面没有 shell
+
+- `go-index-Q25` 进程、线程、协程有什么区别？为什么 Go 的协程更轻？ — 缺 `debug.setmaxstack` `gfree` `pthread_create`
+- `go-index-Q21` init 函数的执行顺序是怎样的？ — 缺 `github.com/go` `driver/mysql`
 
 **`kafka-semantics`** Kafka:它为什么快,以及它到底保证了什么
 
@@ -404,7 +443,15 @@
 
 **`idempotent-aggregate`** 幂等聚合:让至少一次变成恰好一次的效果
 
-- `go-index-Q131` 如何解决消息重复消费和顺序性问题？ — 缺 `setnx` `messagequeueselector` `messagelistenerorderly`
+- `go-index-Q131` 如何解决消息重复消费和顺序性问题？ — 缺 `messagequeueselector` `messagelistenerorderly`
+
+**`triage`** 三类故障:goroutine 泄漏、p99 变慢、统计不准
+
+- `go-index-Q103` 线上 Go 服务 CPU 突然 100%，你会怎么排查？ — 缺 `port/debug/pprof/profile` `sigquit`
+
+**`orchestration`** 编排:一条命令起全栈,以及「起来了」和「能干活」的区别
+
+- `go-index-Q127` 服务注册与发现的原理是什么？ — 缺 `nacos` `ap/cp` `grpc/kratos` `istio` `eureka/nacos`
 
 </details>
 
@@ -552,20 +599,13 @@
 
 ### Java 语言与集合框架 (`java-lang-collections`)
 
-缺口术语 55 个(出现 ≥2 次的 1 个),涉及 8 个课时。
+缺口术语 36 个(出现 ≥2 次的 1 个),涉及 7 个课时。
 
 | 术语 | 次数 |
 |---|---|
 | `add/remove` | 2 |
 
 <details><summary>课时明细(缺 2 个以上符号的题)</summary>
-
-**`lang-jvm`** JVM、字节码与编译执行
-
-- `java-01-Q1` JVM、JDK、JRE 有什么区别？ — 缺 `zing` `jconsole` `javap` `jlink`
-- `java-01-Q2` Java 语言有哪些特点？ — 缺 `anywhere` `free/delete` `rust` `c++11`
-- `java-01-Q6` Oracle JDK 和 OpenJDK 有什么区别？什么是 LTS？ — 缺 `oracle` `gplv2` `classpath` `nftc/otn` `amazon` `corretto` `alibaba` `dragonwell`
-- `java-01-Q8` 什么是 native 方法？ — 缺 `object.hashcode` `thread.start0`
 
 **`string-pool`** String 不可变与常量池
 

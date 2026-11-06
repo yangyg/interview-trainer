@@ -5,11 +5,13 @@ import { useWindowSize, useWindowScroll } from '@vueuse/core'
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  BookOpenIcon,
   CircleCheckIcon,
   ClockIcon,
   FileQuestionIcon,
   ListIcon,
   LockIcon,
+  NetworkIcon,
 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
@@ -71,6 +73,26 @@ watch(
 )
 
 const HINT_KEY = 'interview-trainer/course-lock-hint'
+
+/** 讲义默认图解优先；想通读全文可一键展开，偏好留在本地 */
+const TEXT_MODE_KEY = 'interview-trainer/lesson-text-mode'
+type TextMode = 'visual' | 'text'
+function readTextMode(): TextMode {
+  try {
+    return localStorage.getItem(TEXT_MODE_KEY) === 'text' ? 'text' : 'visual'
+  } catch {
+    return 'visual'
+  }
+}
+const textMode = ref<TextMode>(readTextMode())
+function setTextMode(mode: TextMode) {
+  textMode.value = mode
+  try {
+    localStorage.setItem(TEXT_MODE_KEY, mode)
+  } catch {
+    // 隐私模式下写不进去也不影响本次阅读
+  }
+}
 
 /** 软锁提示每个会话只弹一次:直接输 URL 进来的人不该被反复打扰 */
 function showLockHint() {
@@ -225,14 +247,42 @@ function goToc(id: string) {
             目录
           </Button>
         </div>
-        <h1 class="text-balance text-xl font-semibold tracking-tight sm:text-2xl">
-          {{ lesson.title }}
-        </h1>
+        <div class="flex items-start justify-between gap-3">
+          <h1 class="text-balance min-w-0 text-xl font-semibold tracking-tight sm:text-2xl">
+            {{ lesson.title }}
+          </h1>
+          <div
+            class="inline-flex shrink-0 rounded-md border border-border/70 p-0.5"
+            role="group"
+            aria-label="讲义阅读模式"
+          >
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors"
+              :class="textMode === 'visual' ? 'bg-primary/[0.09] text-primary' : 'text-muted-foreground hover:text-foreground'"
+              :aria-pressed="textMode === 'visual'"
+              aria-label="图解优先：图示为主，文字详解可展开"
+              @click="setTextMode('visual')"
+            >
+              <NetworkIcon class="size-3" />图解
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors"
+              :class="textMode === 'text' ? 'bg-primary/[0.09] text-primary' : 'text-muted-foreground hover:text-foreground'"
+              :aria-pressed="textMode === 'text'"
+              aria-label="全文精读：展开全部文字详解"
+              @click="setTextMode('text')"
+            >
+              <BookOpenIcon class="size-3" />全文精读
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 讲义:不再套一层卡片,避免「卡片里套卡片」,区块自己的面板就是层次 -->
       <div class="pt-1">
-        <LessonContent :content="lesson.content" />
+        <LessonContent :content="lesson.content" :text-mode="textMode" />
         <!-- 讲义 → 题库的对应关系:正文只精讲其中一两道,其余靠这张清单自查 -->
         <LessonQuestionIndex :ids="lesson.questionIds" :focus="focusQuestionIds" />
       </div>
@@ -276,26 +326,26 @@ function goToc(id: string) {
         </CardContent>
       </Card>
 
-      <!-- 上一课 / 下一课 -->
+      <!-- 上一课 / 下一课：窄屏两枚按钮必须等分并可截断，否则长课时名会把页面撑出横向滚动 -->
       <div class="mt-4 flex items-center justify-between gap-2 border-t pt-3">
         <Button
           variant="ghost"
           size="sm"
           :disabled="!prev"
-          class="min-w-0"
+          class="min-w-0 max-w-[46%] flex-1 justify-start"
           @click="prev && go(prev.id)"
         >
           <ArrowLeftIcon class="shrink-0" />
-          <span class="truncate">{{ prev?.title ?? '已是第一课' }}</span>
+          <span class="min-w-0 truncate">{{ prev?.title ?? '已是第一课' }}</span>
         </Button>
         <Button
           variant="ghost"
           size="sm"
           :disabled="!next"
-          class="min-w-0"
+          class="min-w-0 max-w-[46%] flex-1 justify-end"
           @click="next && go(next.id)"
         >
-          <span class="truncate">{{ next?.title ?? '已是最后一课' }}</span>
+          <span class="min-w-0 truncate">{{ next?.title ?? '已是最后一课' }}</span>
           <ArrowRightIcon class="shrink-0" />
         </Button>
       </div>

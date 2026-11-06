@@ -1533,17 +1533,22 @@ export default {
                 diagram: {
                   type: 'sequence',
                   actors: ['客户端A', 'Redis', '客户端B'],
+                  steps: [
+                    { title: 'A 拿到锁', detail: '此刻 B 抢不到，互斥成立' },
+                    { title: '锁过期，B 接手', detail: 'A 什么都没做错，它只是慢了' },
+                    { title: 'A 回来误删', detail: '不比对 value 的 DEL 会删掉别人的锁' },
+                  ],
                   messages: [
-                    { from: '客户端A', to: 'Redis', text: '`SET lock uuid-A NX PX 30000` → OK(拿到锁,TTL 30s)' },
-                    { from: '客户端B', to: 'Redis', text: '`SET lock uuid-B NX PX 30000` → nil(抢锁失败)' },
-                    { from: '客户端A', to: '客户端A', text: '业务卡住 35s(GC 停顿 / 下游慢),锁已自然过期' },
-                    { from: '客户端B', to: 'Redis', text: '重试 `SET lock uuid-B NX PX 30000` → OK(B 拿到锁)' },
-                    { from: '客户端B', to: '客户端B', text: 'B 开始处理同一份数据' },
-                    { from: '客户端A', to: 'Redis', text: '业务结束,直接 `DEL lock` —— 删掉了 B 的锁' },
-                    { from: '客户端B', to: 'Redis', text: 'B 还在处理,但锁已经没了;第三个客户端此时也能进来', reply: true },
+                    { from: '客户端A', to: 'Redis', text: '`SET lock uuid-A NX PX 30000` → OK(拿到锁,TTL 30s)', step: 0, tag: 'request' },
+                    { from: '客户端B', to: 'Redis', text: '`SET lock uuid-B NX PX 30000` → nil(抢锁失败)', step: 0, tag: 'note', quick: true },
+                    { from: '客户端A', to: '客户端A', text: '业务卡住 35s(GC 停顿 / 下游慢),锁已自然过期', step: 1, tag: 'note', hold: 900 },
+                    { from: '客户端B', to: 'Redis', text: '重试 `SET lock uuid-B NX PX 30000` → OK(B 拿到锁)', step: 1, tag: 'request' },
+                    { from: '客户端B', to: '客户端B', text: 'B 开始处理同一份数据', step: 1, tag: 'data', quick: true },
+                    { from: '客户端A', to: 'Redis', text: '业务结束,直接 `DEL lock` —— 删掉了 B 的锁', step: 2, tag: 'request', hold: 800 },
+                    { from: '客户端B', to: 'Redis', text: 'B 还在处理,但锁已经没了;第三个客户端此时也能进来', step: 2, tag: 'response', reply: true },
                   ],
                   caption:
-                    '这是一条可以自己走一遍的因果链——点右上角「逐条播放」,一条一条看着它发生,比读文字快得多。注意第 3 条:A 什么都没做错,它只是慢了。加上 value 比对后,A 的 `DEL` 会因为没有匹配到 `uuid-A` 而变成无操作,误删解决了。[[但 value 比对只解决「误删」,没解决「A 和 B 同时在写」]]——要彻底解决,只能上 fencing token(下游拒绝旧令牌)或换 etcd。',
+                    '这是一条可以自己走一遍的因果链——点右上角「播放演示」,按三个教学步骤看着它发生,比读文字快得多。注意第 3 条:A 什么都没做错,它只是慢了。加上 value 比对后,A 的 `DEL` 会因为没有匹配到 `uuid-A` 而变成无操作,误删解决了。[[但 value 比对只解决「误删」,没解决「A 和 B 同时在写」]]——要彻底解决,只能上 fencing token(下游拒绝旧令牌)或换 etcd。',
                 },
               },
               {

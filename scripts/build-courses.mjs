@@ -31,6 +31,7 @@ import {
   BLOCK_KINDS,
   BLOCK_FIELDS,
   DIAGRAM_TYPES,
+  STAGE_VISUAL_KINDS,
   EXPLORE_DIRECTIONS,
   EXPLORE_BRANCH_MAX,
 } from './curriculum/schema.mjs'
@@ -44,6 +45,10 @@ const EXPLORE_FIELD_LABEL = {
   diff: '不同之处',
   value: '探索价值',
 }
+
+/** sequence 播放层的分类编码，与 src/lib/sequenceTimeline.ts 的 SEQUENCE_TAGS 同步 */
+const SEQUENCE_TAGS = new Set(['request', 'response', 'data', 'note'])
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -92,6 +97,9 @@ function countSectionChars(sections = []) {
     for (const st of s.steps ?? []) {
       add(st.title)
       add(st.detail)
+      add(st.visual?.input)
+      add(st.visual?.output)
+      add(st.visual?.hint)
     }
     add(s.takeaway)
     for (const c of s.head ?? []) add(c)
@@ -133,6 +141,9 @@ function countSectionChars(sections = []) {
         add(it.note)
         add(it.display)
       }
+      // contain 的外部底座不参与包含链,但文字同样计入正文
+      add(d.base?.label)
+      add(d.base?.note)
       for (const c of d.cols ?? []) add(c)
       for (const row of d.rows ?? []) for (const c of row ?? []) add(c)
       walkNode(d.root)
@@ -148,6 +159,10 @@ function countSectionChars(sections = []) {
       }
       // sequence
       for (const a of d.actors ?? []) add(a)
+      for (const s of d.steps ?? []) {
+        add(s.title)
+        add(s.detail)
+      }
       for (const m of d.messages ?? []) {
         add(m.from)
         add(m.to)
@@ -229,6 +244,23 @@ function validateSections(sections, ids, where) {
       if (!Array.isArray(s.steps) || s.steps.length < 2) {
         fail(`${at}: principle 至少要 2 个步骤`)
       }
+      // 分解→连接演示：写了 visual 就必须每一步都写，否则拼装视图会缺卡片
+      const withVisual = (s.steps ?? []).filter((st) => st?.visual)
+      if (withVisual.length && withVisual.length !== s.steps.length) {
+        fail(`${at}: principle.steps 的 visual 要么全部都写、要么全部不写(当前 ${withVisual.length}/${s.steps.length})`)
+      }
+      for (const [si, st] of (s.steps ?? []).entries()) {
+        const v = st?.visual
+        if (!v) continue
+        const where = `${at}: principle.steps 第 ${si + 1} 步的 visual`
+        if (!STAGE_VISUAL_KINDS.has(v.kind)) {
+          fail(`${where}: kind 只能是 ${[...STAGE_VISUAL_KINDS].join(' / ')}`)
+        }
+        if (!v.input || !v.output) fail(`${where}: 缺少 input 或 output`)
+        if (v.tone != null && !['primary', 'warn', 'muted', 'bad'].includes(v.tone)) {
+          fail(`${where}: tone 只能是 primary / warn / muted / bad`)
+        }
+      }
     }
     if (s.kind === 'compare') {
       if (!Array.isArray(s.head) || s.head.length < 2) fail(`${at}: 对比表至少要 2 列`)
@@ -270,6 +302,50 @@ function validateSections(sections, ids, where) {
             break
           }
         }
+        // 播放层字段：可选，但写错必须拦在构建期，否则运行时会静默错位
+        const steps = d.steps ?? []
+        for (const [si, s] of steps.entries()) {
+          if (!s?.title) fail(`${at}: sequence.steps 第 ${si + 1} 步缺少 title`)
+        }
+        let lastStep = 0
+        for (const [mi, m] of (d.messages ?? []).entries()) {
+          const where = `${at}: sequence 第 ${mi + 1} 条消息`
+          if (m.step != null) {
+            if (!Number.isInteger(m.step) || m.step < 0 || (steps.length && m.step >= steps.length)) {
+              fail(`${where}: step 必须是 0 起的整数且小于 steps 长度(${steps.length})`)
+              break
+            }
+            if (m.step < lastStep) {
+              fail(`${where}: step 不能回退(上一条在 ${lastStep})`)
+              break
+            }
+            lastStep = m.step
+          }
+          if (m.quick != null && typeof m.quick !== 'boolean') {
+            fail(`${where}: quick 必须是布尔值`)
+            break
+          }
+          for (const key of ['duration', 'hold']) {
+            if (m[key] != null && (typeof m[key] !== 'number' || m[key] < 0 || !Number.isFinite(m[key]))) {
+              fail(`${where}: ${key} 必须是非负有限毫秒数`)
+              break
+            }
+          }
+          if (m.tag != null && !SEQUENCE_TAGS.has(m.tag)) {
+            fail(`${where}: tag 只能是 request / response / data / note`)
+            break
+          }
+        }
+        if (steps.length && (d.messages ?? []).some((m) => typeof m.step === 'number') && (d.messages ?? [])[0]?.step !== 0) {
+          fail(`${at}: sequence 第一条消息必须显式写 step: 0`)
+        }
+      } else if (d.type === 'contain') {
+        const layers = d.items ?? []
+        if (layers.length < 2) fail(`${at}: contain 至少要 2 层才能表达包含关系`)
+        for (const [li, layer] of layers.entries()) {
+          if (!layer?.label) fail(`${at}: contain 第 ${li + 1} 层缺少 label`)
+        }
+        if (d.base && !d.base.label) fail(`${at}: contain.base 缺少 label`)
       } else if (d.type === 'split') {
         for (const key of ['left', 'right']) {
           const side = d[key]

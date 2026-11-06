@@ -35,6 +35,30 @@ export const AUDIT_RULES = {
   'question-followup': '真题拆解缺少 followup(追问怎么接)',
   'stage-practice': '本阶段没有新场景练习(handwrite 或 explore,规范 6/8.1)',
   'course-explore': '课程没有 explore 发散块(规范第六章)',
+  'process-no-diagram': '课时讲了过程/原因(principle / why),却没有过程类图示(flow / layers / state / sequence)',
+  'long-body-no-structure': '单区块 3 段以上、180 字以上的纯文字,没有配图示 / 表格 / 要点 / 步骤',
+  'text-run-no-anchor': '连续 3 个以上区块都是纯文字,中间没有图示 / 表格 / 要点 / 步骤等视觉锚点(图解化讲义规范)',
+}
+
+/** 能表现「时间往前走」的图示;其余是空间/分类快照 */
+const PROCESS_DIAGRAMS = new Set(['flow', 'layers', 'state', 'sequence'])
+
+/** 天然自带结构化承载的区块类型 */
+const ANCHOR_KINDS = new Set(['diagram', 'compare', 'code', 'handwrite', 'question', 'explore'])
+
+/**
+ * 一个区块有没有「不用读大段文字也能懂」的视觉锚点。
+ * 教学审计与图解化改造脚本共用同一口径，避免两边对「算不算结构化」给出不同答案。
+ */
+export function hasVisualAnchor(block) {
+  return (
+    ANCHOR_KINDS.has(block?.kind) ||
+    !!block?.term ||
+    !!block?.points?.length ||
+    !!block?.steps?.length ||
+    !!block?.mapping?.length ||
+    !!block?.wrong?.length
+  )
 }
 
 /**
@@ -56,8 +80,43 @@ export function auditCourses(courses) {
         const where = `${course.id}/${stage.id}/${lesson.id}`
         const sections = lesson.content?.sections ?? []
 
+        // 过程类内容最好有一张能按时间走的图;没有就提醒作者补,不阻断构建
+        const hasProcessBlock = sections.some((b) => b.kind === 'principle' || b.kind === 'why')
+        const hasProcessDiagram = sections.some(
+          (b) => b.kind === 'diagram' && PROCESS_DIAGRAMS.has(b.diagram?.type),
+        )
+        if (hasProcessBlock && !hasProcessDiagram) {
+          add('process-no-diagram', where, '讲了过程 / 原因却没有过程类图示')
+        }
+
+        // 图解化:不能让读者连着读三屏文字。连续 3 个无锚点区块只报一次,指出整段范围
+        let run = 0
+        let runStart = 0
+        sections.forEach((block, i) => {
+          if (hasVisualAnchor(block)) {
+            run = 0
+            return
+          }
+          if (run === 0) runStart = i + 1
+          run += 1
+          if (run === 3) {
+            add(
+              'text-run-no-anchor',
+              where,
+              `第 ${runStart}-${i + 1} 区块连续纯文字,中间没有图示 / 表格 / 要点 / 步骤`,
+              `${where}#s${runStart}-s${i + 1}`,
+            )
+          }
+        })
+
         sections.forEach((block, i) => {
           const addr = `${where}#s${i + 1}`
+
+          // 长段落纯文字最难读:有 term / points / steps / mapping / 表格 / 图示就算有替代
+          const body = Array.isArray(block.body) ? block.body : []
+          if (body.length >= 3 && body.join('').length >= 180 && !hasVisualAnchor(block)) {
+            add('long-body-no-structure', where, '大段纯文字没有配结构化表达', addr)
+          }
 
           if (block.kind === 'handwrite' || block.kind === 'explore') stageHasPractice = true
           if (block.kind === 'explore') courseHasExplore = true

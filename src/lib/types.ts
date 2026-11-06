@@ -106,6 +106,47 @@ export interface ProgressData {
 
 export type LessonKind = 'concept' | 'drill'
 
+/**
+ * 时序图消息。播放层只认「一条消息 = 一个事件」，step 是叙事层的分组外键：
+ * 多个消息可以归到同一个教学步骤，二者不是一一对应。
+ */
+export interface SequenceMessage {
+  from: string
+  to: string
+  text: string
+  /** 虚线回程箭头；未写 tag 时按此推导分类色 */
+  reply?: boolean
+  /** 0 起的教学步骤序号；只在分组起点写一次，后续消息继承 */
+  step?: number
+  /** 同一步内连续快事件，其后用短停顿（如三次握手的三条包） */
+  quick?: boolean
+  /** 该消息的入场动画时长(ms)，缺省由适配器给定 */
+  duration?: number
+  /** 覆盖事件后的停顿(ms)，用于需要停留思考的关键消息 */
+  hold?: number
+  /** 分类编码：贯穿编号圆点、列表行、泳道箭头 */
+  tag?: 'request' | 'response' | 'data' | 'note'
+}
+
+/** 叙事步骤。不写时播放器仍可用，只是不显示步骤条 */
+export interface SequenceStep {
+  title: string
+  detail?: string
+}
+
+export interface SequenceDiagram {
+  type: 'sequence'
+  /** 参与者,按从左到右列 */
+  actors: string[]
+  /** 按时间先后排列的消息 */
+  messages: SequenceMessage[]
+  /** 可选教学步骤；消息用 step 归组 */
+  steps?: SequenceStep[]
+  /** 覆盖播放节奏(ms) */
+  gaps?: { event?: number; step?: number; quick?: number }
+  caption?: string
+}
+
 /** 图示:结构化描述,由 LessonDiagram.vue 统一渲染,作者不写 SVG */
 export type DiagramSpec =
   | {
@@ -119,6 +160,14 @@ export type DiagramSpec =
       type: 'layers'
       /** 数组顺序即自上而下 */
       items: { label: string; note?: string; tone?: 'primary' | 'muted' }[]
+      caption?: string
+    }
+  | {
+      type: 'contain'
+      /** 数组顺序即由外到内：items[0] ⊃ items[1] ⊃ …；note 写「这一层比内层多了什么」 */
+      items: { label: string; note?: string; tone?: 'primary' | 'muted' }[]
+      /** 承载整套结构、但不属于包含链的外部底座（如操作系统 / 硬件） */
+      base?: { label: string; note?: string }
       caption?: string
     }
   | {
@@ -154,14 +203,7 @@ export type DiagramSpec =
       }[]
       caption?: string
     }
-  | {
-      type: 'sequence'
-      /** 参与者,按从左到右列 */
-      actors: string[]
-      /** 按时间先后排列的消息 */
-      messages: { from: string; to: string; text: string; reply?: boolean }[]
-      caption?: string
-    }
+  | SequenceDiagram
   | {
       type: 'split'
       left: { title: string; items: string[]; tone?: 'bad' | 'warn' | 'good' | 'neutral' }
@@ -190,6 +232,28 @@ export interface TreeNode {
   /** 强调分支:用于标记「这条路径要特别注意」,不影响层级 */
   tone?: 'primary' | 'warn' | 'bad'
   children?: TreeNode[]
+}
+
+/**
+ * 第二种演示（分解 → 连接）里，每个阶段各自带的一张独立微图。
+ * 只有 steps 全部带 visual 才会启用拼装演示；老课时不写这个字段，行为完全不变。
+ */
+export interface StageVisual {
+  /** 决定画哪一种小图；六种形状各自不同，避免「同一张卡换个标题」 */
+  kind: 'file' | 'command' | 'pipeline' | 'interpreter' | 'counter' | 'chip'
+  /** 这一阶段输入的是什么 */
+  input: string
+  /** 这一阶段产出的是什么，input → output 构成链路的一段 */
+  output: string
+  /** 卡片里的一行极短注解，不等同于 step.detail 的展开详解 */
+  hint?: string
+  tone?: 'primary' | 'warn' | 'muted' | 'bad'
+}
+
+export interface PrincipleStep {
+  title: string
+  detail: string
+  visual?: StageVisual
 }
 
 /** 讲义区块:一段完整的教学动作,按数组顺序渲染 */
@@ -226,7 +290,7 @@ export type LessonBlock =
       title: string
       body?: string[]
       /** 机制拆解,有序步骤 */
-      steps: { title: string; detail: string }[]
+      steps: PrincipleStep[]
       /** 收口一句话:这条链路的关键结论 */
       takeaway?: string
       /** 追问与常见误解:挂在机制后面的问答 */

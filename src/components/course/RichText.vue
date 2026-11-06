@@ -11,6 +11,9 @@ import { computed } from 'vue'
  *   !!易错点!!      红色:常被答错/踩坑的说法
  *
  * 额外支持「外层标记内部再嵌代码」:外层会递归解析一次。
+ *
+ * 行内 code 统一允许任意位置折行:讲义里常有 `rate.NewLimiter(rate.Limit(100), 200)`
+ * 这类无空格长串,375px 视口下会把整页撑出横向滚动条。
  */
 const props = defineProps<{ text?: string }>()
 
@@ -78,7 +81,7 @@ const segments = computed<Seg[]>(() => parseInline(props.text ?? ''))
       <template v-for="(s2, j) in seg.inner" :key="j">
         <code
           v-if="s2.t === 'c'"
-          class="rounded bg-muted px-1 py-0.5 font-mono text-[0.86em] text-foreground/90"
+          class="rounded bg-muted px-1 py-0.5 font-mono text-[0.86em] [overflow-wrap:anywhere] text-foreground/90"
           >{{ s2.v }}</code
         >
         <strong v-else-if="s2.t === 'b'" class="font-semibold">{{ s2.v }}</strong>
@@ -90,7 +93,7 @@ const segments = computed<Seg[]>(() => parseInline(props.text ?? ''))
       <template v-for="(s2, j) in seg.inner" :key="j">
         <code
           v-if="s2.t === 'c'"
-          class="rounded bg-background/70 px-1 py-0.5 font-mono text-[0.86em] text-foreground/90"
+          class="rounded bg-background/70 px-1 py-0.5 font-mono text-[0.86em] [overflow-wrap:anywhere] text-foreground/90"
           >{{ s2.v }}</code
         >
         <strong v-else-if="s2.t === 'b'" class="font-semibold">{{ s2.v }}</strong>
@@ -102,7 +105,7 @@ const segments = computed<Seg[]>(() => parseInline(props.text ?? ''))
       <template v-for="(s2, j) in seg.inner" :key="j">
         <code
           v-if="s2.t === 'c'"
-          class="rounded bg-rose-500/10 px-1 py-0.5 font-mono text-[0.86em]"
+          class="rounded bg-rose-500/10 px-1 py-0.5 font-mono text-[0.86em] [overflow-wrap:anywhere]"
           >{{ s2.v }}</code
         >
         <strong v-else-if="s2.t === 'b'" class="font-semibold">{{ s2.v }}</strong>
@@ -112,7 +115,7 @@ const segments = computed<Seg[]>(() => parseInline(props.text ?? ''))
 
     <code
       v-else-if="seg.t === 'c'"
-      class="rounded bg-muted px-1 py-0.5 font-mono text-[0.86em] text-foreground/90"
+      class="rounded bg-muted px-1 py-0.5 font-mono text-[0.86em] [overflow-wrap:anywhere] text-foreground/90"
       >{{ seg.v }}</code
     >
     <template v-else>{{ seg.v }}</template>

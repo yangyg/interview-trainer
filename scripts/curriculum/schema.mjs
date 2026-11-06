@@ -101,16 +101,18 @@ export const BLOCK_FIELDS = {
 
 /**
  * 图示类型
- * - flow / layers / tree / matrix:结构类
+ * - flow:单向流程;state:状态流转;sequence:时序消息 —— 三者有先后顺序,接入步进播放
+ * - layers:并排分层快照(自上而下的堆叠/执行顺序)
+ * - contain:嵌套包含(从外到内的集合关系,JDK ⊃ JRE ⊃ JVM),**静态**,不接播放器
+ * - tree / matrix:组织结构与二维分类
  * - memory:内存区域 + 槽位 + 引用指向(讲对象、栈帧、常量池)
- * - sequence:参与者 + 时序消息(讲类加载、CAS、请求链路)
  * - split:左右对照(讲错误写法 vs 正确写法)
  * - scale:量级条形(讲复杂度、耗时、内存占用)
- * - state:状态流转 + 回退边(讲线程状态、连接状态、SRS 盒)
  */
 export const DIAGRAM_TYPES = new Set([
   'flow',
   'layers',
+  'contain',
   'tree',
   'matrix',
   'memory',
@@ -118,6 +120,21 @@ export const DIAGRAM_TYPES = new Set([
   'split',
   'scale',
   'state',
+])
+
+/**
+ * 「分解 → 连接」演示里每个阶段的独立微图种类。
+ * 与 src/lib/types.ts 的 StageVisual.kind、src/lib/stageAssemble.ts 的
+ * STAGE_VISUAL_KINDS 三处同步；构建期由 build-courses.mjs 校验。
+ * 这是 principle.steps[] 内部的字段，不是区块字段，因此不进 BLOCK_FIELDS。
+ */
+export const STAGE_VISUAL_KINDS = new Set([
+  'file',
+  'command',
+  'pipeline',
+  'interpreter',
+  'counter',
+  'chip',
 ])
 
 /**

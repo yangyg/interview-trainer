@@ -20,7 +20,7 @@
   "stageCount": 5,
   "lessonCount": 20,
   "uniqueQuestionCount": 165,
-  "estimatedMinutes": 1401,
+  "estimatedMinutes": 1404,
   "stages": [
     {
       "id": "mq",
@@ -708,47 +708,81 @@
                     "Follower",
                     "Consumer"
                   ],
+                  "steps": [
+                    {
+                      "title": "生产者写入",
+                      "detail": "先落到 leader 本地 log，LEO 立刻前移"
+                    },
+                    {
+                      "title": "acks=1 返回",
+                      "detail": "此刻还没任何一个副本复制，成功只是「本地成功」"
+                    },
+                    {
+                      "title": "副本拉取写入",
+                      "detail": "follower 主动 fetch，自己的 LEO 才跟上"
+                    },
+                    {
+                      "title": "HW 推进",
+                      "detail": "leader 要等下一次 fetch 才知道副本进度，HW 滞后一轮 RTT"
+                    },
+                    {
+                      "title": "消费者可见",
+                      "detail": "消费读的是 HW，不是 LEO"
+                    }
+                  ],
                   "messages": [
                     {
                       "from": "Producer",
                       "to": "Leader",
+                      "step": 0,
                       "text": "**send(batch)**：按 key 算出分区，发给该分区 leader"
                     },
                     {
                       "from": "Leader",
                       "to": "Leader",
+                      "tag": "note",
                       "text": "**追加写本地 log**：LEO 从 100 → 110（进 page cache 即算写完）"
                     },
                     {
                       "from": "Leader",
                       "to": "Producer",
+                      "step": 1,
                       "text": "**ack**：acks=1 此刻就返回；acks=all 要等第 5 步",
                       "reply": true
                     },
                     {
                       "from": "Follower",
                       "to": "Leader",
+                      "step": 2,
+                      "quick": true,
                       "text": "**fetch(offset=100)**：follower 主动来拉，带上自己的 LEO"
                     },
                     {
                       "from": "Leader",
                       "to": "Follower",
+                      "tag": "data",
+                      "quick": true,
                       "text": "**返回 100~110 的数据**（从 page cache 直接 sendfile）",
                       "reply": true
                     },
                     {
                       "from": "Follower",
                       "to": "Follower",
+                      "tag": "note",
                       "text": "**写入自己的 log**：自己的 LEO 也到 110"
                     },
                     {
                       "from": "Follower",
                       "to": "Leader",
+                      "step": 3,
+                      "quick": true,
                       "text": "**下一次 fetch(offset=110)**：这次 leader 才知道「它追上了」"
                     },
                     {
                       "from": "Leader",
                       "to": "Leader",
+                      "tag": "note",
+                      "hold": 900,
                       "text": "**推进 HW = min(ISR 的 LEO) = 110**；此刻才对消费者可见"
                     },
                     {
@@ -760,11 +794,13 @@
                     {
                       "from": "Consumer",
                       "to": "Leader",
+                      "step": 4,
                       "text": "**fetch(offset=100)**：只能读到 HW=110 之前的消息"
                     },
                     {
                       "from": "Leader",
                       "to": "Consumer",
+                      "tag": "data",
                       "text": "**返回 100~110**；消费完提交 offset 到 `__consumer_offsets`",
                       "reply": true
                     }
@@ -5075,6 +5111,129 @@
             "intro": "这一课要解决的是**「微服务那一套名词背后的机制」**：**为什么拆、按什么拆、拆完怎么找到对方（注册中心）、找到之后怎么高效调用（RPC 与序列化）、调用出问题怎么办（治理）**。**面试里的分水岭在「RPC 那一次调用的完整链路」**——**能把「动态代理 → 序列化 → 网络 → 反序列化 → 反射调用 → 回写」六步讲清，并说出「Dubbo 用 SPI 把每一步都做成可替换扩展」的人，才算真的懂 RPC 框架，而不是「会用注解」。** **Nacos 的 AP/CP 双模与 Dubbo 的 SPI 是两个必考的深水点。**",
             "sections": [
               {
+                "kind": "diagram",
+                "title": "先看全貌：一次 RPC 调用怎么走完整条链路",
+                "body": [
+                  "先按时间走一遍，再回头记名词：动态代理负责「像本地调用」，注册中心负责「找到对方」，序列化与协议负责「送过去」，反序列化负责「带回来」。"
+                ],
+                "diagram": {
+                  "type": "sequence",
+                  "actors": [
+                    "调用方",
+                    "动态代理",
+                    "注册中心",
+                    "服务提供方"
+                  ],
+                  "steps": [
+                    {
+                      "title": "找到对方",
+                      "detail": "代理先问注册中心，再按负载均衡选一个 provider"
+                    },
+                    {
+                      "title": "把调用送过去",
+                      "detail": "序列化 + 协议编码 + 网络，超时与重试都发生在这一段"
+                    },
+                    {
+                      "title": "把结果带回来",
+                      "detail": "反序列化后交回调用方，透明性靠这一层"
+                    }
+                  ],
+                  "messages": [
+                    {
+                      "from": "调用方",
+                      "to": "动态代理",
+                      "text": "`userService.get(1)` —— 看起来就是一次本地调用",
+                      "step": 0,
+                      "tag": "request"
+                    },
+                    {
+                      "from": "动态代理",
+                      "to": "注册中心",
+                      "text": "订阅 / 查询 `UserService` 的 provider 列表",
+                      "step": 0,
+                      "tag": "request",
+                      "quick": true
+                    },
+                    {
+                      "from": "注册中心",
+                      "to": "动态代理",
+                      "text": "返回可用地址 `10.0.0.2:20880`",
+                      "step": 0,
+                      "tag": "response",
+                      "reply": true
+                    },
+                    {
+                      "from": "动态代理",
+                      "to": "服务提供方",
+                      "text": "序列化 + 协议编码，经 Netty 长连接发出请求",
+                      "step": 1,
+                      "tag": "request"
+                    },
+                    {
+                      "from": "服务提供方",
+                      "to": "服务提供方",
+                      "text": "反序列化、定位 Invoker、反射调用真实实现",
+                      "step": 1,
+                      "tag": "data",
+                      "quick": true
+                    },
+                    {
+                      "from": "服务提供方",
+                      "to": "动态代理",
+                      "text": "写回结果（回程同样要序列化 + 编帧）",
+                      "step": 2,
+                      "tag": "response",
+                      "reply": true
+                    },
+                    {
+                      "from": "动态代理",
+                      "to": "调用方",
+                      "text": "反序列化后返回，调用方全程不知道发生过网络调用",
+                      "step": 2,
+                      "tag": "response",
+                      "reply": true,
+                      "hold": 800
+                    }
+                  ],
+                  "caption": "六步链路里最容易答漏的是「注册中心只在寻址那一段出现」和「回程同样要序列化」。按三个教学步骤把这张图播一遍，再去看 Dubbo 的十层架构，每一层都能对上链路上的某一段，而不是十个孤立名词。"
+                }
+              },
+              {
+                "kind": "diagram",
+                "title": "调用栈分层：每一层都是可替换的扩展点",
+                "diagram": {
+                  "type": "flow",
+                  "direction": "v",
+                  "items": [
+                    {
+                      "label": "动态代理",
+                      "note": "把接口方法变成 Invoker，屏蔽远程细节"
+                    },
+                    {
+                      "label": "序列化",
+                      "note": "Hessian / Protobuf / Kryo，决定包体与 CPU"
+                    },
+                    {
+                      "label": "协议编码",
+                      "note": "协议头 + 请求 ID，负责粘包拆包与多路复用"
+                    },
+                    {
+                      "label": "网络传输",
+                      "note": "Netty NIO 长连接、心跳与连接池"
+                    },
+                    {
+                      "label": "服务提供方",
+                      "note": "反序列化后反射调用，再写回响应"
+                    },
+                    {
+                      "label": "治理横切",
+                      "note": "超时、重试、限流、熔断挂在链路各段"
+                    }
+                  ],
+                  "caption": "这张图说明为什么面试爱问「Dubbo 的 SPI」：上面每一层都不是写死的，而是可替换的扩展点，URL 参数决定加载哪个实现。能把「一次调用的时间线」和「可替换的分层」对起来，才算讲清了框架而不是注解。"
+                }
+              },
+              {
                 "kind": "concept",
                 "title": "拆分原则：先问「为什么拆」，再问「怎么拆」",
                 "body": [
@@ -5552,7 +5711,7 @@
             "java-08-Q78",
             "java-08-Q79"
           ],
-          "estimatedMinutes": 68
+          "estimatedMinutes": 71
         },
         {
           "id": "gateway",

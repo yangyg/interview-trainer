@@ -115,18 +115,33 @@ app/
 | `why` | 为什么需要它,附「没有它会怎样」的反证 |
 | `principle` | 更深原理:有序步骤拆解机制,末尾一句收口 |
 | `analogy` | 类比 + 现实物到技术物的映射表 + **类比的边界** |
-| `diagram` | 结构化图示,9 种类型见下表,作者只写数据 |
+| `diagram` | 结构化图示,10 种类型见下表,作者只写数据 |
 | `compare` | 多方案对比表 |
 | `code` | 代码片段 + 关键行讲解 |
 | `handwrite` | 手写题:题干 → 方法签名 → 思路步骤 → 骨架(留 TODO) → 参考实现(折叠) → 复杂度 → 易错点 |
 | `question` | 关联真题拆解:考官在筛什么 → 回答骨架 → 拉开分档的细节 → 追问怎么接 |
 
-图示全部由 `LessonDiagram.vue` 用 div + Tailwind 渲染,不写 SVG,自动跟随亮暗主题:
+图示全部由 `LessonDiagram.vue` 用 div + Tailwind 渲染,不写 SVG,自动跟随亮暗主题。其中 `flow / layers / state / sequence` 有先后顺序,会自动获得「播放演示」(播放 / 单步 / 跳步 / 三态高亮,sequence 另有列表↔泳道);`principle` 区块的步骤也走同一个播放器。**集合包含 / 分类 / 左右对照 / 内存布局没有时间先后,一律静态渲染**:`contain` 画成从外到内的嵌套框,不接播放器。判据是「把顺序打乱还成不成立」——成立就是空间结构。作者不需要为播放补字段,给 `sequence` 写可选的 `steps` 与消息上的 `step / quick / hold / tag` 即可做分组演示。
+
+`principle` 区块还有**另一种不同种类的演示**:当 `steps[]` 每一步都写了 `visual`,区块会多出「分解连接 / 分步讲解」切换。6 张卡各有独立微图,点「连接 N 个阶段」按 1→N 逐段画出链路,再「跑一遍」让令牌沿链扫过;机制与线性播放器完全不同(没有事件游标、没有倍速、没有 rAF 虚拟时钟)。`visual` 是可选字段,不写就完全没有这个 tab,老课时零改动:
+
+```js
+visual: {
+  kind: 'file',             // file / command / pipeline / interpreter / counter / chip
+  input: '.java',
+  output: '.class',
+  hint: '翻译到字节码就停住',  // 可选
+  tone: 'primary',           // 可选
+}
+```
+
+写就必须每一步都写,构建期会拦下漏写与非法 `kind`;6 段 `step.detail` 仍收在 `<details>` 里,全文精读自动展开。样板见 `lang-jvm` 的「一次 java Hello 背后真实发生的六个阶段」。
 
 | 类型 | 用在什么地方 |
 |---|---|
 | `flow` | 单向流程(编译链路、请求经过的组件) |
-| `layers` | 堆叠分层(JDK⊃JRE⊃JVM、协议栈) |
+| `layers` | 并排分层 / 堆叠顺序(协议栈、多道防线);有自上而下顺序,可逐层演示 |
+| `contain` | 嵌套包含:从外到内的集合关系(JDK⊃JRE⊃JVM、容器与组件),可选 `base` 画不在包含链内的外部底座;**静态,不播放** |
 | `tree` | 继承或组织结构 |
 | `matrix` | 二维分类对照 |
 | `memory` | 内存布局:分区 + 槽位 + 「指向 …」引用,讲对象、栈帧、常量池 |
@@ -139,11 +154,29 @@ app/
 
 课时时长不再是「题数 × 1.2」,而是按正文 320 字/分钟 + 每题 1.1 分钟估算。
 
+### 图解化讲义改造(进行中)
+
+讲义分两代:v2 解决了「区块化」,图解化解决「文字太多」,第三步解决「**讲义没覆盖全部关联题**」。样板课 `java-lang-collections/lang-jvm` 已按新写法重写:12 → 20 个区块、图示 3 → 6 张、正文从 1626 字降到 647 字;开头一张 `compare` 题目地图列出 8 道关联题的落点,前 5 块补齐原先完全没讲的 Q2 语言特点 / Q5 与 C++ 区别 / Q6 发行版与 LTS / Q8 native 方法,并强化 Q1 / Q4,形成「Java 是什么 → 它怎么跑起来」双主线。教学审计零告警、术语覆盖报告里该课 18 个缺口符号全部补回,`questionIds` 与 `questionId` 一字未动。**其余课时仍待逐课改造**,写法与检查清单见 `DESIGN.md` 的「图解化讲义写作规范」。
+
+```bash
+npm run courses:visual-plan                              # 全部课时按改造优先级排序
+npm run courses:visual-plan -- --top 20                  # 只列最该先改的 20 课
+npm run courses:visual-plan -- --course java-lang-collections
+npm run courses:visual-plan -- --lesson lang-jvm
+npm run courses:visual-plan -- --gaps --top 20           # 只看关联题没讲到的课
+npm run courses:visual-plan -- --json                    # 结构化输出
+node scripts/curriculum/visual-plan.mjs --json           # 供脚本消费(避免 npm 的 banner)
+```
+
+脚本读 `public/data/courses/*.json`(构建产物,与页面实际渲染一致),所以改完作者源要先跑 `npm run courses`。评分看四件事:纯文字长区块、连续无锚点的文字段、图示与可播放演示密度、**关联题库的落点缺口**;只读不写、不阻断构建。审计侧的 `text-run-no-anchor` 规则与脚本共用 `audit.mjs` 导出的 `hasVisualAnchor()`,两边口径不会漂。
+
+**题目落点**:课时 `questionIds` 里的每道题,要么有对应的 `question` 真题拆解块,要么在图注 / 要点 / 收口 / 导语里显式写了题号,否则算「未落点」并进入 `--lesson` 明细与优先级(每道 +2 分)。口径刻意只取确定信号,不用关键词猜「有没有讲到」——后者会把「Java 特点」和「特点」混为一谈、大量误报。**注意它只是索引检查**:标了题号不等于知识点真讲了,验收时仍要逐题对照答案要点。
+
 ### 块指纹与教学审计
 
 构建除了写课程 JSON,还在本地生成 `scripts/curriculum/.blockindex.json`(不入库):每节课的区块都有一条 `课程/阶段/课时#s序号` 地址和内容指纹,用来定位单个区块、判断改动范围。
 
-审计把《规范》里「值得修、但不该阻断构建」的条款固化成警告(代码块缺 `version`/`env`/`verified`、类比缺边界、图示缺 caption、量级图未标「示意」、真题拆解缺 `depth`/`followup`、阶段无练习、课程无 `explore`)。默认输出按规则聚合的计数,`node scripts/build-courses.mjs --audit` 打印逐条地址;明细同样写进 `.report.json`。
+审计把《规范》里「值得修、但不该阻断构建」的条款固化成警告(代码块缺 `version`/`env`/`verified`、类比缺边界、图示缺 caption、量级图未标「示意」、真题拆解缺 `depth`/`followup`、阶段无练习、课程无 `explore`,以及图解化相关的「大段纯文字无结构」「讲了过程却没有过程图」「连续 3 块纯文字无视觉锚点」)。默认输出按规则聚合的计数,`node scripts/build-courses.mjs --audit` 打印逐条地址;明细同样写进 `.report.json`。
 
 ### 按地址改区块
 
