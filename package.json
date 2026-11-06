@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "predev": "npm run courses",
+    "predev": "npm run courses && npm run quiz",
     "build": "vue-tsc -b && vite build",
-    "prebuild": "npm run courses",
+    "prebuild": "npm run courses && npm run quiz",
     "preview": "vite preview",
     "parse": "node scripts/parse.mjs",
+    "quiz": "node scripts/build-quiz.mjs",
+    "quiz:check": "node scripts/build-quiz.mjs --check",
     "courses": "node scripts/build-courses.mjs",
     "courses:check": "node scripts/build-courses.mjs --check",
+    "courses:visual-plan": "node scripts/curriculum/visual-plan.mjs",
     "course": "node scripts/course-tool.mjs",
     "test": "vitest run"
   },
